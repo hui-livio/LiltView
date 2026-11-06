@@ -14,7 +14,9 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-显式 C++20 兼容模式使用 `compat20` preset，优化构建使用 `release`。第三方组件与 Catch2 的 SYSTEM / FETCH 构建入口详见 [目录与构建说明](docs/PROJECT_STRUCTURE.md)。当前产物为核心静态库，不是可运行的看图程序。
+显式 C++20 兼容模式使用 `compat20` preset，优化构建使用 `release`。启用第三方组件与 Catch2 使用 `dev`；源码统一位于 `third_party/`，编译库使用 Git submodule，纯头文件库直接保存源码。
+
+ImGui、spdlog、Catch2 已注册为固定提交的 submodule，开发构建与 5 项测试已通过。正常克隆后执行 `git submodule update --init --recursive`，再用 `python3 scripts/init_submodules.py --check` 校验。详见 [第三方源码说明](third_party/README.md)和[目录与构建说明](docs/PROJECT_STRUCTURE.md)。当前产物为核心及组件静态库，不是可运行的看图程序。
 
 ## 设计方向
 
@@ -33,6 +35,7 @@ ctest --preset debug
 - [工程落地与中英双语方案](docs/IMPLEMENTATION-v0.1.md)
 - [Core API 设计](docs/CORE_API-v0.1.md) · [公共 C 头文件](core/include/liltview/core.h)
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)
+- [第三方源码与 submodule 管理](third_party/README.md)
 - [当前彩色图标说明](docs/BRANDING-v0.2.md)
 - [命名与首版图标记录](docs/BRANDING-v0.1.md)
 

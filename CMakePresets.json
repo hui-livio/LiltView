@@ -11,7 +11,6 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "BUILD_TESTING": true,
         "LILTVIEW_CXX_STANDARD": "23",
-        "LILTVIEW_DEPENDENCY_MODE": "SYSTEM",
         "LILTVIEW_BUILD_APP_COMPONENTS": false,
         "LILTVIEW_BUILD_UNIT_TESTS": false
       }
@@ -20,23 +19,20 @@
     { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": false } },
     { "name": "compat20", "inherits": "debug", "cacheVariables": { "LILTVIEW_CXX_STANDARD": "20" } },
     {
-      "name": "dev-system",
+      "name": "dev",
       "inherits": "debug",
       "cacheVariables": { "LILTVIEW_BUILD_APP_COMPONENTS": true, "LILTVIEW_BUILD_UNIT_TESTS": true }
-    },
-    { "name": "dev-fetch", "inherits": "dev-system", "cacheVariables": { "LILTVIEW_DEPENDENCY_MODE": "FETCH" } }
+    }
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "compat20", "configurePreset": "compat20" },
-    { "name": "dev-system", "configurePreset": "dev-system" },
-    { "name": "dev-fetch", "configurePreset": "dev-fetch" }
+    { "name": "dev", "configurePreset": "dev" }
   ],
   "testPresets": [
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
     { "name": "compat20", "configurePreset": "compat20", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
-    { "name": "dev-system", "configurePreset": "dev-system", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
-    { "name": "dev-fetch", "configurePreset": "dev-fetch", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } }
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } }
   ]
 }

@@ -8,10 +8,15 @@
 LiltView/
 ├── LICENSE                       # Apache License 2.0
 ├── CMakeLists.txt                 # 顶层配置、选项和子目录
-├── CMakePresets.json              # Debug / Release / 兼容模式 / 依赖模式
+├── CMakePresets.json              # Debug / Release / 兼容模式 / dev
+├── .gitmodules                   # submodule 来源与路径声明
+├── third_party/
+│   ├── README.md                 # submodule / 直接保存头文件的规则
+│   └── dependencies.json         # 版本、固定提交与来源清单
+├── scripts/init_submodules.py    # 首次注册、固定提交及只读检查
 ├── cmake/
 │   ├── LiltViewOptions.cmake      # 语言特性检查和目标级编译设置
-│   └── LiltViewDependencies.cmake # 按需查找或获取第三方依赖
+│   └── LiltViewDependencies.cmake # 按需构建 third_party 本地源码
 ├── core/
 │   ├── CMakeLists.txt
 │   ├── include/liltview/core.h    # 公共 C API 草案
@@ -23,7 +28,7 @@ LiltView/
 │   ├── README.md                 # 后续应用模块分区
 │   └── logging/
 │       ├── core_log.hpp
-│       └── core_log.cpp          # spdlog 回调适配，待第三方构建验证
+│       └── core_log.cpp          # spdlog 回调适配，已通过构建
 ├── tests/
 │   ├── CMakeLists.txt
 │   ├── contract/                 # 无第三方依赖的语言 / ABI 检查
@@ -93,27 +98,41 @@ ctest --test-dir build/custom --output-on-failure
 
 ## 4. 第三方依赖
 
-### 4.1 显式启用
+### 4.1 源码管理
+
+需要编译的库用 Git submodule，纯头文件库直接保存源码，全部放在 `third_party/`。spdlog 仍使用编译库，因此当前 ImGui、spdlog、Catch2 三个库均声明为 submodule。
+
+基线为 ImGui v1.92.0、spdlog v1.15.3、Catch2 v3.8.1，具体提交和发布来源记录在 [依赖清单](../third_party/dependencies.json)。主仓库 gitlink 是实际 submodule 版本锁；manifest 与它应一致。
+
+三个 submodule 已完成实际注册，源码已就绪，gitlink 与清单校验通过。首次引入或维护时在可写且可联网的终端执行：
 
 ```bash
-# 要求本机安装可发现的 ImGui、spdlog、Catch2 开发包。
-cmake --preset dev-system
-cmake --build --preset dev-system
-ctest --preset dev-system
-
-# 或显式允许 FetchContent 获取版本化源码，需要 Git 与可用网络。
-cmake --preset dev-fetch
-cmake --build --preset dev-fetch
-ctest --preset dev-fetch
+python3 scripts/init_submodules.py
+python3 scripts/init_submodules.py --check
+git diff --cached --submodule
 ```
 
-两者都会开启应用组件和 Catch2 测试。也可分别设置 `LILTVIEW_BUILD_APP_COMPONENTS` 和 `LILTVIEW_BUILD_UNIT_TESTS`。单元测试选项要求 `BUILD_TESTING=ON`。
+脚本只暂存 submodule 声明和 gitlink，不提交或推送；首次注册后须将 gitlink 与相关 CMake / 清单一起提交。仅提交 `.gitmodules` 不能完成接入。详细规则见 [third_party 说明](../third_party/README.md)。
 
-SYSTEM 模式通过包配置查找 spdlog、Catch2；ImGui 优先配置包的 `imgui::imgui`，再尝试 pkg-config。系统包需提供 ImGui 1.92+、spdlog 1.15+、Catch2 3.8+；不满足时明确失败，不静默转 FETCH。
+### 4.2 正常克隆与构建
 
-FETCH 的首轮版本基线是 ImGui `v1.92.0`、spdlog `v1.15.3`、Catch2 `v3.8.1`，定义在 `cmake/LiltViewDependencies.cmake`；它们是版本化引导引用，不表示“最新版本”，也不是不可变提交锁。当前网络不可用，尚未核实下载与集成构建，正式启用时需确认版本可用性、记录验证结果，并在发布前改成已核验的提交 SHA 或源码包哈希。
+以下命令适用于主仓库已记录 gitlink 的后续克隆：
 
-FETCH 可使用 CMake 的 `FETCHCONTENT_SOURCE_DIR_IMGUI`、`FETCHCONTENT_SOURCE_DIR_SPDLOG`、`FETCHCONTENT_SOURCE_DIR_CATCH2` 指向事先准备好的对应版本源码，用于离线集成；本次没有通过假第三方头或函数桩代替真实依赖验证。
+```bash
+git submodule update --init --recursive
+python3 scripts/init_submodules.py --check
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+`dev` 开启应用组件和 Catch2 测试。也可分别设置 `LILTVIEW_BUILD_APP_COMPONENTS` 和 `LILTVIEW_BUILD_UNIT_TESTS`，后者要求 `BUILD_TESTING=ON`。默认 debug / release / compat20 仍不需要第三方源码。
+
+移除原先的 SYSTEM / FETCH 模式和对应 presets。CMake 只读本地源码，不运行 Git、不联网；缺少依赖时提示如何初始化。源码准备好后，配置和构建可以离线运行。
+
+### 4.3 纯头文件库
+
+直接提交到 `third_party/<name>/`，附上原许可证、上游提交和文件校验信息，使用 INTERFACE target 暴露路径。当前没有额外引入纯头文件库；cpp-httplib 延期，不为满足目录布局提前下载它。
 
 日志回调使用 spdlog 的默认 logger，项目可在应用入口配置 sink 和等级。适配器按显式长度处理文本，并在 C 边界捕获异常。ImGui target 暂只包含核心源文件，窗口与渲染后端在选型后再加入。
 
@@ -124,8 +143,9 @@ cpp-httplib、TLS 库和更新检测均不在当前依赖图内。
 - 当前 GCC/G++ 16.2.1、CMake 4.4.5、Ninja 1.13.2 下：Debug 构建通过，CTest 3/3；显式 C++20 构建通过，CTest 2/2；Release 静态库构建通过。
 - Debug / C++20 使用 warnings-as-errors。
 - 契约检查覆盖跨 C / C++ 的 14 个公开结构大小与对齐、关键字段偏移，以及实际 C 编译初始化函数的链接调用。
-- `dev-system` 在未安装 ImGui 时明确配置失败；未偷偷下载依赖。
-- 当前环境无法解析 GitHub 域名，未完成 FETCH 路径、spdlog 适配器或 Catch2 用例的实际构建；这些不计为已通过测试。
+- `dev` 的缺失源码检查会提示初始化步骤，不自动联网；源码到位后已完成真实依赖及应用组件构建，CTest 5/5 通过。
+- 首次注册脚本以临时本地 Git 仓库验证：预声明 `.gitmodules` 后注册、检出固定旧提交、重复执行、只读检查及拒绝覆盖脏工作区。此检查不代表真实第三方库已经构建。
+- 三个真实 gitlink 与本地检出已通过 `scripts/init_submodules.py --check`；spdlog 适配器和 Catch2 用例已构建。当前执行环境仍将主仓库 `.git` 设为只读，提交操作需在可写环境执行。
 
 ## 6. 下一步
 

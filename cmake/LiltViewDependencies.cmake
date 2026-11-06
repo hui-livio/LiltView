@@ -1,86 +1,67 @@
 include_guard(GLOBAL)
 
-# Versioned bootstrap baselines, not claims about the latest releases.
-# Resolve and record immutable revisions before release. See docs/PROJECT_STRUCTURE.md.
-set(LILTVIEW_IMGUI_REF "v1.92.0")
-set(LILTVIEW_SPDLOG_REF "v1.15.3")
-set(LILTVIEW_CATCH2_REF "v3.8.1")
+# CMake only reads local sources. Git gitlinks are the submodule version lock.
+function(liltview_dependency_source name marker output)
+    file(READ "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/dependencies.json" manifest)
+    string(JSON relative_path GET "${manifest}" submodules "${name}" path)
+    get_filename_component(source "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../${relative_path}" ABSOLUTE)
+    if(NOT EXISTS "${source}/${marker}")
+        message(FATAL_ERROR
+            "Missing ${name} sources: ${relative_path}/${marker}\n"
+            "For first-time registration run: python3 scripts/init_submodules.py\n"
+            "For clones with recorded gitlinks run: git submodule update --init --recursive\n"
+            "CMake does not fetch dependencies automatically.")
+    endif()
+    set(${output} "${source}" PARENT_SCOPE)
+endfunction()
 
 function(liltview_require_imgui)
     if(TARGET LiltView::imgui)
         return()
     endif()
+    liltview_dependency_source(imgui imgui.cpp source)
+    foreach(required imgui.h imgui_draw.cpp imgui_tables.cpp imgui_widgets.cpp)
+        if(NOT EXISTS "${source}/${required}")
+            message(FATAL_ERROR "Incomplete ImGui source tree: ${source}/${required}")
+        endif()
+    endforeach()
+    add_library(liltview_imgui_vendor STATIC
+        "${source}/imgui.cpp" "${source}/imgui_draw.cpp"
+        "${source}/imgui_tables.cpp" "${source}/imgui_widgets.cpp")
+    target_include_directories(liltview_imgui_vendor SYSTEM PUBLIC "${source}")
+    target_compile_features(liltview_imgui_vendor PUBLIC cxx_std_11)
     add_library(liltview_imgui INTERFACE)
     add_library(LiltView::imgui ALIAS liltview_imgui)
-    if(LILTVIEW_DEPENDENCY_MODE STREQUAL "SYSTEM")
-        find_package(imgui 1.92 CONFIG QUIET)
-        if(TARGET imgui::imgui)
-            target_link_libraries(liltview_imgui INTERFACE imgui::imgui)
-        else()
-            find_package(PkgConfig REQUIRED)
-            pkg_check_modules(LILTVIEW_SYSTEM_IMGUI REQUIRED IMPORTED_TARGET "imgui>=1.92")
-            target_link_libraries(liltview_imgui INTERFACE PkgConfig::LILTVIEW_SYSTEM_IMGUI)
-        endif()
-    else()
-        include(FetchContent)
-        FetchContent_Declare(imgui
-            GIT_REPOSITORY https://github.com/ocornut/imgui.git
-            GIT_TAG ${LILTVIEW_IMGUI_REF}
-            GIT_SHALLOW TRUE
-            EXCLUDE_FROM_ALL)
-        FetchContent_MakeAvailable(imgui)
-        add_library(liltview_imgui_vendor STATIC
-            "${imgui_SOURCE_DIR}/imgui.cpp"
-            "${imgui_SOURCE_DIR}/imgui_draw.cpp"
-            "${imgui_SOURCE_DIR}/imgui_tables.cpp"
-            "${imgui_SOURCE_DIR}/imgui_widgets.cpp")
-        target_include_directories(liltview_imgui_vendor SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
-        target_compile_features(liltview_imgui_vendor PUBLIC cxx_std_11)
-        target_link_libraries(liltview_imgui INTERFACE liltview_imgui_vendor)
-    endif()
+    target_link_libraries(liltview_imgui INTERFACE liltview_imgui_vendor)
 endfunction()
 
 function(liltview_require_spdlog)
+    liltview_dependency_source(spdlog CMakeLists.txt source)
     if(TARGET spdlog::spdlog)
         return()
     endif()
-    if(LILTVIEW_DEPENDENCY_MODE STREQUAL "SYSTEM")
-        find_package(spdlog 1.15 CONFIG REQUIRED)
-    else()
-        include(FetchContent)
-        set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-        set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(spdlog
-            GIT_REPOSITORY https://github.com/gabime/spdlog.git
-            GIT_TAG ${LILTVIEW_SPDLOG_REF}
-            GIT_SHALLOW TRUE
-            EXCLUDE_FROM_ALL)
-        FetchContent_MakeAvailable(spdlog)
-    endif()
+    set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${source}" "${PROJECT_BINARY_DIR}/third_party/spdlog" EXCLUDE_FROM_ALL SYSTEM)
 endfunction()
 
 function(liltview_require_catch2)
-    if(LILTVIEW_DEPENDENCY_MODE STREQUAL "SYSTEM")
-        find_package(Catch2 3.8 CONFIG REQUIRED)
-        set(LILTVIEW_CATCH_SCRIPT "${Catch2_DIR}/Catch.cmake" PARENT_SCOPE)
-    else()
-        include(FetchContent)
+    liltview_dependency_source(Catch2 CMakeLists.txt source)
+    if(NOT EXISTS "${source}/extras/Catch.cmake")
+        message(FATAL_ERROR "Incomplete Catch2 source tree: ${source}/extras/Catch.cmake")
+    endif()
+    if(NOT TARGET Catch2::Catch2WithMain)
         set(CATCH_BUILD_TESTING OFF CACHE BOOL "" FORCE)
         set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
         set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "" FORCE)
         set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
         set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(Catch2
-            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG ${LILTVIEW_CATCH2_REF}
-            GIT_SHALLOW TRUE
-            EXCLUDE_FROM_ALL)
-        FetchContent_MakeAvailable(Catch2)
-        set(LILTVIEW_CATCH_SCRIPT "${catch2_SOURCE_DIR}/extras/Catch.cmake" PARENT_SCOPE)
+        add_subdirectory("${source}" "${PROJECT_BINARY_DIR}/third_party/Catch2" EXCLUDE_FROM_ALL SYSTEM)
     endif()
+    set(LILTVIEW_CATCH_SCRIPT "${source}/extras/Catch.cmake" PARENT_SCOPE)
 endfunction()

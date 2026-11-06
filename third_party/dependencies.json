@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "submodules": {
+    "imgui": {
+      "path": "third_party/imgui",
+      "url": "https://github.com/ocornut/imgui.git",
+      "version": "v1.92.0",
+      "commit": "85b2fe8486190fa9326565a2fb5fccb6caea4396",
+      "release": "https://github.com/ocornut/imgui/releases/tag/v1.92.0"
+    },
+    "spdlog": {
+      "path": "third_party/spdlog",
+      "url": "https://github.com/gabime/spdlog.git",
+      "version": "v1.15.3",
+      "commit": "6fa36017cfd5731d617e1a934f0e5ea9c4445b13",
+      "release": "https://github.com/gabime/spdlog/releases/tag/v1.15.3"
+    },
+    "Catch2": {
+      "path": "third_party/Catch2",
+      "url": "https://github.com/catchorg/Catch2.git",
+      "version": "v3.8.1",
+      "commit": "2b60af89e23d28eefc081bc930831ee9d45ea58b",
+      "release": "https://github.com/catchorg/Catch2/releases/tag/v3.8.1"
+    }
+  },
+  "vendored_headers": []
+}

@@ -57,19 +57,19 @@ liltview_app_tests           翻译、版本比较等不依赖窗口的逻辑测
 | 选项 | 初始建议 | 含义 |
 | --- | --- | --- |
 | `BUILD_TESTING` | 开发 ON，Release preset OFF | 控制独立契约检查与测试总开关 |
-| `LILTVIEW_BUILD_UNIT_TESTS` | 默认 OFF，dev presets ON | 启用 Catch2 单元测试与依赖 |
-| `LILTVIEW_BUILD_APP_COMPONENTS` | 默认 OFF，dev presets ON | 启用 ImGui 目标和 spdlog 适配库 |
+| `LILTVIEW_BUILD_UNIT_TESTS` | 默认 OFF，dev preset ON | 启用 Catch2 单元测试与依赖 |
+| `LILTVIEW_BUILD_APP_COMPONENTS` | 默认 OFF，dev preset ON | 启用 ImGui 目标和 spdlog 适配库 |
 | `LILTVIEW_ENABLE_UPDATE_CHECK` | 后续引入，默认 OFF | 预留配置名称；当前阶段不实现启用路径 |
-| `LILTVIEW_DEPENDENCY_MODE` | 显式选择 FETCH 或 SYSTEM | 明确依赖来源，避免不同机器无意使用不同版本 |
 | C++ 标准配置 | 默认 23，兼容配置为 20 | 兼容配置需有实际构建验证，不能静默降级 |
 
 当前阶段不获取、构建或链接为更新检测专用的 cpp-httplib / TLS 依赖，不新增检查更新入口或启动时联网行为。后续实现模块时，关闭选项仍须满足这一约束。测试关闭时不为本项目获取或构建 Catch2。
 
-### 2.2 依赖管理建议
+### 2.2 依赖管理约定
 
-- 开发模式可使用 `FetchContent`；当前提供版本化引导 tag，不追踪浮动分支。真实集成验证后、正式发布前锁定提交或源码包哈希，当前不能宣称不可变锁定已完成。
-- 系统依赖模式使用 `find_package()` 或必要的显式适配，记录实际解析到的版本；找不到必要依赖时明确失败，不悄悄改为联网下载。
-- CMake 支持 FetchContent 与 find_package 的配合，但本项目应规定清晰的来源策略。[S1]
+- 需要编译的库使用 Git submodule，纯头文件库直接提交源码，均放到 `third_party/`；保留原许可证和来源记录。
+- ImGui、编译库形式的 spdlog、Catch2 声明为 submodule；由主仓库 gitlink 锁定提交，manifest 记录版本和来源。Git submodule 管理流程参考上游文档。[S1]
+- CMake 只读取已准备的本地依赖，不自动下载或更新；原 SYSTEM / FETCH 模式已移除。
+- 三个 submodule 已注册并取得源码，gitlink、清单与检出提交一致；真实开发构建及 5 项测试通过。详见 [第三方管理规则](../third_party/README.md)。
 - 关闭第三方示例和不需要的功能；项目自己的测试与第三方项目的自测分别控制。
 - ImGui 使用锁定版本的源码和匹配后端；可以自建 CMake target，不假定每个依赖都提供相同的安装接口。
 - HTTP 客户端的 TLS、压缩等编译配置统一由一个 target 管理，避免不同编译单元配置不一致。
@@ -221,11 +221,11 @@ ImGui::Button(label);
 4. 按总体设计实现渐进、预读、预算及超大图处理。
 5. 主线完成后再评估更新检测排期；后续采用 cpp-httplib，届时明确版本信息协议、TLS 配置和网络测试。当前不以实现更新模块作为首版验收条件。
 
-当前待决定：依赖获取默认模式、当前使用依赖的具体版本、字体发现与兜底方案，以及窗口 / 渲染与图片格式库。更新检测专用的 cpp-httplib 版本、TLS 后端和版本信息协议延后决定，不阻塞当前工作。
+依赖来源已明确为 submodule / 直接保存纯头文件；现有三个 submodule 的注册与源码集成验证已完成。字体发现与兜底、窗口 / 渲染与图片格式库仍待确定。更新检测专用的 cpp-httplib 版本、TLS 后端和版本信息协议延后决定，不阻塞当前工作。
 
 ## 8. 参考资料
 
-- [S1] CMake FetchContent：`https://cmake.org/cmake/help/latest/module/FetchContent.html`
+- [S1] Git submodule：`https://git-scm.com/docs/git-submodule`
 - [S2] spdlog：`https://github.com/gabime/spdlog`
 - [S3] libhv：`https://github.com/ithewei/libhv`
 - [S4] cpp-httplib：`https://github.com/yhirose/cpp-httplib`

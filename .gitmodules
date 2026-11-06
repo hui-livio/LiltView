@@ -1,0 +1,9 @@
+[submodule "imgui"]
+	path = third_party/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "spdlog"]
+	path = third_party/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "Catch2"]
+	path = third_party/Catch2
+	url = https://github.com/catchorg/Catch2.git
