@@ -1,7 +1,7 @@
 #ifndef LILTVIEW_CORE_H
 #define LILTVIEW_CORE_H
 
-/* Draft API v0.1. Declarations only: no decoder or engine implementation yet.
+/* Draft API v0.1. ABI query and initialization implemented; engine API pending.
  * Contract: docs/CORE_API-v0.1.md. C23 implementation, C++20/23 consumers.
  * ABI compatibility is for the same architecture and platform ABI only. */
 #include <stddef.h>
@@ -306,8 +306,8 @@ typedef struct lv_core_stats {
     uint32_t external_pixel_refs;
 } lv_core_stats;
 
-/* Initialization: sets version/size and documented defaults. Config memory
- * budgets and request paths/target dimensions still require caller values. */
+/* Initialization: sets version/size and documented defaults. NULL is a no-op.
+ * Config budgets and request paths/target sizes still require caller values. */
 LV_API uint32_t LV_CALL lv_core_abi_version(void);
 LV_API void LV_CALL lv_core_config_init(lv_core_config *out_config);
 LV_API void LV_CALL lv_request_desc_init(lv_request_desc *out_request);

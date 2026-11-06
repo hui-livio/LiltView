@@ -3,7 +3,7 @@
 - 正式项目名：LiltView
 - 文档版本：v0.1
 - 日期：2026-11-06
-- 状态：设计草案，尚未进入实现阶段
+- 状态：设计草案；CMake 骨架与核心初始化已建立，图片引擎和窗口程序待实现
 - 首发平台：Arch Linux
 - 后续方向：复用 C 核心，增加 Windows / Win32 界面
 
@@ -11,7 +11,7 @@
 
 CMake 目标、依赖边界、日志、更新检测、Catch2 测试及中英双语的详细方案见 [工程落地与中英双语方案](IMPLEMENTATION-v0.1.md)。
 
-公共接口已形成 [Core API v0.1 草案](CORE_API-v0.1.md)及 [C 头文件](../core/include/liltview/core.h)。接口细节以该草案为准，当前没有核心实现。
+公共接口已形成 [Core API v0.1 草案](CORE_API-v0.1.md)及 [C 头文件](../core/include/liltview/core.h)。ABI 版本查询和初始化已实现，图片引擎待实现；当前目录与构建入口见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。
 
 ## 1. 目标与当前决策
 
@@ -422,7 +422,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 10. 建议代码结构
 
-以下目录为规划结构，目前只创建公共 API 头文件；没有核心、界面或解码实现。
+以下展示完整规划结构；实际已建立的目录、CMake 目标和实现状态以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前实现包含核心初始化与日志适配源码，尚无图片引擎或窗口程序。
 
 ```text
 LiltView/

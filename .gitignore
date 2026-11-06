@@ -5,6 +5,7 @@
 /.env
 /.env.*
 !/.env.example
+/CMakeUserPresets.json
 
 # Build output
 /build/
