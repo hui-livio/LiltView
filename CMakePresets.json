@@ -18,6 +18,7 @@
     { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
     { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": false } },
     { "name": "compat20", "inherits": "debug", "cacheVariables": { "LILTVIEW_CXX_STANDARD": "20" } },
+    { "name": "app-release", "inherits": "release", "cacheVariables": { "LILTVIEW_BUILD_APP_COMPONENTS": true } },
     {
       "name": "dev",
       "inherits": "debug",
@@ -28,7 +29,8 @@
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "compat20", "configurePreset": "compat20" },
-    { "name": "dev", "configurePreset": "dev" }
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "app-release", "configurePreset": "app-release" }
   ],
   "testPresets": [
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },

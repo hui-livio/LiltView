@@ -2,7 +2,7 @@
 
 轻量、流畅的图片浏览器，首发目标平台为 Arch Linux。
 
-当前已初始化 CMake 工程、公共 C API 和核心配置初始化，尚未实现图片引擎与窗口程序。
+主窗口已建立，支持 KDE 系统顶栏全局菜单、中英双语、跟随系统 / 深色 / 浅色主题、全屏和设置保存。不支持全局菜单的桌面使用窗口内菜单。图片打开、加载与解码暂未实现，对应操作处于禁用状态。
 
 ## 构建与检查
 
@@ -16,14 +16,36 @@ ctest --preset debug
 
 显式 C++20 兼容模式使用 `compat20` preset，优化构建使用 `release`。启用第三方组件与 Catch2 使用 `dev`；源码统一位于 `third_party/`，编译库使用 Git submodule，纯头文件库直接保存源码。
 
-ImGui、spdlog、Catch2 已注册为固定提交的 submodule，开发构建与 5 项测试已通过。正常克隆后执行 `git submodule update --init --recursive`，再用 `python3 scripts/init_submodules.py --check` 校验。详见 [第三方源码说明](third_party/README.md)和[目录与构建说明](docs/PROJECT_STRUCTURE.md)。当前产物为核心及组件静态库，不是可运行的看图程序。
+ImGui、spdlog、SDL3、Catch2 通过 submodule 固定提交。正常克隆后初始化依赖，然后构建运行主程序：
+
+```bash
+git submodule update --init --recursive
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+./build/dev/app/liltview
+```
+
+Linux 应用构建依赖 OpenGL、Fontconfig 及 SDL3 对应的 X11 / Wayland 开发环境。全局菜单默认开启，另需 GIO / GLib、Wayland 客户端和 `wayland-scanner`；可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。默认设置保存在 SDL 的用户应用配置目录。
+
+开发构建首次接入桌面 / Dock 时执行以下命令，注册指向当前构建的用户级启动器和彩色图标，再重新启动 LiltView：
+
+```bash
+python3 scripts/register_desktop.py
+```
+
+应用 ID、桌面文件名和图标名统一为 `io.github.hui_livio.LiltView`。正式安装也会部署同名 `.desktop` 和图标资源。主窗口使用 256px 内嵌图标及 mipmap 缩小采样，避免原 64px 图标放大显示的模糊。
+
+主题在“设置 → 外观”选择，默认跟随系统并响应系统主题变化；手动选择深色或浅色后保持该选择。既有配置中的深浅主题仍保留，不会自动覆盖。
+
+`app-release` preset 构建优化的主程序；安装、冒烟测试和完整参数见[目录与构建说明](docs/PROJECT_STRUCTURE.md)。
 
 ## 设计方向
 
 - C23 核心负责图片解码、数据预读、后台任务和缓存。
 - C++23 + Dear ImGui 负责界面与窗口行为；必要时显式提供 C++20 兼容构建。
-- 使用 CMake，计划接入 spdlog 日志与 Catch2 / CTest 测试。
-- 计划支持中英双语；更新检测优先使用 cpp-httplib，但暂不实现，当前不引入其网络依赖。
+- 使用 CMake、spdlog、Catch2 / CTest，窗口采用 SDL3 + OpenGL 3.3。
+- 已有中英双语界面；更新检测优先使用 cpp-httplib，但暂不实现，当前不引入其网络依赖。
 - 计划支持 JPEG（JPG / JPEG）、PNG、SVG、WebP、BMP，并逐步扩展其他主流图片格式。
 - 根据图片规模采用完整后显示、渐进更新或超大图分块处理。
 - 保持公共 C API 独立，为后续 Win32 界面适配保留空间。
@@ -36,6 +58,7 @@ ImGui、spdlog、Catch2 已注册为固定提交的 submodule，开发构建与 
 - [Core API 设计](docs/CORE_API-v0.1.md) · [公共 C 头文件](core/include/liltview/core.h)
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)
 - [第三方源码与 submodule 管理](third_party/README.md)
+- [默认鸿蒙字体与授权来源](assets/fonts/README.md)
 - [当前彩色图标说明](docs/BRANDING-v0.2.md)
 - [命名与首版图标记录](docs/BRANDING-v0.1.md)
 
@@ -48,10 +71,12 @@ ImGui、spdlog、Catch2 已注册为固定提交的 submodule，开发构建与 
 - [小尺寸 SVG](assets/icons/liltview-color-small.svg)
 - [PNG 尺寸集合](assets/icons/png/)
 
-当前选用彩色版本。窗口程序的运行及安装说明将在实现后补充。
+当前选用彩色版本，已用于主窗口与空状态画面。
 
 ## 许可证
 
 Copyright 2026 LiltView contributors.
 
 LiltView 采用 [Apache License 2.0](LICENSE)，SPDX 标识为 `Apache-2.0`。第三方依赖遵循各自的许可证。
+
+HarmonyOS Sans SC 字体版权归 Huawei Device Co., Ltd.，使用[其原始许可协议](assets/fonts/LICENSE.HarmonyOS-Sans.txt)，不适用项目代码的 Apache-2.0。

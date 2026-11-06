@@ -60,12 +60,8 @@ def require_clean_checkout(path):
         raise ValueError(f"Submodule has local changes; refusing to overwrite: {path}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="Check pins and sources without mutation or network")
-    args = parser.parse_args()
-    dependencies = read_dependencies()
-
+def validate_worktrees(dependencies):
+    """Review every checkout before registering or changing any submodule."""
     # Validate all existing paths before mutating any dependency.
     for entry in dependencies.values():
         path = ROOT / entry["path"]
@@ -74,34 +70,52 @@ def main():
             raise ValueError(f"Unregistered dependency directory already exists: {path}; review it manually")
         require_clean_checkout(path)
 
+
+def check_dependency(entry):
+    relative = entry["path"]
+    path = ROOT / relative
+    expected = entry["commit"]
+    if index_commit(relative) != expected:
+        raise ValueError(f"Missing or mismatched gitlink: {relative}; run this script without --check")
+    if not (path / ".git").exists():
+        raise ValueError(f"Uninitialized submodule: {relative}; run git submodule update --init --recursive")
+    actual = git("rev-parse", "HEAD", cwd=path, capture=True)
+    if actual != expected:
+        raise ValueError(f"Checkout mismatch: {relative}; expected {expected}, got {actual}")
+
+
+def register_dependency(name, entry):
+    relative = entry["path"]
+    path = ROOT / relative
+    expected = entry["commit"]
+    if index_commit(relative) is None:
+        git("submodule", "add", "--name", name, "--", entry["url"], relative)
+    else:
+        git("submodule", "update", "--init", "--recursive", "--", relative)
+    require_clean_checkout(path)
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{expected}^{{commit}}"], cwd=path,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if not exists:
+        git("fetch", "origin", expected, cwd=path)
+    git("checkout", "--detach", expected, cwd=path)
+    git("submodule", "update", "--init", "--recursive", cwd=path)
+    git("add", "--", ".gitmodules", relative)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Check pins and sources without mutation or network")
+    args = parser.parse_args()
+    dependencies = read_dependencies()
+    validate_worktrees(dependencies)
     for name, entry in dependencies.items():
-        relative = entry["path"]
-        path = ROOT / relative
-        recorded = index_commit(relative)
-        expected = entry["commit"]
         if args.check:
-            if recorded != expected:
-                raise ValueError(f"Missing or mismatched gitlink: {relative}; run this script without --check")
-            if not (path / ".git").exists():
-                raise ValueError(f"Uninitialized submodule: {relative}; run git submodule update --init --recursive")
-            actual = git("rev-parse", "HEAD", cwd=path, capture=True)
-            if actual != expected:
-                raise ValueError(f"Checkout mismatch: {relative}; expected {expected}, got {actual}")
+            check_dependency(entry)
         else:
-            if recorded is None:
-                git("submodule", "add", "--name", name, "--", entry["url"], relative)
-            else:
-                git("submodule", "update", "--init", "--recursive", "--", relative)
-            require_clean_checkout(path)
-            exists = subprocess.run(
-                ["git", "cat-file", "-e", f"{expected}^{{commit}}"], cwd=path,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            ).returncode == 0
-            if not exists:
-                git("fetch", "origin", expected, cwd=path)
-            git("checkout", "--detach", expected, cwd=path)
-            git("submodule", "update", "--init", "--recursive", cwd=path)
-            git("add", "--", ".gitmodules", relative)
+            register_dependency(name, entry)
+        expected = entry["commit"]
         print(f"OK {name}: {entry['version']} ({expected})", flush=True)
     if not args.check:
         print("Submodule gitlinks staged. Review git diff --cached --submodule before committing.")

@@ -15,6 +15,13 @@
       "commit": "6fa36017cfd5731d617e1a934f0e5ea9c4445b13",
       "release": "https://github.com/gabime/spdlog/releases/tag/v1.15.3"
     },
+    "SDL": {
+      "path": "third_party/SDL",
+      "url": "https://github.com/libsdl-org/SDL.git",
+      "version": "release-3.4.0",
+      "commit": "a962f40bbba175e9716557a25d5d7965f134a3d3",
+      "release": "https://github.com/libsdl-org/SDL/releases/tag/release-3.4.0"
+    },
     "Catch2": {
       "path": "third_party/Catch2",
       "url": "https://github.com/catchorg/Catch2.git",

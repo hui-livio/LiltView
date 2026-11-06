@@ -12,7 +12,7 @@ if(NOT LILTVIEW_CXX_STANDARD MATCHES "^(20|23)$")
     message(FATAL_ERROR "LILTVIEW_CXX_STANDARD must be 23 or 20; C17/C++17 fallback is not supported")
 endif()
 
-option(LILTVIEW_BUILD_APP_COMPONENTS "Build ImGui integration target and spdlog adapter (no window executable yet)" OFF)
+option(LILTVIEW_BUILD_APP_COMPONENTS "Build the SDL3/OpenGL application and spdlog adapter" OFF)
 option(LILTVIEW_BUILD_UNIT_TESTS "Build Catch2 unit tests in addition to dependency-free contract checks" OFF)
 option(LILTVIEW_WARNINGS_AS_ERRORS "Treat warnings in LiltView targets as errors" OFF)
 
@@ -37,4 +37,4 @@ endif()
 
 message(STATUS "LiltView ${PROJECT_VERSION}: C23 core / C++${LILTVIEW_CXX_STANDARD} consumers")
 message(STATUS "Dependencies: local third_party sources; app components=${LILTVIEW_BUILD_APP_COMPONENTS}; Catch2=${LILTVIEW_BUILD_UNIT_TESTS}")
-message(STATUS "Scaffold only: API initialization implemented; viewer engine and window executable are not implemented")
+message(STATUS "Application shell available when enabled; image loading and decoding are not implemented")

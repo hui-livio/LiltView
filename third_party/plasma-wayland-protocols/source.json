@@ -1,0 +1,10 @@
+{
+  "source": "https://invent.kde.org/libraries/plasma-wayland-protocols/-/raw/master/src/protocols/appmenu.xml",
+  "retrieved": "2026-11-06",
+  "license": "MIT",
+  "copyright": "2017 David Edmundson",
+  "files": {
+    "appmenu.xml": "7d0251ee00d3d4bc7ee41e3cd1161beaf68a0c18c4f56f48ff1907a475846022",
+    "LICENSE.MIT": "8f25018489d6fe0dec34a352314c38dc146247b7de65735790f4398a92afa84b"
+  }
+}

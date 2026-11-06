@@ -1,0 +1,13 @@
+{
+  "family": "HarmonyOS Sans SC",
+  "style": "Regular",
+  "source": "https://developer.huawei.com/images/download/general/HarmonyOS-Sans.zip",
+  "copyright": "Copyright 2021 Huawei Device Co., Ltd.",
+  "license": "HarmonyOS Sans Fonts License Agreement",
+  "archive_sha256": "fb02c86e358cd9aad8d4dfa957ee502381e7ee2e94499a9133add4324b6ce69a",
+  "files": {
+    "HarmonyOS_Sans_SC_Regular.ttf": "297b088424be212207df2ce8b98e335468b782aa6b96832af0b8b773d711e2b1",
+    "LICENSE.HarmonyOS-Sans.txt": "b2ffec0e6269ee41c3b5fc0345ab37600b46d66ebea6c9c58ff37f517bdfa164"
+  },
+  "modified": false
+}

@@ -1,0 +1,10 @@
+#ifndef LILTVIEW_VERSION_HPP
+#define LILTVIEW_VERSION_HPP
+
+#define LILTVIEW_VERSION "@PROJECT_VERSION@"
+#define LILTVIEW_APP_ID "io.github.hui_livio.LiltView"
+#define LILTVIEW_PROJECT_URL "https://github.com/hui-livio/LiltView"
+#define LILTVIEW_AUTHOR "hui-livio"
+#define LILTVIEW_AUTHOR_EMAIL "yuanfeng1897@gmail.com"
+
+#endif
