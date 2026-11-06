@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">LiltView symbolic icon</title>
+  <desc id="desc">Monochrome open picture frame with a mountain and a point of light.</desc>
+  <path d="M17 5H7C5.343 5 4 6.343 4 8V24C4 25.657 5.343 27 7 27H25C26.657 27 28 25.657 28 24V17" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4.5 21L11 14.5L18 21.5L22 17.5L27.5 23" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="25" cy="7" r="3" fill="currentColor"/>
+</svg>

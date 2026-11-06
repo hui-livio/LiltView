@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">LiltView colorful application icon</title>
+  <desc id="desc">An ivory picture frame with aqua mountains and an amber sun on a blue-to-violet rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="72" y1="48" x2="440" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2378D5"/>
+      <stop offset="0.5" stop-color="#5652D2"/>
+      <stop offset="1" stop-color="#9845B5"/>
+    </linearGradient>
+    <linearGradient id="mountain" x1="140" y1="240" x2="372" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8BF1D2"/>
+      <stop offset="1" stop-color="#6ED9FF"/>
+    </linearGradient>
+    <linearGradient id="valley" x1="256" y1="238" x2="256" y2="366" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#57D9D6" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#76C9F4" stop-opacity="0.08"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="334" y1="142" x2="374" y2="190" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE58C"/>
+      <stop offset="1" stop-color="#FFAA79"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="108" fill="url(#background)"/>
+  <path d="M140 310L216 234L280 298L320 258L372 310V336C372 350.359 360.359 362 346 362H166C151.641 362 140 350.359 140 336Z" fill="url(#valley)"/>
+  <path d="M140 310L216 234L280 298L320 258L372 310" stroke="url(#mountain)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M270 148H166C149.431 148 136 161.431 136 178V336C136 352.569 149.431 366 166 366H346C362.569 366 376 352.569 376 336V258" stroke="#FFF9F2" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="354" cy="166" r="28" fill="url(#sun)"/>
+</svg>
