@@ -24,8 +24,7 @@ MenuItem toggle(Language language, std::int32_t id, Text text, MenuAction action
 MenuItem file_menu(Language language)
 {
     auto file     = item(language, 1, Text::file);
-    auto open     = item(language, 10, Text::open);
-    open.enabled  = false;
+    auto open     = item(language, 10, Text::open, MenuAction::open);
     open.shortcut = {"Control", "o"};
     MenuItem separator;
     separator.id        = 11;

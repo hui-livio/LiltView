@@ -6,10 +6,10 @@ GenericName=Image Viewer
 GenericName[zh_CN]=图片浏览器
 Comment=A lightweight image viewer
 Comment[zh_CN]=轻量、流畅的图片浏览器
-Exec=liltview
+Exec=liltview %f
 Icon=io.github.hui_livio.LiltView
 Terminal=false
 Categories=Graphics;Viewer;
 StartupNotify=true
 StartupWMClass=io.github.hui_livio.LiltView
-# No file argument or MIME association until image opening is implemented.
+MimeType=image/jpeg;

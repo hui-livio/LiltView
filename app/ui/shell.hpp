@@ -2,14 +2,17 @@
 #define LILTVIEW_SHELL_HPP
 
 #include "menu/menu_model.hpp"
+#include "renderer/renderer.hpp"
 #include "settings/settings.hpp"
 
 #include <imgui.h>
 
 namespace liltview
 {
+class Viewer;
 struct ShellActions
 {
+    bool open              = false;
     bool quit              = false;
     bool toggle_fullscreen = false;
 };
@@ -18,7 +21,7 @@ class Shell
 {
 public:
     ShellActions draw(Settings &settings, Language language, const MenuItem &menu, bool system_menu, bool fullscreen,
-                      ImTextureID icon);
+                      render::Renderer &renderer, render::Image icon, Viewer &viewer);
     void show_about()
     {
         open_about_ = true;
@@ -26,11 +29,11 @@ public:
 
 private:
     ShellActions draw_window_menu(Settings &settings, const MenuItem &menu);
-    bool draw_toolbar(Language language, bool fullscreen);
-    void draw_canvas(Language language, ImTextureID icon);
-    void draw_status(Language language);
-    void draw_about(Language language, ImTextureID icon);
-    void draw_about_header(Language language, ImTextureID icon);
+    void draw_toolbar(Language language, bool fullscreen, Viewer &, ShellActions &);
+    void draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &);
+    void draw_status(Language language, const Viewer &);
+    void draw_about(Language language, render::Renderer &renderer, render::Image icon);
+    void draw_about_header(Language language, render::Renderer &renderer, render::Image icon);
     void draw_about_licenses(Language language);
     void draw_about_author(Language language);
 

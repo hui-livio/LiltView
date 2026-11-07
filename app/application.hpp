@@ -14,6 +14,7 @@ struct LaunchOptions
     std::string config_directory;
     bool smoke_test = false;
     std::string screenshot;
+    std::string image_path;
 };
 
 int run_application(const LaunchOptions &options);

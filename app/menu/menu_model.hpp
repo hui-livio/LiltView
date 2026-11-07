@@ -12,6 +12,7 @@ namespace liltview
 enum class MenuAction
 {
     none,
+    open,
     quit,
     fullscreen,
     about,

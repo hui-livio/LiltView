@@ -11,6 +11,7 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 
 | 路径 | 版本基线 | 固定提交 | 接入形式 |
 | --- | --- | --- | --- |
+| `libjpeg-turbo/` | 3.1.2 | `4e151a4ad91001b3aa8c2ece2205c15f487ce320` | submodule、ExternalProject 静态库 |
 | `imgui/` | v1.92.0 | `85b2fe8486190fa9326565a2fb5fccb6caea4396` | submodule |
 | `spdlog/` | v1.15.3 | `6fa36017cfd5731d617e1a934f0e5ea9c4445b13` | submodule、编译库 |
 | `Catch2/` | v3.8.1 | `2b60af89e23d28eefc081bc930831ee9d45ea58b` | submodule、仅测试 |
@@ -18,9 +19,11 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 
 初始化脚本读取 `dependencies.json`，其发布页字段记录版本来源。基线不是“最新版本”声明，升级时需同时审阅 manifest 和 gitlink 改动。
 
+libjpeg-turbo 使用本地 ExternalProject 独立构建 jpeg-static，因为上游不支持 add_subdirectory。关闭 shared、TurboJPEG API、tools 和 tests；安装附 LICENSE.md / README.ijg，不安装 JPEG 动态库。x86 SIMD 需要 NASM，没有时上游回退标量。
+
 ## 首次注册
 
-四个 submodule 已注册并取得源码，gitlink 与 `dependencies.json` 的固定提交一致，`--check` 校验通过。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、OpenGL 和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。系统 OpenGL、Fontconfig 和窗口系统运行库仍按动态方式使用，这不是完整静态应用。
+五个 submodule 已注册并取得源码，gitlink 与 `dependencies.json` 的固定提交一致，`--check` 校验通过。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、OpenGL 和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。系统 OpenGL、Fontconfig 和窗口系统运行库仍按动态方式使用，这不是完整静态应用。
 
 `plasma-wayland-protocols/` 保存 KDE appmenu 协议描述、原 MIT 许可和带 SHA-256 的来源清单。它是构建时生成 Wayland C 接口所需的协议数据，不是完整第三方库；没有复制 Qt 实现或链接 Qt。生成工具 wayland-scanner、GIO / GLib、Wayland 和 X11 由系统开发环境提供。
 

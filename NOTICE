@@ -1,0 +1,8 @@
+LiltView
+Copyright 2026 LiltView contributors.
+
+JPEG decoding uses libjpeg-turbo, distributed under its original licenses.
+This software is based in part on the work of the Independent JPEG Group.
+
+Third-party code and the HarmonyOS Sans font retain their original licenses.
+See the accompanying license files for each component.

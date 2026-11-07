@@ -2,13 +2,16 @@
 
 轻量、流畅的图片浏览器，首发目标平台为 Arch Linux。
 
-主窗口已建立，支持 KDE 系统顶栏全局菜单、中英双语、跟随系统 / 深色 / 浅色主题、全屏和设置保存。不支持全局菜单的桌面使用窗口内菜单。图片打开、加载与解码暂未实现，对应操作处于禁用状态。
+已支持常规 JPG / JPEG 的后台加载与显示，可通过命令行、打开菜单 / Ctrl+O 或拖放进入。支持适应窗口、EXIF 方向、中英双语错误提示，以及原有的系统顶栏菜单、主题和设置。渲染为独立模块：Linux 使用 OpenGL 3.3，接口为后续 Win32 + DX11 保持一致。
+
+当前只支持 8 位 RGB / 灰度 JPEG（包括渐进编码的最终结果），文件上限 64 MiB、原始 RGBA 大小上限 256 MiB，还须满足 CPU / GPU 预算。超大图、渐进扫描预览、其他格式、目录上一张 / 下一张和 REGION 暂未实现；100% 仅在 FIT 输出已保留原始尺寸时可用。
 
 ## 构建与检查
 
-需要 CMake 3.30+、Ninja 以及支持所需 C23 / C++23 特性的工具链。默认构建不下载第三方库：
+需要 CMake 3.30+、Ninja 以及支持所需 C23 / C++23 特性的工具链。x86 建议安装 NASM 以启用 libjpeg-turbo SIMD；没有 NASM 时上游回退标量构建。先初始化固定 submodule，CMake 只使用本地源码，不下载依赖：
 
 ```bash
+git submodule update --init --recursive
 cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug
@@ -16,7 +19,7 @@ ctest --preset debug
 
 显式 C++20 兼容模式使用 `compat20` preset，优化构建使用 `release`。启用第三方组件与 Catch2 使用 `dev`；源码统一位于 `third_party/`，编译库使用 Git submodule，纯头文件库直接保存源码。
 
-ImGui、spdlog、SDL3、Catch2 通过 submodule 固定提交。正常克隆后初始化依赖，然后构建运行主程序：
+libjpeg-turbo、ImGui、spdlog、SDL3、Catch2 通过 submodule 固定提交。libjpeg-turbo 经独立 ExternalProject 构建并静态链接，不覆盖系统 JPEG 库。构建运行主程序：
 
 ```bash
 git submodule update --init --recursive
@@ -24,6 +27,7 @@ cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
 ./build/dev/app/liltview
+./build/dev/app/liltview /path/to/photo.jpg
 ```
 
 裁剪后的 SDL3 以 **静态库**链接到主程序，不链接或安装 `libSDL3.so`，不覆盖系统 SDL。Linux 仍使用系统 OpenGL、Fontconfig 和 X11 / Wayland 运行库；全局菜单默认开启，另需 GIO / GLib、Wayland 客户端和 `wayland-scanner`。可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。
@@ -56,6 +60,7 @@ python3 scripts/register_desktop.py
 ## 文档
 
 - [首版设计文档](docs/DESIGN-v0.1.md)
+- [跨平台渲染模块设计](docs/RENDERER-v0.1.md)
 - [工程落地与中英双语方案](docs/IMPLEMENTATION-v0.1.md)
 - [Core API 设计](docs/CORE_API-v0.1.md) · [调用时序与生命周期契约](docs/CORE_RUNTIME-v0.1.md) · [公共 C 头文件](core/include/liltview/core.h)
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)
@@ -81,5 +86,7 @@ python3 scripts/register_desktop.py
 Copyright 2026 LiltView contributors.
 
 LiltView 采用 [Apache License 2.0](LICENSE)，SPDX 标识为 `Apache-2.0`。第三方依赖遵循各自的许可证。
+
+JPEG 解码使用 libjpeg-turbo。This software is based in part on the work of the Independent JPEG Group. 第三方署名见 [NOTICE](NOTICE)。
 
 HarmonyOS Sans SC 字体版权归 Huawei Device Co., Ltd.，使用[其原始许可协议](assets/fonts/LICENSE.HarmonyOS-Sans.txt)，不适用项目代码的 Apache-2.0。

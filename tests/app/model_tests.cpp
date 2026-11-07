@@ -80,7 +80,8 @@ TEST_CASE("system and fallback menus keep the same identities across language ch
     };
     check(check, english);
     REQUIRE(find_menu_item(english, 10) != nullptr);
-    CHECK_FALSE(find_menu_item(english, 10)->enabled);
+    CHECK(find_menu_item(english, 10)->enabled);
+    CHECK(find_menu_item(english, 10)->action == MenuAction::open);
     CHECK(find_menu_item(english, 9999) == nullptr);
 }
 

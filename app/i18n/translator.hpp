@@ -47,6 +47,14 @@ enum class Text
     license,
     author,
     project_homepage,
+    loading,
+    image_io_error,
+    image_unsupported,
+    image_corrupt,
+    image_limit,
+    image_memory,
+    image_changed,
+    image_error,
     count
 };
 

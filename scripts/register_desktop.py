@@ -29,7 +29,7 @@ def desktop_exec(path):
 def write_launcher(executable, data_root):
     desktop = data_root / f"applications/{APP_ID}.desktop"
     template = (ROOT / f"packaging/linux/{APP_ID}.desktop").read_text()
-    contents = template.replace("Exec=liltview\n", f"Exec={desktop_exec(executable)}\n")
+    contents = template.replace("Exec=liltview %f\n", f"Exec={desktop_exec(executable)} %f\n")
     # Validate before replacing a user's launcher; this script only owns its app ID.
     validator = shutil.which("desktop-file-validate")
     if desktop.exists() and "StartupWMClass=" + APP_ID not in desktop.read_text():

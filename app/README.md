@@ -1,6 +1,6 @@
 # 应用侧目录
 
-启用 `LILTVIEW_BUILD_APP_COMPONENTS` 后创建 `liltview` 可执行文件、ImGui UI 静态库、应用状态库和 spdlog 日志适配库。窗口使用 submodule 中裁剪后的 SDL3 静态库，渲染使用系统 OpenGL 3.3 和 ImGui 官方匹配后端。
+启用 `LILTVIEW_BUILD_APP_COMPONENTS` 后创建 `liltview` 可执行文件、跨平台 renderer、ImGui UI 静态库、应用状态库和 spdlog 日志适配库。窗口 / 输入使用裁剪后的 SDL3 静态库；renderer 通过 CMake 选择 OpenGL 3.3 后端。渲染公共接口与 DX11 迁移边界见 [`docs/RENDERER-v0.1.md`](../docs/RENDERER-v0.1.md)。
 
 逐步增加的职责分区：
 
@@ -14,10 +14,13 @@
 - `platform/`：字体候选查找与加载；读取前限制大小，校验随包字体 CRC32，解析失败尝试系统字体。Linux 用 GIO 导出 `com.canonical.dbusmenu`，包含全项批量查询和属性默认值；Wayland / X11 分别关联窗口，后台线程只排队动作，通过 SDL 唤醒主线程。
 
 可读性审查记录见 [函数拆分与验证](../docs/CODE_REVIEW-2026-11-07.md)。D-Bus 方法解析、服务生命周期、Wayland / X11 关联分别有独立入口；字体查找分为随包资源与平台回退。
-- `resources/`：从 256px 项目图标生成的 RGBA 数据，无运行时图标解码依赖；使用 mipmap 缩小采样并对齐实际像素。
+- `renderer/`：跨平台 image/frame API、句柄校验与 OpenGL 后端；图形对象不出现在 app/controller 接口。
+- `resources/`：从 256px 项目图标生成的 RGBA 数据，无运行时图标解码依赖；通过 renderer 上传后使用 mipmap 缩小采样。
 
-后续增加 `viewer/` 和图片 `renderer/`。当前不提交图片加载请求，不调用尚未实现的核心引擎入口。静止时使用 SDL 事件等待，退出时先释放 ImGui / GL 资源再关闭 SDL。
+后续增加 `viewer/` 和 D3D11 renderer backend。图片加载时经 C core event 上传；worker 线程不调用图形 API。静止时使用 SDL 事件等待，退出时先释放 renderer image / backend / context，再关闭 ImGui / SDL。
 
 原生应用 ID 与 `.desktop` / icon 名保持一致，开发时用 `scripts/register_desktop.py` 注册。系统菜单适配对象在 `run()` 作用域内先销毁，撤销窗口关联并等待 D-Bus 工作线程退出，再由 Application 析构回收 GL、窗口与 SDL。
 
 `update/` 延期，当前不创建网络模块或获取 cpp-httplib。
+
+当前可打开常规 JPEG，viewer 每帧最多消费约 4 ms 的 core 事件，上传返回即 release 像素。CLI、菜单 / Ctrl+O 和拖放接入；目录导航仍禁用。FIT 输出受 framebuffer 和设备上限约束，100% 仅在 FIT 未缩小源图时可用。

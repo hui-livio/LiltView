@@ -13,14 +13,14 @@ namespace
 {
 void print_help()
 {
-    std::puts("LiltView " LILTVIEW_VERSION "\n\nUsage: liltview [options]\n"
+    std::puts("LiltView " LILTVIEW_VERSION "\n\nUsage: liltview [options] [image.jpg]\n"
               "  --language system|en-US|zh-CN   Override the saved language\n"
               "  --config-dir PATH             Use a separate settings directory\n"
               "  --smoke-test                  Exercise the window and exit\n"
               "  --screenshot PATH             Save a PPM during --smoke-test\n"
               "  --version                     Print the version\n"
               "  --help                        Print this help\n\n"
-              "Image opening and decoding are not implemented yet.");
+              "Open ordinary JPEG images; large-image and other codecs are pending.");
 }
 
 std::optional<int> handle_flag(std::string_view argument, liltview::LaunchOptions &options)
@@ -82,7 +82,12 @@ std::optional<int> parse_arguments(int argc, char **argv, liltview::LaunchOption
             }
             continue;
         }
-        std::fprintf(stderr, "Unsupported option: %s\n", argv[i]);
+        if (!argument.starts_with('-') && options.image_path.empty())
+        {
+            options.image_path = argument;
+            continue;
+        }
+        std::fprintf(stderr, "Unsupported option or extra image: %s\n", argv[i]);
         return 2;
     }
     if (!options.screenshot.empty() && !options.smoke_test)

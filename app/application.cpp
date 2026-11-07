@@ -2,24 +2,27 @@
 
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
+#include "platform/sdl_render_host.hpp"
+#include "renderer/renderer.hpp"
 #include "resources/icon_rgba.hpp"
 #include "settings/settings.hpp"
 #include "settings/store.hpp"
 #include "ui/shell.hpp"
 #include "version.hpp"
+#include "viewer/viewer.hpp"
 
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_opengl.h>
 #include <imgui.h>
-#include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <vector>
 
@@ -53,20 +56,28 @@ std::string system_locale()
 
 class Application
 {
+    struct DialogResult
+    {
+        std::mutex mutex;
+        std::atomic<bool> ready{false};
+        std::string path;
+        bool failed = false;
+    };
+
 public:
     ~Application()
     {
         // 逆初始化顺序释放；标志位也覆盖启动途中抛异常的情况。
-        if (renderer_ready_)
-            ImGui_ImplOpenGL3_Shutdown();
+        viewer_.reset();
+        if (renderer_)
+        {
+            renderer_->destroy_image(icon_);
+            renderer_.reset();
+        }
         if (platform_ready_)
             ImGui_ImplSDL3_Shutdown();
         if (imgui_ready_)
             ImGui::DestroyContext();
-        if (icon_texture_ != 0)
-            glDeleteTextures(1, &icon_texture_);
-        if (context_ != nullptr)
-            SDL_GL_DestroyContext(context_);
         if (window_ != nullptr)
             SDL_DestroyWindow(window_);
         if (sdl_ready_)
@@ -81,6 +92,8 @@ public:
         menu_ = current_menu();
         GlobalMenu global_menu(window_, menu_);
         run_event_loop(options, shell, global_menu);
+        stop_image_work();
+        viewer_.reset();
         save_settings(options.smoke_test);
         spdlog::info("Window closed cleanly after {} frames", rendered_frames_);
         return 0;
@@ -101,32 +114,28 @@ private:
 
         create_window();
         initialize_imgui();
+        create_icon();
         load_font();
+        viewer_ = std::make_unique<Viewer>(*renderer_);
+        if (!options.image_path.empty())
+            viewer_->open(utf8_path(options.image_path));
+        smoke_started_ = SDL_GetTicks();
         if (settings_.maximized)
             require(SDL_MaximizeWindow(window_), "SDL_MaximizeWindow");
         if (!options.smoke_test)
             require(SDL_ShowWindow(window_), "SDL_ShowWindow");
-        spdlog::info("LiltView {} started, app_id={}, video={}, OpenGL={}", LILTVIEW_VERSION, LILTVIEW_APP_ID,
-                     SDL_GetCurrentVideoDriver(), reinterpret_cast<const char *>(glGetString(GL_VERSION)));
+        spdlog::info("LiltView {} started, app_id={}, video={}, renderer=OpenGL3, texture_limit={}", LILTVIEW_VERSION,
+                     LILTVIEW_APP_ID, SDL_GetCurrentVideoDriver(), renderer_->capabilities().max_texture_edge);
     }
 
     // 窗口和 GL 上下文准备完成后才创建纹理；任一阶段失败都由析构函数回收已完成部分。
     void create_window()
     {
-        require(SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE), "GL profile");
-        require(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3), "GL major version");
-        require(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3), "GL minor version");
-        require(SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1), "GL double buffer");
+        const auto render_flags = prepare_render_window();
         window_ = SDL_CreateWindow("LiltView", settings_.width, settings_.height,
-                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+                                   render_flags | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
         require(window_ != nullptr, "SDL_CreateWindow");
         require(SDL_SetWindowMinimumSize(window_, 640, 480), "SDL_SetWindowMinimumSize");
-        context_ = SDL_GL_CreateContext(window_);
-        require(context_ != nullptr, "SDL_GL_CreateContext");
-        require(SDL_GL_MakeCurrent(window_, context_), "SDL_GL_MakeCurrent");
-        if (!SDL_GL_SetSwapInterval(1))
-            spdlog::warn("VSync unavailable: {}", SDL_GetError());
-        create_icon();
     }
 
     void initialize_imgui()
@@ -139,10 +148,9 @@ private:
         // 应用设置统一存到用户目录，不在启动目录生成 imgui.ini / 日志。
         io.IniFilename  = nullptr;
         io.LogFilename  = nullptr;
-        platform_ready_ = ImGui_ImplSDL3_InitForOpenGL(window_, context_);
+        renderer_       = render::create_renderer({render::SurfaceKind::sdl_window, window_});
+        platform_ready_ = initialize_imgui_platform(window_);
         require(platform_ready_, "ImGui SDL3 backend");
-        renderer_ready_ = ImGui_ImplOpenGL3_Init("#version 330 core");
-        require(renderer_ready_, "ImGui OpenGL backend");
     }
 
     void load_font()
@@ -185,6 +193,8 @@ private:
                 inject_smoke_events(shell);
 
             process_events(options.smoke_test);
+            consume_dialog();
+            viewer_->pump();
 
             if (quit_)
                 break;
@@ -209,13 +219,27 @@ private:
                 toggle_fullscreen();
             if (action == MenuAction::about)
                 shell.show_about();
+            if (action == MenuAction::open)
+                open_dialog();
+        }
+    }
+
+    void stop_image_work()
+    {
+        viewer_->begin_shutdown();
+        while (!viewer_->join_shutdown())
+        {
+            // Join is polled while platform notifications continue to be processed.
+            SDL_Event event;
+            if (SDL_WaitEventTimeout(&event, 10))
+                ImGui_ImplSDL3_ProcessEvent(&event);
         }
     }
 
     // 最近有交互时保持响应；静止时延长等待，避免持续空转重绘。
     void process_events(bool smoke_test)
     {
-        const bool active = SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
+        const bool active = viewer_->loading() || SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
         const int wait_ms = smoke_test ? 0 : (active ? 16 : 200);
         SDL_Event event;
         if (!SDL_WaitEventTimeout(&event, wait_ms))
@@ -237,6 +261,8 @@ private:
             quit_ = true;
         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
             handle_shortcut(event.key);
+        if (event.type == SDL_EVENT_DROP_FILE && event.drop.data)
+            viewer_->open(utf8_path(event.drop.data));
         update_window_settings(event);
     }
 
@@ -251,6 +277,52 @@ private:
             toggle_fullscreen();
         if (key.key == SDLK_Q && (key.mod & SDL_KMOD_CTRL) != 0)
             quit_ = true;
+        if (key.key == SDLK_O && (key.mod & SDL_KMOD_CTRL) != 0)
+            open_dialog();
+    }
+
+    static void SDLCALL dialog_callback(void *data, const char *const *files, int)
+    {
+        // Callback owns a shared reference; no Application/window access after close.
+        std::unique_ptr<std::shared_ptr<DialogResult>> reference(static_cast<std::shared_ptr<DialogResult> *>(data));
+        auto result = *reference;
+        try
+        {
+            std::lock_guard lock(result->mutex);
+            if (files && files[0])
+                result->path = files[0];
+            result->failed = !files;
+        } catch (...)
+        {
+            result->failed = true;
+        }
+        result->ready.store(true);
+    }
+
+    void open_dialog()
+    {
+        if (dialog_)
+            return;
+        dialog_ = std::make_shared<DialogResult>();
+        static constexpr SDL_DialogFileFilter filters[]{{"JPEG images", "jpg;jpeg;JPG;JPEG"}, {"All files", "*"}};
+        auto *reference = new std::shared_ptr<DialogResult>(dialog_);
+        SDL_ShowOpenFileDialog(dialog_callback, reference, window_, filters, 2, nullptr, false);
+    }
+
+    void consume_dialog()
+    {
+        if (!dialog_ || !dialog_->ready.load())
+            return;
+        std::string path;
+        {
+            std::lock_guard lock(dialog_->mutex);
+            path = dialog_->path;
+        }
+        if (dialog_->failed)
+            spdlog::warn("File dialog failed");
+        dialog_.reset();
+        if (!path.empty())
+            viewer_->open(utf8_path(path));
     }
 
     void update_window_settings(const SDL_Event &event)
@@ -317,16 +389,17 @@ private:
 
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu)
     {
-        ImGui_ImplOpenGL3_NewFrame();
+        renderer_->begin_frame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
-        const auto actions =
-            shell.draw(settings_, language, menu_, system_menu, is_fullscreen(), static_cast<ImTextureID>(icon_texture_));
+        const auto actions  = shell.draw(settings_, language, menu_, system_menu, is_fullscreen(), *renderer_, icon_, *viewer_);
         if (actions.quit)
             quit_ = true;
         if (actions.toggle_fullscreen)
             toggle_fullscreen();
+        if (actions.open)
+            open_dialog();
         ImGui::Render();
         present_frame(options);
         ++rendered_frames_;
@@ -334,17 +407,9 @@ private:
 
     void present_frame(const LaunchOptions &options)
     {
-        int width  = 0;
-        int height = 0;
-        require(SDL_GetWindowSizeInPixels(window_, &width, &height), "Framebuffer dimensions");
-        if (width <= 0 || height <= 0)
-            return;
-        glViewport(0, 0, width, height);
-        glClearColor(0.055f, 0.063f, 0.075f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        capture_smoke_frame(options, width, height);
-        require(SDL_GL_SwapWindow(window_), "SDL_GL_SwapWindow");
+        renderer_->render_frame(ImGui::GetDrawData());
+        capture_smoke_frame(options);
+        renderer_->present();
     }
 
     // 测试动作通过真实 SDL 事件路径执行，避免另写一套退出和弹窗处理逻辑。
@@ -362,7 +427,7 @@ private:
             event.key.key      = SDLK_ESCAPE;
             event.key.scancode = SDL_SCANCODE_ESCAPE;
         }
-        else if (rendered_frames_ == 11)
+        else if (rendered_frames_ >= 11 && (viewer_->settled() || SDL_GetTicks() - smoke_started_ > 10000))
         {
             event.type            = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
             event.window.windowID = SDL_GetWindowID(window_);
@@ -371,7 +436,7 @@ private:
             SDL_PushEvent(&event);
     }
 
-    void capture_smoke_frame(const LaunchOptions &options, int width, int height)
+    void capture_smoke_frame(const LaunchOptions &options)
     {
         if (!options.smoke_test || options.screenshot.empty())
             return;
@@ -379,10 +444,13 @@ private:
         {
             const auto filename = utf8_path(options.screenshot);
             const auto about    = filename.parent_path() / (filename.stem().string() + "-about.ppm");
-            save_screenshot(about.string(), width, height);
+            save_screenshot(about.string());
         }
-        if (rendered_frames_ == 10)
-            save_screenshot(options.screenshot, width, height);
+        if (rendered_frames_ >= 10 && viewer_->settled() && !smoke_captured_)
+        {
+            save_screenshot(options.screenshot);
+            smoke_captured_ = true;
+        }
     }
 
     bool is_fullscreen() const
@@ -448,36 +516,18 @@ private:
                 spdlog::debug("Window icon: {}", SDL_GetError());
             SDL_DestroySurface(surface);
         }
-        glGenTextures(1, &icon_texture_);
-        glBindTexture(GL_TEXTURE_2D, icon_texture_);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, resources::icon_size, resources::icon_size, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                     resources::icon_rgba.data());
-        // 高分辨率源图覆盖常见 2x / 3x 显示；mipmap 让较小尺寸也能稳定、清晰地采样。
-        const auto generate_mipmap = reinterpret_cast<PFNGLGENERATEMIPMAPPROC>(SDL_GL_GetProcAddress("glGenerateMipmap"));
-        require(generate_mipmap != nullptr, "glGenerateMipmap");
-        generate_mipmap(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        if (icon_texture_ == 0 || glGetError() != GL_NO_ERROR)
-            throw std::runtime_error("Cannot upload application icon");
+        const render::Size size{resources::icon_size, resources::icon_size};
+        icon_ = renderer_->create_image({size, true});
+        renderer_->update_image(icon_, {0, 0, size.width, size.height},
+                                {resources::icon_rgba.data(), resources::icon_rgba.size(), size.width * 4ULL, size});
     }
 
-    void save_screenshot(const std::string &filename, int width, int height)
+    void save_screenshot(const std::string &filename)
     {
-        const auto row_bytes = static_cast<std::size_t>(width) * 3;
-        std::vector<unsigned char> pixels(row_bytes * static_cast<std::size_t>(height));
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-        if (glGetError() != GL_NO_ERROR)
-            throw std::runtime_error("Screenshot readback failed");
+        const auto pixels = renderer_->readback();
         std::ofstream output(utf8_path(filename), std::ios::binary);
-        output << "P6\n" << width << ' ' << height << "\n255\n";
-        for (int y = height; y-- > 0;)
-            output.write(reinterpret_cast<const char *>(pixels.data() + static_cast<std::size_t>(y) * row_bytes),
-                         static_cast<std::streamsize>(row_bytes));
+        output << "P6\n" << pixels.size.width << ' ' << pixels.size.height << "\n255\n";
+        output.write(reinterpret_cast<const char *>(pixels.rgb.data()), static_cast<std::streamsize>(pixels.rgb.size()));
         if (!output)
             throw std::runtime_error("Cannot save screenshot: " + filename);
     }
@@ -497,13 +547,16 @@ private:
     Uint64 last_activity_     = 0;
     unsigned rendered_frames_ = 0;
     std::filesystem::path settings_path_;
-    SDL_Window *window_    = nullptr;
-    SDL_GLContext context_ = nullptr;
-    GLuint icon_texture_   = 0;
-    bool sdl_ready_        = false;
-    bool imgui_ready_      = false;
-    bool platform_ready_   = false;
-    bool renderer_ready_   = false;
+    SDL_Window *window_ = nullptr;
+    std::unique_ptr<render::Renderer> renderer_;
+    std::unique_ptr<Viewer> viewer_;
+    std::shared_ptr<DialogResult> dialog_;
+    render::Image icon_;
+    Uint64 smoke_started_ = 0;
+    bool smoke_captured_  = false;
+    bool sdl_ready_       = false;
+    bool imgui_ready_     = false;
+    bool platform_ready_  = false;
 };
 } // namespace
 

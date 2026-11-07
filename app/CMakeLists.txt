@@ -1,8 +1,18 @@
 liltview_require_imgui()
 liltview_require_spdlog()
 liltview_require_sdl3()
-find_package(OpenGL REQUIRED)
 include(GNUInstallDirs)
+liltview_dependency_source(imgui backends/imgui_impl_sdl3.cpp imgui_source)
+add_subdirectory(renderer)
+
+add_library(liltview_imgui_sdl_backend STATIC "${imgui_source}/backends/imgui_impl_sdl3.cpp")
+target_include_directories(liltview_imgui_sdl_backend SYSTEM PUBLIC "${imgui_source}/backends")
+target_link_libraries(liltview_imgui_sdl_backend PUBLIC LiltView::imgui SDL3::SDL3-static)
+add_library(liltview_sdl_platform STATIC platform/sdl_render_host.cpp)
+target_include_directories(liltview_sdl_platform PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(liltview_sdl_platform SYSTEM PUBLIC "${imgui_source}/backends")
+target_link_libraries(liltview_sdl_platform PUBLIC liltview_imgui_sdl_backend)
+liltview_configure_cxx_target(liltview_sdl_platform)
 
 add_library(liltview_app_model STATIC i18n/translator.cpp settings/settings.cpp settings/store.cpp menu/menu_model.cpp)
 add_library(LiltView::app_model ALIAS liltview_app_model)
@@ -11,19 +21,15 @@ liltview_configure_cxx_target(liltview_app_model)
 
 configure_file(version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp" @ONLY)
 
-liltview_dependency_source(imgui backends/imgui_impl_sdl3.cpp imgui_source)
-add_library(liltview_imgui_backends STATIC
-    "${imgui_source}/backends/imgui_impl_sdl3.cpp"
-    "${imgui_source}/backends/imgui_impl_opengl3.cpp")
-target_include_directories(liltview_imgui_backends SYSTEM PUBLIC "${imgui_source}/backends")
-target_link_libraries(liltview_imgui_backends PUBLIC LiltView::imgui SDL3::SDL3-static OpenGL::GL)
-target_compile_features(liltview_imgui_backends PRIVATE cxx_std_11)
-
+add_library(liltview_viewer STATIC viewer/viewer.cpp)
+target_include_directories(liltview_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog)
+liltview_configure_cxx_target(liltview_viewer)
 add_library(liltview_ui STATIC ui/shell.cpp)
 add_library(LiltView::ui ALIAS liltview_ui)
 target_include_directories(liltview_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
     PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(liltview_ui PUBLIC LiltView::app_model LiltView::imgui)
+target_link_libraries(liltview_ui PUBLIC LiltView::app_model LiltView::imgui LiltView::renderer liltview_viewer)
 liltview_configure_cxx_target(liltview_ui)
 
 add_library(liltview_logging STATIC logging/core_log.cpp)
@@ -38,7 +44,7 @@ target_link_libraries(liltview_fonts PUBLIC LiltView::imgui PRIVATE SDL3::SDL3-s
 liltview_configure_cxx_target(liltview_fonts)
 add_executable(liltview main.cpp application.cpp)
 target_include_directories(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(liltview PRIVATE LiltView::ui LiltView::logging liltview_imgui_backends liltview_fonts spdlog::spdlog)
+target_link_libraries(liltview PRIVATE LiltView::ui LiltView::logging liltview_sdl_platform liltview_fonts spdlog::spdlog)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Fontconfig REQUIRED)
     target_link_libraries(liltview_fonts PRIVATE Fontconfig::Fontconfig)
@@ -92,13 +98,17 @@ set_property(TARGET liltview APPEND PROPERTY LINK_DEPENDS
 install(TARGETS liltview RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf" "${font_dir}/LICENSE.HarmonyOS-Sans.txt" "${font_dir}/source.json"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/assets/fonts")
-install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView")
+install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/NOTICE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/SDL/LICENSE.txt"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/SDL")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/imgui/LICENSE.txt"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/imgui")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/spdlog/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/spdlog")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/LICENSE.md"
+    "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/README.ijg"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libjpeg-turbo")
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(app_id "io.github.hui_livio.LiltView")

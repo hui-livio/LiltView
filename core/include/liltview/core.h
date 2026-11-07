@@ -1,7 +1,7 @@
 #ifndef LILTVIEW_CORE_H
 #define LILTVIEW_CORE_H
 
-/* Draft API v0.1. ABI query and initialization implemented; engine API pending.
+/* Draft API v0.1. Linux JPEG DISPLAY/FIT engine implemented; other features pending.
  * Contracts: docs/CORE_API-v0.1.md and docs/CORE_RUNTIME-v0.1.md.
  * C23 implementation, C++20/23 consumers.
  * ABI compatibility is for the same architecture and platform ABI only. */

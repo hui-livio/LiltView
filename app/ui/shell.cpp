@@ -1,6 +1,7 @@
 #include "shell.hpp"
 
 #include "version.hpp"
+#include "viewer/viewer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -25,7 +26,7 @@ void centered_text(const char *text, float width, bool muted = false)
         ImGui::PopStyleColor();
 }
 
-void aligned_image(ImTextureID texture, ImVec2 size)
+void aligned_image(render::Renderer &renderer, render::Image image, ImVec2 size)
 {
     // 对齐到实际 framebuffer 像素，避免居中布局的小数坐标造成额外的半像素模糊。
     const auto density = ImGui::GetIO().DisplayFramebufferScale;
@@ -35,7 +36,30 @@ void aligned_image(ImTextureID texture, ImVec2 size)
     size.x             = std::round(size.x * density.x) / density.x;
     size.y             = std::round(size.y * density.y) / density.y;
     ImGui::SetCursorScreenPos(position);
-    ImGui::Image(texture, size);
+    renderer.add_image(ImGui::GetWindowDrawList(), image, {position.x, position.y}, {position.x + size.x, position.y + size.y});
+    ImGui::Dummy(size);
+}
+
+Text image_error_text(lv_error_code code)
+{
+    switch (code)
+    {
+    case LV_ERROR_IO:
+        return Text::image_io_error;
+    case LV_ERROR_FORMAT_UNSUPPORTED:
+        return Text::image_unsupported;
+    case LV_ERROR_CORRUPT_DATA:
+        return Text::image_corrupt;
+    case LV_ERROR_DIMENSION_LIMIT:
+        return Text::image_limit;
+    case LV_ERROR_MEMORY_BUDGET:
+    case LV_ERROR_OUT_OF_MEMORY:
+        return Text::image_memory;
+    case LV_ERROR_SOURCE_CHANGED:
+        return Text::image_changed;
+    default:
+        return Text::image_error;
+    }
 }
 
 void unavailable_button(Language language, Text text, const char *id)
@@ -132,7 +156,7 @@ void apply_style(bool dark, float scale)
 }
 
 ShellActions Shell::draw(Settings &settings, Language language, const MenuItem &menu, bool system_menu, bool fullscreen,
-                         ImTextureID icon)
+                         render::Renderer &renderer, render::Image icon, Viewer &viewer)
 {
     // 按区域组织一帧；窗口、子画布和弹窗的 Begin/End 在对应函数中配对。
     ShellActions actions;
@@ -140,10 +164,10 @@ ShellActions Shell::draw(Settings &settings, Language language, const MenuItem &
     if (!system_menu)
         actions = draw_window_menu(settings, menu);
 
-    actions.toggle_fullscreen = draw_toolbar(language, fullscreen) || actions.toggle_fullscreen;
-    draw_canvas(language, icon);
-    draw_status(language);
-    draw_about(language, icon);
+    draw_toolbar(language, fullscreen, viewer, actions);
+    draw_canvas(language, renderer, icon, viewer);
+    draw_status(language, viewer);
+    draw_about(language, renderer, icon);
     ImGui::End();
     return actions;
 }
@@ -154,6 +178,7 @@ ShellActions Shell::draw_window_menu(Settings &settings, const MenuItem &menu)
     if (!ImGui::BeginMenuBar())
         return actions;
     const auto selected = draw_menu(menu);
+    actions.open        = selected == MenuAction::open;
     apply_menu_setting(selected, settings);
     if (selected == MenuAction::quit)
         actions.quit = true;
@@ -165,16 +190,16 @@ ShellActions Shell::draw_window_menu(Settings &settings, const MenuItem &menu)
     return actions;
 }
 
-bool Shell::draw_toolbar(Language language, bool fullscreen)
+void Shell::draw_toolbar(Language language, bool fullscreen, Viewer &viewer, ShellActions &actions)
 {
     // 宽度不足时逐组收起尚未启用的操作，保留全屏入口。
     const auto id = [language](Text text, const char *stable_id)
     {
         return label(language, text, stable_id);
     };
-    bool toggle_fullscreen    = false;
     const float toolbar_width = ImGui::GetContentRegionAvail().x;
-    unavailable_button(language, Text::open, "open_toolbar");
+    if (ImGui::Button(id(Text::open, "open_toolbar").c_str()))
+        actions.open = true;
     if (toolbar_width > 590.0f * ImGui::GetStyle().FontScaleDpi)
     {
         ImGui::SameLine();
@@ -186,17 +211,22 @@ bool Shell::draw_toolbar(Language language, bool fullscreen)
     if (wide)
     {
         ImGui::SameLine();
-        unavailable_button(language, Text::fit, "fit");
+        ImGui::BeginDisabled(!viewer.has_image());
+        if (ImGui::Button(id(Text::fit, "fit").c_str()))
+            viewer.fit();
         ImGui::SameLine();
-        unavailable_button(language, Text::actual_size, "actual_size");
+        ImGui::BeginDisabled(!viewer.can_actual_size());
+        if (ImGui::Button(id(Text::actual_size, "actual_size").c_str()))
+            viewer.actual_size();
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
     }
     ImGui::SameLine();
     if (ImGui::Button(id(fullscreen ? Text::leave_fullscreen : Text::fullscreen, "fullscreen_toolbar").c_str()))
-        toggle_fullscreen = true;
-    return toggle_fullscreen;
+        actions.toggle_fullscreen = true;
 }
 
-void Shell::draw_canvas(Language language, ImTextureID icon)
+void Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer)
 {
     // 为状态栏预留空间；空状态内容以后可替换为图片视图。
     const auto t = [language](Text text)
@@ -206,12 +236,35 @@ void Shell::draw_canvas(Language language, ImTextureID icon)
     const float status_height = ImGui::GetFrameHeightWithSpacing();
     ImGui::BeginChild("canvas", {0.0f, -status_height}, ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    const auto available   = ImGui::GetContentRegionAvail();
+    const auto available = ImGui::GetContentRegionAvail();
+    if (viewer.has_visible_image())
+    {
+        const auto position = ImGui::GetCursorScreenPos();
+        viewer.draw({position.x, position.y}, {position.x + available.x, position.y + available.y},
+                    ImGui::GetIO().DisplayFramebufferScale.x);
+        ImGui::EndChild();
+        return;
+    }
+    if (viewer.loading())
+    {
+        centered_text(translate(language, Text::loading), ImGui::GetWindowWidth(), true);
+        ImGui::EndChild();
+        return;
+    }
+    if (viewer.failed())
+    {
+        const auto message = image_error_text(viewer.error());
+        ImGui::PushTextWrapPos();
+        ImGui::TextWrapped("%s", translate(language, message));
+        ImGui::PopTextWrapPos();
+        ImGui::EndChild();
+        return;
+    }
     const float scale      = ImGui::GetStyle().FontScaleDpi;
     const float image_size = 82.0f * scale;
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), (available.y - 200.0f * scale) * 0.5f));
     ImGui::SetCursorPosX((ImGui::GetWindowWidth() - image_size) * 0.5f);
-    aligned_image(icon, {image_size, image_size});
+    aligned_image(renderer, icon, {image_size, image_size});
     ImGui::Dummy({0.0f, 10.0f * scale});
     ImGui::PushFont(nullptr, 27.0f);
     centered_text("LiltView", ImGui::GetWindowWidth());
@@ -222,21 +275,28 @@ void Shell::draw_canvas(Language language, ImTextureID icon)
     ImGui::EndChild();
 }
 
-void Shell::draw_status(Language language)
+void Shell::draw_status(Language language, const Viewer &viewer)
 {
     const auto t = [language](Text text)
     {
         return translate(language, text);
     };
     const float scale = ImGui::GetStyle().FontScaleDpi;
-    ImGui::TextDisabled("%s  /  %s", t(Text::ready), t(Text::no_image));
+    Text status       = viewer.loading() ? Text::loading : Text::ready;
+    if (viewer.failed())
+        status = image_error_text(viewer.error());
+    if (viewer.filename().empty())
+        ImGui::TextDisabled("%s  /  %s", t(status), t(Text::no_image));
+    else
+        ImGui::TextDisabled("%s  |  %s  %u x %u", t(status), viewer.filename().c_str(), viewer.source_size().width,
+                            viewer.source_size().height);
     const char *language_name = language == Language::chinese ? "简体中文" : "English";
     ImGui::SameLine(
         std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::CalcTextSize(language_name).x - 22.0f * scale));
     ImGui::TextDisabled("%s", language_name);
 }
 
-void Shell::draw_about(Language language, ImTextureID icon)
+void Shell::draw_about(Language language, render::Renderer &renderer, render::Image icon)
 {
     // OpenPopup 和 BeginPopupModal 使用同一 ID，并处于相同的父窗口作用域。
     const auto id = [language](Text text, const char *stable_id)
@@ -254,7 +314,7 @@ void Shell::draw_about(Language language, ImTextureID icon)
     ImGui::SetNextWindowSize({std::min(viewport->Size.x - 36.0f * scale, 440.0f * scale), 0.0f}, ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("about_dialog", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
     {
-        draw_about_header(language, icon);
+        draw_about_header(language, renderer, icon);
         draw_about_licenses(language);
         draw_about_author(language);
         if (ImGui::Button(id(Text::close, "close_about").c_str()) || ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -263,14 +323,14 @@ void Shell::draw_about(Language language, ImTextureID icon)
     }
 }
 
-void Shell::draw_about_header(Language language, ImTextureID icon)
+void Shell::draw_about_header(Language language, render::Renderer &renderer, render::Image icon)
 {
     const auto t = [language](Text text)
     {
         return translate(language, text);
     };
     const float scale = ImGui::GetStyle().FontScaleDpi;
-    aligned_image(icon, {56.0f * scale, 56.0f * scale});
+    aligned_image(renderer, icon, {56.0f * scale, 56.0f * scale});
     ImGui::SameLine();
     ImGui::BeginGroup();
     ImGui::TextUnformatted("LiltView");
@@ -285,6 +345,7 @@ void Shell::draw_about_licenses(Language language)
     ImGui::Spacing();
     ImGui::TextWrapped("%s", translate(language, Text::license));
     ImGui::TextDisabled("Copyright 2026 LiltView contributors");
+    ImGui::TextWrapped("libjpeg-turbo\nThis software is based in part on the work of the Independent JPEG Group.");
     ImGui::Spacing();
     ImGui::TextWrapped("HarmonyOS Sans SC Regular\nCopyright 2021 Huawei Device Co., Ltd.");
     ImGui::TextWrapped("HarmonyOS Sans Fonts License Agreement");

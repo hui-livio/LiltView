@@ -1,7 +1,12 @@
-add_library(liltview_core STATIC src/api/config.c)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "JPEG v0.1 file/thread adapter currently supports Linux; Windows adapter is pending")
+endif()
+include("${PROJECT_SOURCE_DIR}/cmake/LiltViewJpeg.cmake")
+find_package(Threads REQUIRED)
+add_library(liltview_core STATIC src/api/config.c src/api/engine.c src/engine/objects.c
+    src/codecs/jpeg.c src/platform/file.c)
 add_library(LiltView::core ALIAS liltview_core)
 target_include_directories(liltview_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 liltview_configure_c_target(liltview_core)
-
-# This source list is explicit. Engine and codec files are added when implemented.
-# Do not provide success-returning stubs for the still-unimplemented public API.
+target_link_libraries(liltview_core PRIVATE liltview_jpeg Threads::Threads)
+add_dependencies(liltview_core liltview_jpeg_build)

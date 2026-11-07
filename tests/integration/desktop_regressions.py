@@ -104,12 +104,31 @@ def test_save_failure(executable, folder):
                 app.wait(timeout=5)
 
 
+def test_jpeg_render(executable, folder):
+    sample = Path(__file__).resolve().parents[2] / "third_party/libjpeg-turbo/testimages/testorig.jpg"
+    screenshot = folder / "jpeg.ppm"
+    result = subprocess.run([str(executable), "--smoke-test", "--screenshot", str(screenshot), str(sample)],
+                            text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "JPEG displayed: testorig.jpg" in result.stdout, result.stdout
+    header, dimensions, maximum, pixels = screenshot.read_bytes().split(b"\n", 3)
+    assert header == b"P6" and maximum == b"255", "invalid screenshot"
+    width, height = map(int, dimensions.split())
+    red = 0
+    for y in range(height // 3, height * 2 // 3):
+        for x in range(width // 3, width * 2 // 3):
+            offset = (y * width + x) * 3
+            r, g, b = pixels[offset:offset+3]
+            red += r > 120 and r > g * 1.4 and r > b * 1.4
+    assert red > 500, "JPEG rose pixels were not rendered in the canvas"
+
+
 def main():
     executable = Path(sys.argv[1]).resolve()
     case = sys.argv[2]
     os.environ["SDL_VIDEODRIVER"] = "offscreen"
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
-        {"menu": test_menu, "font": test_font, "save": test_save_failure}[case](executable, Path(temporary))
+        {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 

@@ -1,6 +1,6 @@
 # LiltView 目录与 CMake 构建
 
-已有可运行的 SDL3 + OpenGL 3.3 / ImGui 主窗口，C23 核心仍只有初始化函数。图片打开、加载与解码暂不实现，界面相应操作已禁用。
+已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 常规 JPEG 引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；超大图、其他格式、REGION、预读及目录导航未实现。
 
 ## 1. 当前目录
 
@@ -22,7 +22,10 @@ LiltView/
 │   ├── include/liltview/core.h    # 公共 C API 草案
 │   └── src/
 │       ├── README.md             # 后续核心模块分区
-│       └── api/config.c          # 已实现的初始化和 ABI 版本查询
+│       ├── api/                  # 初始化、校验、worker 与生命周期
+│       ├── engine/objects.c      # 预算、事件、像素引用与源版本
+│       ├── codecs/jpeg.c         # JPEG / EXIF / FIT
+│       └── platform/file.c       # Linux 文件与单调时钟
 ├── app/
 │   ├── CMakeLists.txt
 │   ├── README.md                 # 后续应用模块分区
@@ -34,6 +37,8 @@ LiltView/
 │   ├── settings/                # 可持久化的窗口、主题与语言设置
 │   ├── platform/                # 随包 / 系统字体选择
 │   ├── resources/               # 嵌入的应用图标
+│   ├── renderer/                # 统一纹理 / 帧接口与 OpenGL 后端
+│   ├── viewer/                  # core 消费和 GPU 图像所有者
 │   └── logging/
 │       ├── core_log.hpp
 │       └── core_log.cpp          # spdlog 回调适配，已通过构建
@@ -49,7 +54,7 @@ LiltView/
 └── build/                        # 本机生成内容，忽略提交
 ```
 
-后续核心增加 `engine`、`io`、`codecs`、`cache`、`platform`，应用增加图片 `viewer` 和 `renderer`。更新检测延期，不创建 `update` 源码和网络依赖。
+后续增加其他 codecs、缓存与平台服务。独立渲染模块详见[渲染模块设计](RENDERER-v0.1.md)：Linux 首版 OpenGL 3.3，Windows 后续选 D3D11。更新检测延期，不创建 `update` 源码和网络依赖。
 
 源码清单显式写入各自 CMakeLists，不使用递归 GLOB 自动收集文件，以便清楚审阅新增模块和依赖边界。
 
@@ -59,7 +64,10 @@ Core API 的请求时序、对象所有权、关闭过程、资源预算与边�
 
 | 目标 | 当前内容 | 启用条件 |
 | --- | --- | --- |
-| `LiltView::core` / `liltview_core` | C23 静态库：ABI 版本、配置初始化、请求初始化 | 总是 |
+| `LiltView::core` / `liltview_core` | C23 静态库：JPEG FIT、队列、取消、像素与生命周期 | 总是 |
+| `LiltView::renderer` | 统一 image / frame API 和 OpenGL 后端 | 应用组件开启 |
+| `liltview_viewer` | core 请求、像素上传和图片显示 | 应用组件开启 |
+| `liltview_jpeg` | ExternalProject 导入的静态 JPEG 库 | 总是 |
 | `liltview_contract_c` | C23、受检算术及实际 C 入口检查 | `BUILD_TESTING=ON` |
 | `liltview_contract_cpp20` | C++20 调 C 函数，比较 C / C++ 结构布局 | `BUILD_TESTING=ON` |
 | `liltview_contract_cpp23` | C++23 同类检查 | 测试开启且标准选择 23 |
@@ -69,10 +77,11 @@ Core API 的请求时序、对象所有权、关闭过程、资源预算与边�
 | `liltview_fonts` | 字体候选、资源校验和 ImGui 加载 | 应用组件开启 |
 | `LiltView::logging` | spdlog 日志回调静态库 | 应用组件开启 |
 | `liltview_core_tests` | Catch2 单元测试，CTest 自动发现 | 单元测试开启 |
-| `liltview_app_tests` | 翻译和设置 Catch2 测试 | 应用组件及单元测试开启 |
+| `liltview_app_tests` | 翻译、设置和 renderer 参数 Catch2 测试 | 应用组件及单元测试开启 |
+| `liltview_viewer_tests` | 实际 core 下的切图、上传失败恢复与资源回收测试 | 应用组件及单元测试开启 |
 | `liltview` | 主窗口可执行文件 | 应用组件开启 |
 
-只有 `lv_core_abi_version`、`lv_core_config_init`、`lv_request_desc_init` 已实现，其余接口在调用时仍无法链接。没有为未实现的引擎函数提供伪成功桩。
+所有 core 函数已可链接；未支持的配置和请求返回 UNSUPPORTED。当前范围见 [Core API §1.2](CORE_API-v0.1.md#12-当前-jpeg-实现范围)。
 
 ## 3. 工具链与默认构建
 
@@ -84,14 +93,14 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-默认无第三方依赖、不发起依赖下载，`BUILD_TESTING=ON`，仅运行独立契约检查。
+默认需要已初始化的 libjpeg-turbo submodule，不下载依赖；BUILD_TESTING=ON，运行 C / C++ 契约检查。libjpeg-turbo 不支持 add_subdirectory，使用本地 ExternalProject 静态构建，首次 build 完成其 configure 和编译。x86 SIMD 需要 NASM，没有时回退标量。
 
 ```bash
 cmake --preset release
 cmake --build --preset release
 ```
 
-`release` 是不含窗口的核心构建，默认不构建测试；产物为 `build/release/core/libliltview_core.a`。主程序使用下面的 `dev` 或 `app-release`。
+`release` 是不含窗口、但带静态 JPEG 解码依赖的核心构建，默认不构建测试；产物为 `build/release/core/libliltview_core.a`。主程序使用下面的 `dev` 或 `app-release`。
 
 显式选择 C++20 兼容模式：
 
@@ -117,11 +126,11 @@ ctest --test-dir build/custom --output-on-failure
 
 ### 4.1 源码管理
 
-需要编译的库用 Git submodule，纯头文件库直接保存源码，全部放在 `third_party/`。当前 ImGui、spdlog、SDL3、Catch2 四个库均使用 submodule。
+需要编译的库用 Git submodule，纯头文件库直接保存源码，全部放在 `third_party/`。当前 libjpeg-turbo、ImGui、spdlog、SDL3、Catch2 五个库均使用 submodule。
 
-基线为 ImGui v1.92.0、spdlog v1.15.3、SDL3 release-3.4.0、Catch2 v3.8.1，具体提交和发布来源记录在 [依赖清单](../third_party/dependencies.json)。主仓库 gitlink 是实际 submodule 版本锁；manifest 与它应一致。
+基线为 libjpeg-turbo 3.1.2、ImGui v1.92.0、spdlog v1.15.3、SDL3 release-3.4.0、Catch2 v3.8.1，具体提交和发布来源记录在 [依赖清单](../third_party/dependencies.json)。主仓库 gitlink 是实际 submodule 版本锁；manifest 与它应一致。
 
-四个 submodule 已注册，源码已就绪，gitlink 与清单校验通过。首次引入或维护时执行：
+五个 submodule 已注册，源码已就绪，gitlink 与清单校验通过。首次引入或维护时执行：
 
 ```bash
 python3 scripts/init_submodules.py
@@ -143,7 +152,7 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-`dev` 开启应用组件和 Catch2 测试。也可分别设置 `LILTVIEW_BUILD_APP_COMPONENTS` 和 `LILTVIEW_BUILD_UNIT_TESTS`，后者要求 `BUILD_TESTING=ON`。默认 debug / release / compat20 仍不需要第三方源码。
+`dev` 开启应用组件和 Catch2 测试。也可分别设置 `LILTVIEW_BUILD_APP_COMPONENTS` 和 `LILTVIEW_BUILD_UNIT_TESTS`，后者要求 `BUILD_TESTING=ON`。默认 debug / release / compat20 也需要 JPEG submodule，默认不构建窗口与 Catch2。
 
 移除原先的 SYSTEM / FETCH 模式和对应 presets。CMake 只读本地源码，不运行 Git、不联网；缺少依赖时提示如何初始化。源码准备好后，配置和构建可以离线运行。
 
@@ -155,21 +164,23 @@ ctest --preset dev
 
 cpp-httplib、TLS 库和更新检测均不在当前依赖图内。
 
-## 5. 本次验证
+## 5. 历史与当前验证
 
 - 当前 GCC/G++ 16.2.1、CMake 4.4.5、Ninja 1.13.2 下：Debug 构建通过，CTest 3/3；显式 C++20 构建通过，CTest 2/2；Release 静态库构建通过。
 - Debug / C++20 使用 warnings-as-errors。
 - 契约检查覆盖跨 C / C++ 的 14 个公开结构大小与对齐、关键字段偏移，以及实际 C 编译初始化函数的链接调用。
 - `dev` 已完成主程序、实际依赖和应用组件构建，CTest 12/12 通过；缺少源码时明确提示，不自动联网。
 - 首次注册脚本以临时本地 Git 仓库验证：预声明 `.gitmodules` 后注册、检出固定旧提交、重复执行、只读检查及拒绝覆盖脏工作区。此检查不代表真实第三方库已经构建。
-- 四个真实 gitlink 与本地检出已通过 `scripts/init_submodules.py --check`。
+- 原四个真实 gitlink 与本地检出已通过 `scripts/init_submodules.py --check`。
 - Wayland、X11、SDL offscreen 三种路径均完成窗口创建、渲染、调整尺寸、关于弹窗、关闭事件的冒烟测试；中英文截图已检查。
 - 普通事件循环退出和设置文件保存已验证；从 `/tmp` 启动仍可加载随包字体。Windows 尚未验证，IME 和跨屏高 DPI 需要后续人工验收。
 - 主程序既有的 C++20 兼容、Release 安装迁移验证已完成；本轮已将 SDL 改为静态链接，最新项目级修复与测试数量见 [项目审查](PROJECT_REVIEW-2026-11-07.md)，不能以旧动态链接安装结果代替验证。
 
+当前 JPEG 阶段验证：dev 43/43（含实际 OpenGL、JPEG 截图与 viewer 恢复）、显式 C++20 应用 37/37、ASan/UBSan 核心 16/16。Release 应用已构建，安装迁移后可加载字体与 JPEG，SDL / JPEG 均无动态链接。x86 测试机缺 NASM，当前是标量 JPEG 构建；这些结果不构成 SIMD 性能或 Windows 支持声明。
+
 ## 6. 下一步
 
-窗口与渲染已采用 SDL3 / OpenGL，下一步选择解码库并实现 C 引擎。测试随任务、事件、内存和解码行为扩展；当前图片操作仍禁用。
+常规 JPEG 与独立 renderer 已打通；后续扩展格式、导航与渐进能力。超大图和 Win32 + DX11 单独实施，不改变 core / viewer 的基本数据契约。
 
 ## 7. 主程序运行与资源
 
@@ -181,7 +192,7 @@ cmake --build --preset dev
 
 菜单提供语言、主题、全屏和关于。主题有跟随系统 / 深色 / 浅色，默认跟随系统；启动读取 SDL_GetSystemTheme，并在 SDL_EVENT_SYSTEM_THEME_CHANGED 时更新。显式选择始终优先，未获得系统偏好时采用深色。配置分别保存 `theme=system|dark|light`，兼容旧深浅配置；菜单勾选的是偏好模式，不把“跟随系统下恰好为深色”当作手动深色。
 
-在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置保存在 SDL 用户应用目录下的 `settings.ini`，可用 `--config-dir PATH` 隔离测试。
+在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放 JPEG。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置保存在 SDL 用户应用目录下的 `settings.ini`，可用 `--config-dir PATH` 隔离测试。
 
 默认字体为原始 HarmonyOS Sans SC Regular，位于 `assets/fonts/`，构建时复制到可执行文件相邻资源目录。详情与独立许可见 [字体说明](../assets/fonts/README.md)。“关于”提供字体署名。缺失随包字体时尝试系统字体，无中文字体时使用英文。
 

@@ -1,6 +1,13 @@
 {
   "schema_version": 1,
   "submodules": {
+    "libjpeg-turbo": {
+      "path": "third_party/libjpeg-turbo",
+      "url": "https://github.com/libjpeg-turbo/libjpeg-turbo.git",
+      "version": "3.1.2",
+      "commit": "4e151a4ad91001b3aa8c2ece2205c15f487ce320",
+      "release": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/tag/3.1.2"
+    },
     "imgui": {
       "path": "third_party/imgui",
       "url": "https://github.com/ocornut/imgui.git",
