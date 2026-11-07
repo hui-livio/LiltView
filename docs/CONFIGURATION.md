@@ -1,0 +1,52 @@
+# 命令行与 YAML 设置
+
+命令行解析使用 CLI11 v2.5.0；配置序列化和反序列化使用固定提交的 iguana YAML reader / writer。二者为直接保存在 `third_party/` 的纯头文件依赖，不进入 C core 或 renderer。
+
+## 命令行
+
+```bash
+liltview [options] [image.jpg]
+liltview --language zh-CN --config-dir /tmp/liltview-settings photo.jpg
+liltview --help
+```
+
+| 参数 | 含义 |
+| --- | --- |
+| `--language system\|en-US\|zh-CN` | 覆盖保存的语言，正常退出后随设置保存 |
+| `--config-dir PATH` | 将 settings.yaml 放在指定目录 |
+| `--smoke-test` | 隐藏窗口执行冒烟流程并退出，不保存设置 |
+| `--screenshot PATH` | 需同时提供 --smoke-test，输出 PPM 截图 |
+| `--help` / `-h`、`--version` | 显示 CLI11 帮助 / 应用版本，退出前不初始化窗口 |
+| 一个位置参数 | 打开的图片路径；以 `-` 开头的文件名用 `--` 分隔 |
+
+帮助、选项值校验、重复 / 多余参数和依赖关系由 CLI11 处理。错误返回非零 CLI11 退出码，不依赖固定数值。未提供 --language 时使用配置偏好；没有配置时跟随系统。仅有一个图片位置参数，不扫描目录。
+
+## settings.yaml
+
+默认位置是 SDL 用户配置目录中的 `settings.yaml`；可用 --config-dir 隔离。只读取这个文件名，不读取、导入或迁移旧 INI；只存在旧 INI 时以默认值启动。
+
+```yaml
+width: 1120
+height: 760
+maximized: false
+theme: system
+language: system
+log_level: warn
+```
+
+- width 为 640..8192，height 为 480..8192；越界字段回退各自默认值。
+- maximized 使用 true / false。
+- theme 使用 system / dark / light，language 使用 system / en-US / zh-CN；不认识的值回退 system。
+- log_level 使用 trace / debug / info / warn / error / critical / off；有效配置优先于构建默认值。Debug 开发构建默认 debug，Release / RelWithDebInfo / MinSizeRel 发布构建默认 warn；缺失或值无效时使用该构建默认值。上例显式选择 warn。
+- 设置读取完成后、创建工作线程前，将 log_level 应用到 spdlog。启动期间读取配置前先使用构建默认值；运行中不监控文件变化，修改后需重启。保存时记录实际使用的等级，因此已有有效配置在更换构建类型后仍然优先。
+- 缺失字段保留默认值。支持单个普通 YAML 映射、注释、引号、UTF-8 BOM、CRLF 及可选的 --- / ... 文档标记；不接受多文档，配置不承诺任意 YAML 高级特性。
+- 空文件使用默认值；文件超过 4096 字节、含 NUL、字段类型错误、未知键或语法错误时使用整份默认配置，不应用已解析的半份结果。
+- 解析由 iguana 完成，应用只负责长度、字段范围与枚举映射，不保留手写 key=value parser。
+
+固定的 iguana 快照对字符串字段类型和缩进校验较宽松，已保留一个有来源记录的最小补丁：拒绝把集合、别名及无效 plain scalar 当作字符串，拒绝映射键缩进不一致。补丁与校验信息保存在 third_party/iguana，应用只做单文档边界归一化，不再引入另一种配置解析器。
+
+保存仍采用同目录临时文件：先序列化，再写入、刷新和关闭，成功后替换目标文件；检查失败时保留旧文件。现有普通文件权限与有效符号链接处理保留，拒绝目录和特殊设备；不承诺 fsync 级断电持久性。程序退出只保存当前字段，不保留手动注释和键顺序。
+
+源代码入口：[`app/cli/options.cpp`](../app/cli/options.cpp)、[`app/settings/settings.cpp`](../app/settings/settings.cpp)、[`app/settings/store.cpp`](../app/settings/store.cpp)。
+
+日志适配见 [`app/logging/configure.cpp`](../app/logging/configure.cpp)。--smoke-test 禁止 false / 0 等 flag override，防止它只作为依赖参数出现而实际未启用冒烟测试。

@@ -1,4 +1,5 @@
 #include "application.hpp"
+#include "logging/configure.hpp"
 
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
@@ -108,6 +109,8 @@ private:
         sdl_ready_ = true;
         refresh_system_theme();
         prepare_settings(options);
+        configure_logging(settings_.log_level);
+        spdlog::debug("Log level: {}", log_level_name(settings_.log_level));
         locale_ = system_locale();
         if (options.language)
             settings_.language = *options.language;
@@ -467,13 +470,13 @@ private:
     void prepare_settings(const LaunchOptions &options)
     {
         if (!options.config_directory.empty())
-            settings_path_ = utf8_path(options.config_directory) / "settings.ini";
+            settings_path_ = utf8_path(options.config_directory) / "settings.yaml";
         else if (!options.smoke_test)
         {
             char *directory = SDL_GetPrefPath("LiltView", "LiltView");
             if (directory != nullptr)
             {
-                settings_path_ = utf8_path(directory) / "settings.ini";
+                settings_path_ = utf8_path(directory) / "settings.yaml";
                 SDL_free(directory);
             }
         }

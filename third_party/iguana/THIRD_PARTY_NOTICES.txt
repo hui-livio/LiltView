@@ -1,0 +1,167 @@
+iguana bundled-header notices
+
+Unmodified upstream header notices are retained below. iguana, frozen and YLT use Apache-2.0; integer conversion and fast_float include MIT terms; dragonbox may be used under the accompanying Boost Software License.
+
+--- include/frozen/string.h ---
+/*
+ * Frozen
+ * Copyright 2016 QuarksLab
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+
+--- include/iguana/detail/itoa.hpp ---
+//=== itoa.h - Fast integer to ascii conversion                   --*- C++ -*-//
+//
+// The MIT License (MIT)
+// Copyright (c) 2016 Arturo Martin-de-Nicolas
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+//     The above copyright notice and this permission notice shall be included
+//     in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//===----------------------------------------------------------------------===//
+
+
+--- include/iguana/detail/fast_float.h ---
+// version: 3.4.0
+// fast_float by Daniel Lemire
+// fast_float by João Paulo Magalhaes
+//
+// with contributions from Eugene Golushkov
+// with contributions from Maksim Kita
+// with contributions from Marcin Wojdyr
+// with contributions from Neal Richardson
+// with contributions from Tim Paine
+// with contributions from Fabio Pellacini
+//
+// Licensed under the Apache License, Version 2.0, or the
+// MIT License at your option. This file may not be copied,
+// modified, or distributed except according to those terms.
+//
+// MIT License Notice
+//
+//    MIT License
+//
+//    Copyright (c) 2021 The fast_float authors
+//
+//    Permission is hereby granted, free of charge, to any
+//    person obtaining a copy of this software and associated
+//    documentation files (the "Software"), to deal in the
+//    Software without restriction, including without
+//    limitation the rights to use, copy, modify, merge,
+//    publish, distribute, sublicense, and/or sell copies of
+//    the Software, and to permit persons to whom the Software
+//    is furnished to do so, subject to the following
+//    conditions:
+//
+//    The above copyright notice and this permission notice
+//    shall be included in all copies or substantial portions
+//    of the Software.
+//
+//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+//    ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+//    TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+//    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+//    SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+//    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+//    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+//    IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+//    DEALINGS IN THE SOFTWARE.
+//
+// Apache License (Version 2.0) Notice
+//
+//    Copyright 2021 The fast_float authors
+//    Licensed under the Apache License, Version 2.0 (the "License");
+//    you may not use this file except in compliance with the License.
+//    You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+//    Unless required by applicable law or agreed to in writing, software
+//    distributed under the License is distributed on an "AS IS" BASIS,
+//    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//    See the License for the specific language governing permissions and
+//
+
+
+--- include/iguana/detail/dragonbox.h ---
+// Copyright 2020-2022 Junekey Jeon
+//
+// The contents of this file may be used under the terms of
+// the Apache License v2.0 with LLVM Exceptions.
+//
+//    (See accompanying file LICENSE-Apache or copy at
+//     https://llvm.org/foundation/relicensing/LICENSE.txt)
+//
+// Alternatively, the contents of this file may be used under the terms of
+// the Boost Software License, Version 1.0.
+//    (See accompanying file LICENSE-Boost or copy at
+//     https://www.boost.org/LICENSE_1_0.txt)
+//
+// Unless required by applicable law or agreed to in writing, this software
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.
+
+// commit-id: 33a9e021290d529bcb41773be2c7c3c91726a9cb
+
+
+--- include/iguana/ylt/util/expected.hpp ---
+/*
+ * Copyright (c) 2023, Alibaba Group Holding Limited;
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+///
+// expected - An implementation of std::expected with extensions
+// Written in 2017 by Simon Brand (simonrbrand@gmail.com, @TartanLlama)
+//
+// Documentation available at http://tl.tartanllama.xyz/
+//
+// To the extent possible under law, the author(s) have dedicated all
+// copyright and related and neighboring rights to this software to the
+// public domain worldwide. This software is distributed without any warranty.
+//
+// You should have received a copy of the CC0 Public Domain Dedication
+// along with this software. If not, see
+// <http://creativecommons.org/publicdomain/zero/1.0/>.
+///

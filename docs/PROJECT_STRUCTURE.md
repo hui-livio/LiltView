@@ -30,6 +30,7 @@ LiltView/
 │   ├── CMakeLists.txt
 │   ├── README.md                 # 后续应用模块分区
 │   ├── main.cpp                  # 命令行与程序入口
+│   ├── cli/                     # CLI11 参数、帮助、版本和校验
 │   ├── application.cpp           # 窗口、事件、资源及退出生命周期
 │   ├── ui/                      # 菜单、空画布、关于与主题
 │   ├── i18n/                    # 中英翻译
@@ -73,7 +74,8 @@ Core API 的请求时序、对象所有权、关闭过程、资源预算与边�
 | `liltview_contract_cpp23` | C++23 同类检查 | 测试开启且标准选择 23 |
 | `LiltView::imgui` | ImGui 核心封装，官方 SDL3 / OpenGL 后端单独编译 | 应用组件开启 |
 | `LiltView::ui` | UI 静态库：菜单、空画布、主题及关于 | 应用组件开启 |
-| `LiltView::app_model` | 翻译、菜单、设置解析及安全文件替换，无窗口依赖 | 应用组件开启 |
+| `LiltView::app_model` | 翻译、菜单、iguana YAML 设置与安全文件替换，无窗口依赖 | 应用组件开启 |
+| `liltview_cli` | CLI11 命令行与 LaunchOptions，不初始化图形栈 | 应用组件开启 |
 | `liltview_fonts` | 字体候选、资源校验和 ImGui 加载 | 应用组件开启 |
 | `LiltView::logging` | spdlog 日志回调静态库 | 应用组件开启 |
 | `liltview_core_tests` | Catch2 单元测试，CTest 自动发现 | 单元测试开启 |
@@ -158,7 +160,7 @@ ctest --preset dev
 
 ### 4.3 纯头文件库
 
-直接提交到 `third_party/<name>/`，附上原许可证、上游提交和文件校验信息，使用 INTERFACE target 暴露路径。当前没有额外引入纯头文件库；cpp-httplib 延期，不为满足目录布局提前下载它。
+CLI11 v2.5.0 和 iguana 固定快照直接保存于 `third_party/CLI11`、`third_party/iguana`，附原许可、source.json 和逐文件 SHA-256。通过 SYSTEM INTERFACE targets 暴露路径，不在 CMake 中下载。iguana 只保留 YAML 与传递依赖（包含上游 bundled frozen），仅在 settings.cpp 使用。cpp-httplib 仍延期。
 
 日志回调使用 spdlog 的默认 logger，项目可在应用入口配置 sink 和等级。适配器按显式长度处理文本，并在 C 边界捕获异常。ImGui 使用锁定版本中的 SDL3 / OpenGL 官方后端，不改动第三方源码。
 
@@ -178,6 +180,10 @@ cpp-httplib、TLS 库和更新检测均不在当前依赖图内。
 
 当前 JPEG 阶段验证：dev 43/43（含实际 OpenGL、JPEG 截图与 viewer 恢复）、显式 C++20 应用 37/37、ASan/UBSan 核心 16/16。Release 应用已构建，安装迁移后可加载字体与 JPEG，SDL / JPEG 均无动态链接。x86 测试机缺 NASM，当前是标量 JPEG 构建；这些结果不构成 SIMD 性能或 Windows 支持声明。
 
+CLI11 / iguana YAML 接入后：dev 49/49，C++20 应用 42/42；配置 / CLI 的 ASan/UBSan 检查 12 个用例、122 项断言通过。包含 YAML 重启恢复、CLI 语言覆盖、坏配置回退及原文件保存失败保护。Release 安装包通过帮助 / 版本、YAML 重启和 JPEG 冒烟验证。
+
+日志等级配置与审查修复后：dev 52/52、C++20 应用 44/44；配置 / CLI / 日志 ASan/UBSan 检查 14 个用例、179 项断言通过。实际 Debug 和 Release 程序验证了默认 debug / warn、YAML 覆盖与 off；已补测不一致缩进、字符串字段误用集合、文档标记和截图 flag override。
+
 ## 6. 下一步
 
 常规 JPEG 与独立 renderer 已打通；后续扩展格式、导航与渐进能力。超大图和 Win32 + DX11 单独实施，不改变 core / viewer 的基本数据契约。
@@ -192,7 +198,7 @@ cmake --build --preset dev
 
 菜单提供语言、主题、全屏和关于。主题有跟随系统 / 深色 / 浅色，默认跟随系统；启动读取 SDL_GetSystemTheme，并在 SDL_EVENT_SYSTEM_THEME_CHANGED 时更新。显式选择始终优先，未获得系统偏好时采用深色。配置分别保存 `theme=system|dark|light`，兼容旧深浅配置；菜单勾选的是偏好模式，不把“跟随系统下恰好为深色”当作手动深色。
 
-在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放 JPEG。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置保存在 SDL 用户应用目录下的 `settings.ini`，可用 `--config-dir PATH` 隔离测试。
+在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放 JPEG。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置为 SDL 用户目录中的 `settings.yaml`，可用 --config-dir 隔离；不读取或迁移 INI。[命令行及配置契约](CONFIGURATION.md)。
 
 默认字体为原始 HarmonyOS Sans SC Regular，位于 `assets/fonts/`，构建时复制到可执行文件相邻资源目录。详情与独立许可见 [字体说明](../assets/fonts/README.md)。“关于”提供字体署名。缺失随包字体时尝试系统字体，无中文字体时使用英文。
 

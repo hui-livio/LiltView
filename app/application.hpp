@@ -1,22 +1,10 @@
 #ifndef LILTVIEW_APPLICATION_HPP
 #define LILTVIEW_APPLICATION_HPP
 
-#include "i18n/translator.hpp"
-
-#include <optional>
-#include <string>
+#include "cli/options.hpp"
 
 namespace liltview
 {
-struct LaunchOptions
-{
-    std::optional<Language> language;
-    std::string config_directory;
-    bool smoke_test = false;
-    std::string screenshot;
-    std::string image_path;
-};
-
 int run_application(const LaunchOptions &options);
 } // namespace liltview
 

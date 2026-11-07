@@ -51,12 +51,12 @@ TEST_CASE("settings preserve window and language state across serialization", "[
 TEST_CASE("malformed or oversized settings keep safe defaults", "[settings]")
 {
     const Settings defaults;
-    const auto settings = parse_settings("width=99999999999999\nheight=-1\nlanguage=bad\nunknown=ignored\n");
+    const auto settings = parse_settings("width: 99999999999999\nheight: -1\nlanguage: bad\n");
     CHECK(settings.width == defaults.width);
     CHECK(settings.height == defaults.height);
     CHECK(settings.language == Language::system);
-    CHECK(parse_settings("width=640junk\n").width == defaults.width);
-    CHECK(parse_settings("width=800\r\nheight=600\r\n").height == 600);
+    CHECK(parse_settings("width: 640junk\n").width == defaults.width);
+    CHECK(parse_settings("width: 800\r\nheight: 600\r\n").height == 600);
     CHECK(parse_settings(std::string(4097, 'x')).width == defaults.width);
 }
 
@@ -111,7 +111,7 @@ TEST_CASE("theme follows the system only when explicitly selected", "[theme]")
     CHECK(resolve_theme(Theme::light, Theme::dark) == Theme::light);
 }
 
-TEST_CASE("all theme preferences persist and legacy light or dark settings remain valid", "[theme][settings]")
+TEST_CASE("all theme preferences persist as YAML strings", "[theme][settings]")
 {
     for (const auto theme : {Theme::system, Theme::dark, Theme::light})
     {
@@ -119,11 +119,51 @@ TEST_CASE("all theme preferences persist and legacy light or dark settings remai
         settings.theme = theme;
         CHECK(parse_settings(serialize_settings(settings)).theme == theme);
     }
-    CHECK(parse_settings("theme=dark\n").theme == Theme::dark);
-    CHECK(parse_settings("theme=light\n").theme == Theme::light);
-    CHECK(parse_settings("theme=system\n").theme == Theme::system);
-    CHECK(parse_settings("theme=unknown\n").theme == Theme::system);
+    CHECK(parse_settings("theme: dark\n").theme == Theme::dark);
+    CHECK(parse_settings("theme: light\n").theme == Theme::light);
+    CHECK(parse_settings("theme: system\n").theme == Theme::system);
+    CHECK(parse_settings("theme: unknown\n").theme == Theme::system);
     CHECK(parse_settings("").theme == Theme::system);
+}
+
+TEST_CASE("YAML settings accept comments quoted values and missing fields", "[settings][yaml]")
+{
+    const auto settings = parse_settings("\xef\xbb\xbf---\n# User preferences\nwidth: 1440\nheight: 900\n"
+                                         "maximized: true\ntheme: 'light' # appearance\nlanguage: \"zh-CN\"\n...\n");
+    CHECK(settings.width == 1440);
+    CHECK(settings.height == 900);
+    CHECK(settings.maximized);
+    CHECK(settings.theme == Theme::light);
+    CHECK(settings.language == Language::chinese);
+    const auto partial = parse_settings("theme: dark");
+    CHECK(partial.width == Settings{}.width);
+    CHECK(partial.height == Settings{}.height);
+    CHECK(partial.theme == Theme::dark);
+    const auto yaml = serialize_settings(settings);
+    CHECK(yaml.find("width: 1440") != std::string::npos);
+    CHECK(yaml.find("theme: light") != std::string::npos);
+    CHECK(yaml.find("language: zh-CN") != std::string::npos);
+}
+
+TEST_CASE("invalid YAML never applies partially parsed settings", "[settings][yaml]")
+{
+    const Settings defaults;
+    for (const auto input :
+         {"width: 1440\nmaximized: yes\n", "width: 1440\nunknown: value\n", "width: 1440\nheight: [1, 2]\n",
+          "theme: \"unclosed\n", "width 1440\n", "width: 1440\n  height: 900\n", "  width: 1440\nheight: 900\n",
+          "width: 1440\ntheme: [light]\n", "width: 1440\nlanguage: {value: zh-CN}\n", "width: 1440\ntheme: light: bad\n",
+          "width: 1440\n---\nheight: 900\n", "width: 1440\ntheme: \"li\rght\"\n"})
+    {
+        CAPTURE(input);
+        const auto settings = parse_settings(input);
+        CHECK(settings.width == defaults.width);
+        CHECK(settings.maximized == defaults.maximized);
+        CHECK(settings.theme == defaults.theme);
+    }
+    CHECK(parse_settings("width: 639\nheight: 479\n").width == defaults.width);
+    CHECK(parse_settings("width: 8193\nheight: 8193\n").height == defaults.height);
+    CHECK(parse_settings("language: unknown\n").language == Language::system);
+    CHECK(parse_settings(std::string("width: 1440\0\n", 13)).width == defaults.width);
 }
 
 TEST_CASE("theme menu checks the preference rather than the current resolved appearance", "[theme][menu]")

@@ -1,0 +1,47 @@
+--- a/iguana/yaml_reader.hpp
++++ b/iguana/yaml_reader.hpp
+@@ -1,4 +1,7 @@
+ #pragma once
++
++// LiltView downstream changes (2026-11-07): reject collection values in string
++// fields and inconsistent mapping indentation. See patches/yaml-validation.patch.
+ 
+ #include <charconv>
+ 
+@@ -149,6 +152,18 @@
+ IGUANA_INLINE void yaml_parse_value(U &value, It value_begin, It value_end) {
+   using T = std::decay_t<U>;
+   auto end = value_end;
++
++  // LiltView: a string field must not silently absorb a YAML collection or an
++  // invalid plain scalar. Quoted strings retain their normal YAML semantics.
++  if (value_begin != value_end && *value_begin != '"' && *value_begin != '\'') {
++    if (*value_begin == '[' || *value_begin == '{' || *value_begin == '!' ||
++        *value_begin == '&' || *value_begin == '*')
++      throw std::runtime_error("Expected a YAML string scalar");
++    for (auto current = value_begin; current != value_end; ++current) {
++      if (*current == ':' && (current + 1 == value_end || current[1] == ' ' || current[1] == '\t'))
++        throw std::runtime_error("Invalid YAML plain scalar");
++    }
++  }
+ 
+   auto handle_quoted = [&](char quote_char, const char *error_msg) {
+     // Check minimum length: at least 2 characters (opening and closing quote)
+@@ -585,6 +600,8 @@
+ #endif
+       }
+     auto subspaces = skip_space_and_lines<false>(it, end, min_spaces);
++    if (it != end && subspaces >= min_spaces && subspaces != spaces)
++      throw std::runtime_error("Unexpected indentation of YAML mapping key");
+     if (subspaces < min_spaces)
+       IGUANA_UNLIKELY {
+         it -= subspaces + 1;
+@@ -626,6 +643,8 @@
+         }
+     }
+     auto subspaces = skip_space_and_lines<false>(it, end, min_spaces);
++    if (it != end && subspaces >= min_spaces && subspaces != spaces)
++      throw std::runtime_error("Unexpected indentation of YAML mapping key");
+     if (subspaces < min_spaces)
+       IGUANA_UNLIKELY {
+         it -= subspaces + 1;

@@ -80,7 +80,7 @@ bool limited_write_preserves_file(const std::filesystem::path &path)
 TEST_CASE("settings replacement preserves complete contents and permissions", "[settings][io]")
 {
     TestDirectory directory;
-    const auto path = directory.path / "settings.ini";
+    const auto path = directory.path / "settings.yaml";
     std::error_code error;
     liltview::Settings settings;
     REQUIRE(liltview::save_settings_file(path, settings, error));
@@ -100,11 +100,11 @@ TEST_CASE("invalid settings destinations fail without truncating other content",
     std::error_code error;
     REQUIRE_FALSE(liltview::save_settings_file(directory.path, {}, error));
     CHECK(error);
-    REQUIRE_FALSE(liltview::save_settings_file(directory.path / "missing" / "settings.ini", {}, error));
+    REQUIRE_FALSE(liltview::save_settings_file(directory.path / "missing" / "settings.yaml", {}, error));
     CHECK(error);
     CHECK(std::filesystem::is_directory(directory.path));
 #ifdef __linux__
-    const auto previous = directory.path / "settings.ini";
+    const auto previous = directory.path / "settings.yaml";
     std::ofstream(previous) << "previous";
     CHECK(limited_write_preserves_file(previous));
     CHECK(read_file(previous) == "previous");
@@ -117,14 +117,14 @@ TEST_CASE("settings reject special devices and preserve symlinked regular settin
 {
     TestDirectory directory;
     std::error_code error;
-    const auto link = directory.path / "settings.ini";
+    const auto link = directory.path / "settings.yaml";
     std::filesystem::create_symlink("/dev/full", link);
     REQUIRE_FALSE(liltview::save_settings_file(link, {}, error));
     CHECK(error);
     CHECK(std::filesystem::is_symlink(link));
     std::filesystem::remove(link);
-    const auto target = directory.path / "target.ini";
-    std::ofstream(target) << "theme=dark\n";
+    const auto target = directory.path / "target.yaml";
+    std::ofstream(target) << "theme: dark\n";
     std::filesystem::create_symlink(target, link);
     liltview::Settings settings;
     settings.theme = liltview::Theme::light;
@@ -136,12 +136,12 @@ TEST_CASE("settings reject special devices and preserve symlinked regular settin
 TEST_CASE("dangling settings symlinks do not write into the working directory", "[settings][io]")
 {
     TestDirectory directory;
-    const auto link = directory.path / "settings.ini";
-    std::filesystem::create_symlink(directory.path / "missing.ini", link);
+    const auto link = directory.path / "settings.yaml";
+    std::filesystem::create_symlink(directory.path / "missing.yaml", link);
     std::error_code error;
     CHECK_FALSE(liltview::save_settings_file(link, {}, error));
     CHECK(error);
-    CHECK_FALSE(std::filesystem::exists(directory.path / "missing.ini"));
+    CHECK_FALSE(std::filesystem::exists(directory.path / "missing.yaml"));
 }
 #endif
 

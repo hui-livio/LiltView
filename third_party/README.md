@@ -16,6 +16,8 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `spdlog/` | v1.15.3 | `6fa36017cfd5731d617e1a934f0e5ea9c4445b13` | submodule、编译库 |
 | `Catch2/` | v3.8.1 | `2b60af89e23d28eefc081bc930831ee9d45ea58b` | submodule、仅测试 |
 | `SDL/` | release-3.4.0 | `a962f40bbba175e9716557a25d5d7965f134a3d3` | submodule、窗口 / 输入 |
+| `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
+| `iguana/` | 2026-08-12 快照 | `2c05e011942c652d020a6782d026c2378c42008a` | YAML 及传递头文件直接保存 |
 
 初始化脚本读取 `dependencies.json`，其发布页字段记录版本来源。基线不是“最新版本”声明，升级时需同时审阅 manifest 和 gitlink 改动。
 
@@ -56,3 +58,5 @@ ctest --preset dev
 直接保存到 `third_party/<name>/`，至少包含实际头文件、原始 LICENSE 和来源记录。后续在 manifest 的 `vendored_headers` 中登记版本、上游提交和保存文件的 SHA-256。若有额外实现 `.c/.cpp` 或要求某个宏生成实现，则按实际链接方式审查，不仅凭“单文件”归类。
 
 头文件库在 CMake 中用 INTERFACE target 暴露包含路径；上游目录标记为 SYSTEM，避免将项目自身的严格告警施加给第三方代码。第三方文件遵循原许可证，不改标为本项目 Apache-2.0。
+
+CLI11 保存未修改的 include/CLI 目录；iguana 保存 YAML reader / writer 和传递头文件，含其上游自带 frozen。iguana yaml_reader.hpp 有最小的类型 / 缩进校验补丁，差异保存在 patches/yaml-validation.patch，其余头文件保持上游原样。每库 source.json 记录来源、提交、补丁与逐文件 SHA-256。不调用两者上游 CMake，不编译其示例 / 测试。iguana 的 bundled 转换器各自原始许可另保存在 THIRD_PARTY_NOTICES.txt 和 LICENSE-Boost；安装包一并带上。

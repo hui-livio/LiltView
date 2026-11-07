@@ -1,5 +1,24 @@
 include_guard(GLOBAL)
 
+# Header-only dependencies are vendored directly, never fetched by CMake.
+function(liltview_require_app_headers)
+    if(TARGET LiltView::cli11)
+        return()
+    endif()
+    set(vendor "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party")
+    foreach(required CLI11/include/CLI/CLI.hpp iguana/include/iguana/yaml_reader.hpp iguana/include/iguana/yaml_writer.hpp)
+        if(NOT EXISTS "${vendor}/${required}")
+            message(FATAL_ERROR "Missing vendored header: third_party/${required}; restore the recorded source files")
+        endif()
+    endforeach()
+    add_library(liltview_cli11 INTERFACE)
+    add_library(LiltView::cli11 ALIAS liltview_cli11)
+    target_include_directories(liltview_cli11 SYSTEM INTERFACE "${vendor}/CLI11/include")
+    add_library(liltview_iguana INTERFACE)
+    add_library(LiltView::iguana ALIAS liltview_iguana)
+    target_include_directories(liltview_iguana SYSTEM INTERFACE "${vendor}/iguana/include")
+endfunction()
+
 # CMake only reads local sources. Git gitlinks are the submodule version lock.
 function(liltview_dependency_source name marker output)
     file(READ "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/dependencies.json" manifest)

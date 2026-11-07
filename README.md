@@ -32,7 +32,9 @@ ctest --preset dev
 
 裁剪后的 SDL3 以 **静态库**链接到主程序，不链接或安装 `libSDL3.so`，不覆盖系统 SDL。Linux 仍使用系统 OpenGL、Fontconfig 和 X11 / Wayland 运行库；全局菜单默认开启，另需 GIO / GLib、Wayland 客户端和 `wayland-scanner`。可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。
 
-字体加载前校验随包文件，损坏时回退系统字体；没有中文字体时使用英文。设置写入 SDL 用户配置目录，完整写入临时文件并检查刷新 / 关闭后再替换，失败会记录原因，不先截断旧设置。
+字体加载前校验随包文件，损坏时回退系统字体；没有中文字体时使用英文。命令行使用 CLI11，设置使用 iguana 读写 YAML，保存到 SDL 用户配置目录的 `settings.yaml`。只保留 YAML，不读取或迁移旧 INI；完整写入临时文件并检查刷新 / 关闭后再替换，失败会记录原因。
+
+YAML 的 `log_level` 配置 spdlog 日志等级，支持 trace / debug / info / warn / error / critical / off。没有有效配置时，Debug 默认 debug，发布构建默认 warn；有效配置优先，重启生效。
 
 开发构建首次接入桌面 / Dock 时执行以下命令，注册指向当前构建的用户级启动器和彩色图标，再重新启动 LiltView：
 
@@ -42,7 +44,7 @@ python3 scripts/register_desktop.py
 
 应用 ID、桌面文件名和图标名统一为 `io.github.hui_livio.LiltView`。正式安装也会部署同名 `.desktop` 和图标资源。主窗口使用 256px 内嵌图标及 mipmap 缩小采样，避免原 64px 图标放大显示的模糊。
 
-主题在“设置 → 外观”选择，默认跟随系统并响应系统主题变化；手动选择深色或浅色后保持该选择。既有配置中的深浅主题仍保留，不会自动覆盖。
+主题在“设置 → 外观”选择，默认跟随系统并响应系统主题变化；手动选择深色或浅色后保存到 YAML。
 
 `app-release` preset 构建优化的主程序；安装、冒烟测试和完整参数见[目录与构建说明](docs/PROJECT_STRUCTURE.md)。
 
@@ -61,6 +63,7 @@ python3 scripts/register_desktop.py
 
 - [首版设计文档](docs/DESIGN-v0.1.md)
 - [跨平台渲染模块设计](docs/RENDERER-v0.1.md)
+- [CLI11 命令行与 iguana YAML 配置](docs/CONFIGURATION.md)
 - [工程落地与中英双语方案](docs/IMPLEMENTATION-v0.1.md)
 - [Core API 设计](docs/CORE_API-v0.1.md) · [调用时序与生命周期契约](docs/CORE_RUNTIME-v0.1.md) · [公共 C 头文件](core/include/liltview/core.h)
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)

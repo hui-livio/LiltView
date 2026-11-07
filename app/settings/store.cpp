@@ -110,8 +110,9 @@ bool save_settings_file(const std::filesystem::path &path, const Settings &setti
         error = std::make_error_code(std::errc::invalid_argument);
         return false;
     }
+    const auto data = serialize_settings(settings);
     TemporaryFile temp;
-    if (!open_temporary(target, temp, error) || !write_and_close(temp, serialize_settings(settings), error))
+    if (!open_temporary(target, temp, error) || !write_and_close(temp, data, error))
         return false;
     if (std::filesystem::exists(status))
     {

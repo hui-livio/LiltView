@@ -14,6 +14,9 @@
 | 项目 | 方案 | 状态 |
 | --- | --- | --- |
 | 构建 | CMake | 已明确 |
+| 命令行 | CLI11 v2.5.0，纯头文件源码直接入 third_party | 已接入 |
+| 配置 | iguana YAML reader / writer，settings.yaml，不兼容 / 迁移 INI | 已接入 |
+| 日志等级 | YAML log_level，Debug 默认 debug，发布默认 warn，有效配置优先 | 已接入 |
 | 核心 | C23，负责解码、预读、任务和缓存 | 已明确 |
 | 界面 | C++23 优先，最低 C++20；Dear ImGui | 当前设计基线 |
 | 日志 | spdlog，通过应用侧适配器接收核心日志 | 依赖已明确，适配方式为建议 |
@@ -78,6 +81,8 @@ liltview_app_tests           翻译、版本比较等不依赖窗口的逻辑测
 - ImGui 使用锁定版本的源码和匹配后端；可以自建 CMake target，不假定每个依赖都提供相同的安装接口。
 - HTTP 客户端的 TLS、压缩等编译配置统一由一个 target 管理，避免不同编译单元配置不一致。
 - 记录实际依赖树、发布包大小、运行时动态库及首次安装新增依赖；“header-only”不是体积结论。
+
+CLI11 与 iguana 的固定提交、逐文件校验和许可证存放在各自 source.json。iguana YAML 适配只在应用配置模块使用，不进入 core；完整参数、默认值、配置错误与保存约束见[配置说明](CONFIGURATION.md)。
 
 ## 3. 日志方案
 
