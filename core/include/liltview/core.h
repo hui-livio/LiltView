@@ -2,7 +2,8 @@
 #define LILTVIEW_CORE_H
 
 /* Draft API v0.1. ABI query and initialization implemented; engine API pending.
- * Contract: docs/CORE_API-v0.1.md. C23 implementation, C++20/23 consumers.
+ * Contracts: docs/CORE_API-v0.1.md and docs/CORE_RUNTIME-v0.1.md.
+ * C23 implementation, C++20/23 consumers.
  * ABI compatibility is for the same architecture and platform ABI only. */
 #include <stddef.h>
 #include <stdint.h>
@@ -176,7 +177,7 @@ typedef struct lv_core_config {
     uint64_t small_file_bytes;       /* init: 16 MiB */
     uint64_t small_pixel_bytes;      /* init: 64 MiB */
     uint64_t large_pixel_bytes;      /* init: 256 MiB */
-    uint32_t progressive_after_ms;   /* init: 100; 0 permits immediate output. */
+    uint32_t progressive_after_ms;   /* init: 100; UI also schedules reveal timer. */
     uint32_t update_interval_ms;     /* init: 33; 0 disables time coalescing. */
     uint32_t tile_edge;              /* init: 256; power of two, 16..1024. */
     uint32_t max_requests;           /* init: 16; includes undrained terminals. */
@@ -211,7 +212,7 @@ typedef struct lv_image_info {
     lv_info_flags flags;
     lv_size_u32 source_size;       /* Unrotated; SVG may have no natural size. */
     uint64_t file_bytes;
-    uint64_t source_revision;     /* Opaque per-engine observed source version. */
+    uint64_t source_revision;     /* Retain INFO to anchor this source identity. */
     lv_orientation orientation;
     lv_capabilities capabilities;/* Actual file/backend, not format-wide claims. */
     lv_load_mode load_mode;
@@ -312,23 +313,27 @@ LV_API uint32_t LV_CALL lv_core_abi_version(void);
 LV_API void LV_CALL lv_core_config_init(lv_core_config *out_config);
 LV_API void LV_CALL lv_request_desc_init(lv_request_desc *out_request);
 
-/* Control-thread only. create copies config/path values but borrows callback
- * userdata until successful join. Output handles/IDs are cleared on failure. */
+/* Control APIs are serialized on the create thread; no callback reentry.
+ * create/submit copy input values/paths but borrow callback userdata until join.
+ * Failed create leaves no callbacks in flight. Output handles/IDs clear on failure. */
 LV_API lv_status LV_CALL lv_core_create(const lv_core_config *config,
                                       lv_core **out_core);
 LV_API lv_status LV_CALL lv_core_submit(lv_core *core,
                                       const lv_request_desc *request,
                                       lv_request_id *out_request_id);
-/* cancel invalidates publication, discards unpolled pixel events for this
- * request, then cooperatively stops work. Already borrowed events remain valid. */
+/* Active cancel invalidates publication, discards unpolled pixel events, then
+ * cooperatively stops work. Once a terminal event is committed, cancel is a
+ * no-op and preserves all queued events. Already borrowed objects stay valid. */
 LV_API lv_status LV_CALL lv_core_cancel(lv_core *core, lv_request_id request_id);
 LV_API lv_status LV_CALL lv_core_poll_event(lv_core *core, lv_event **out_event);
 LV_API lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format,
                                             lv_format_support *out_support);
 LV_API lv_status LV_CALL lv_core_get_stats(lv_core *core, lv_core_stats *out_stats);
 
-/* Event owns one reference to any region pixels. Returned views are borrowed.
- * Release an event exactly once; all release functions accept NULL. */
+/* poll transfers event ownership; the event owns any region-pixels reference.
+ * Views are borrowed; retain pixels before releasing the event for delayed use.
+ * Release an event exactly once. release/retain(NULL) are no-ops; view(NULL) is NULL.
+ * Retained INFO anchors source identity; it survives terminal release/slot reuse. */
 LV_API const lv_event_view *LV_CALL lv_event_get_view(const lv_event *event);
 LV_API void LV_CALL lv_event_release(lv_event *event);
 LV_API const lv_pixel_view *LV_CALL lv_pixels_get_view(const lv_pixels *pixels);
@@ -338,7 +343,9 @@ LV_API void LV_CALL lv_pixels_release(lv_pixels *pixels);
 /* Closing is asynchronous and discards UNPOLLED events. Normal per-request
  * terminal-delivery guarantees end here; borrowed objects stay valid.
  * join(0) polls; a nonzero timeout is a bounded wait, never a forced thread kill.
- * destroy returns BUSY until joined and all borrowed objects have been released. */
+ * join does not wait for application upload threads; no callbacks occur after OK.
+ * destroy returns BUSY until joined and all borrowed objects have been released.
+ * The caller must finish all external object accesses before final destroy. */
 LV_API lv_status LV_CALL lv_core_begin_shutdown(lv_core *core);
 LV_API lv_status LV_CALL lv_core_join(lv_core *core, uint32_t timeout_ms);
 LV_API lv_status LV_CALL lv_core_destroy(lv_core **inout_core);
