@@ -26,7 +26,9 @@ ctest --preset dev
 ./build/dev/app/liltview
 ```
 
-Linux 应用构建依赖 OpenGL、Fontconfig 及 SDL3 对应的 X11 / Wayland 开发环境。全局菜单默认开启，另需 GIO / GLib、Wayland 客户端和 `wayland-scanner`；可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。默认设置保存在 SDL 的用户应用配置目录。
+裁剪后的 SDL3 以 **静态库**链接到主程序，不链接或安装 `libSDL3.so`，不覆盖系统 SDL。Linux 仍使用系统 OpenGL、Fontconfig 和 X11 / Wayland 运行库；全局菜单默认开启，另需 GIO / GLib、Wayland 客户端和 `wayland-scanner`。可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。
+
+字体加载前校验随包文件，损坏时回退系统字体；没有中文字体时使用英文。设置写入 SDL 用户配置目录，完整写入临时文件并检查刷新 / 关闭后再替换，失败会记录原因，不先截断旧设置。
 
 开发构建首次接入桌面 / Dock 时执行以下命令，注册指向当前构建的用户级启动器和彩色图标，再重新启动 LiltView：
 
@@ -59,6 +61,7 @@ python3 scripts/register_desktop.py
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)
 - [第三方源码与 submodule 管理](third_party/README.md)
 - [默认鸿蒙字体与授权来源](assets/fonts/README.md)
+- [项目审查与逐项需求验收](docs/PROJECT_REVIEW-2026-11-07.md)
 - [当前彩色图标说明](docs/BRANDING-v0.2.md)
 - [命名与首版图标记录](docs/BRANDING-v0.1.md)
 

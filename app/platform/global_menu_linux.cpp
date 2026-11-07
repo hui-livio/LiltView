@@ -105,6 +105,33 @@ GVariant *layout(const MenuItem &item, int depth, const std::vector<std::string>
     }
     return g_variant_new("(i@a{sv}@av)", item.id, properties(item, filter), g_variant_builder_end(&children));
 }
+
+void append_group_properties(GVariantBuilder &builder, const MenuItem &item, const std::vector<std::string> &names)
+{
+    g_variant_builder_add(&builder, "(i@a{sv})", item.id, properties(item, names));
+    for (const auto &child : item.children)
+        append_group_properties(builder, child, names);
+}
+
+// Layout replies may omit default-valued properties, but GetProperty must still
+// return their protocol defaults rather than pretending they do not exist.
+GVariant *default_property(const char *name)
+{
+    if (std::strcmp(name, "type") == 0)
+        return g_variant_new_string("standard");
+    if (std::strcmp(name, "disposition") == 0)
+        return g_variant_new_string("normal");
+    if (std::strcmp(name, "toggle-state") == 0)
+        return g_variant_new_int32(-1);
+    if (std::strcmp(name, "shortcut") == 0)
+        return g_variant_new_array(G_VARIANT_TYPE("as"), nullptr, 0);
+    if (std::strcmp(name, "icon-data") == 0)
+        return g_variant_new_array(G_VARIANT_TYPE_BYTE, nullptr, 0);
+    for (const auto *property : {"icon-name", "toggle-type", "children-display", "accessible-desc"})
+        if (std::strcmp(name, property) == 0)
+            return g_variant_new_string("");
+    return nullptr;
+}
 } // namespace
 
 struct GlobalMenu::Impl
@@ -251,9 +278,12 @@ struct GlobalMenu::Impl
         GVariantIter iterator;
         g_variant_iter_init(&iterator, ids);
         gint32 id;
-        while (g_variant_iter_next(&iterator, "i", &id))
-            if (const auto *item = find_menu_item(menu, id))
-                g_variant_builder_add(&result, "(i@a{sv})", id, properties(*item, names));
+        if (g_variant_n_children(ids) == 0)
+            append_group_properties(result, menu, names);
+        else
+            while (g_variant_iter_next(&iterator, "i", &id))
+                if (const auto *item = find_menu_item(menu, id))
+                    g_variant_builder_add(&result, "(i@a{sv})", id, properties(*item, names));
         g_variant_unref(ids);
         g_variant_unref(filter);
         g_dbus_method_invocation_return_value(invocation, g_variant_new("(@a(ia{sv}))", g_variant_builder_end(&result)));
@@ -270,6 +300,9 @@ struct GlobalMenu::Impl
             return invalid_item(invocation);
         auto *all   = g_variant_ref_sink(properties(*item, {}));
         auto *value = g_variant_lookup_value(all, name, nullptr);
+        if (value == nullptr)
+            if (auto *fallback = default_property(name))
+                value = g_variant_ref_sink(fallback);
         if (value != nullptr)
         {
             g_dbus_method_invocation_return_value(invocation, g_variant_new("(v)", value));

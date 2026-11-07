@@ -9,7 +9,9 @@ cmake --install build/app-release --prefix "$PWD/build/package"
 ./build/package/bin/liltview
 ```
 
-安装目录包含主程序、构建的 SDL3 动态库、鸿蒙字体与其原始许可证，以及项目和运行时第三方许可证。Linux 安装后的程序通过相对 RPATH 寻找 SDL3；仍依赖系统 OpenGL、Fontconfig 及窗口系统运行库。当前只有应用壳层，不能打开图片。
+安装目录包含静态链接裁剪版 SDL 的主程序、鸿蒙字体与其原始许可证，以及项目和第三方许可证。**不安装 SDL 动态库或设置 SDL 专用 RPATH**，不会覆盖发行版的 SDL；仍依赖系统 OpenGL、Fontconfig、GIO（启用全局菜单时）和窗口系统运行库。当前只有应用壳层，不能打开图片。
+
+验证安装时使用新的 staging 目录：旧动态链接构建留下的 `.so` 文件不会由 CMake 自动删除，不能将旧 staging 文件误认为新的安装产物。可用 `readelf -d <prefix>/bin/liltview` / `ldd` 检查动态依赖中没有 SDL。
 
 Linux 同时安装 `io.github.hui_livio.LiltView.desktop` 与同名 hicolor SVG / PNG，和程序的 app_id / WM_CLASS 一致，供 Dock / 任务栏匹配。安装到非标准 prefix 后，需让该 prefix 的 `share` 进入 XDG_DATA_DIRS，或使用 `scripts/register_desktop.py --executable <prefix>/bin/liltview` 注册用户入口。
 

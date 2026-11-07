@@ -4,7 +4,7 @@ liltview_require_sdl3()
 find_package(OpenGL REQUIRED)
 include(GNUInstallDirs)
 
-add_library(liltview_app_model STATIC i18n/translator.cpp settings/settings.cpp menu/menu_model.cpp)
+add_library(liltview_app_model STATIC i18n/translator.cpp settings/settings.cpp settings/store.cpp menu/menu_model.cpp)
 add_library(LiltView::app_model ALIAS liltview_app_model)
 target_include_directories(liltview_app_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 liltview_configure_cxx_target(liltview_app_model)
@@ -16,7 +16,7 @@ add_library(liltview_imgui_backends STATIC
     "${imgui_source}/backends/imgui_impl_sdl3.cpp"
     "${imgui_source}/backends/imgui_impl_opengl3.cpp")
 target_include_directories(liltview_imgui_backends SYSTEM PUBLIC "${imgui_source}/backends")
-target_link_libraries(liltview_imgui_backends PUBLIC LiltView::imgui SDL3::SDL3 OpenGL::GL)
+target_link_libraries(liltview_imgui_backends PUBLIC LiltView::imgui SDL3::SDL3-static OpenGL::GL)
 target_compile_features(liltview_imgui_backends PRIVATE cxx_std_11)
 
 add_library(liltview_ui STATIC ui/shell.cpp)
@@ -32,12 +32,16 @@ target_include_directories(liltview_logging PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 target_link_libraries(liltview_logging PUBLIC LiltView::core PRIVATE spdlog::spdlog)
 liltview_configure_cxx_target(liltview_logging)
 
-add_executable(liltview main.cpp application.cpp platform/fonts.cpp)
+add_library(liltview_fonts STATIC platform/fonts.cpp)
+target_include_directories(liltview_fonts PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(liltview_fonts PUBLIC LiltView::imgui PRIVATE SDL3::SDL3-static)
+liltview_configure_cxx_target(liltview_fonts)
+add_executable(liltview main.cpp application.cpp)
 target_include_directories(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(liltview PRIVATE LiltView::ui LiltView::logging liltview_imgui_backends spdlog::spdlog)
+target_link_libraries(liltview PRIVATE LiltView::ui LiltView::logging liltview_imgui_backends liltview_fonts spdlog::spdlog)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Fontconfig REQUIRED)
-    target_link_libraries(liltview PRIVATE Fontconfig::Fontconfig)
+    target_link_libraries(liltview_fonts PRIVATE Fontconfig::Fontconfig)
     option(LILTVIEW_ENABLE_GLOBAL_MENU "Export menus to the KDE Plasma system panel" ON)
     if(LILTVIEW_ENABLE_GLOBAL_MENU)
         find_package(PkgConfig REQUIRED)
@@ -85,13 +89,7 @@ add_custom_command(TARGET liltview POST_BUILD
 set_property(TARGET liltview APPEND PROPERTY LINK_DEPENDS
     "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf" "${font_dir}/LICENSE.HarmonyOS-Sans.txt" "${font_dir}/source.json")
 
-if(UNIX AND NOT APPLE)
-    set_target_properties(liltview PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
-endif()
 install(TARGETS liltview RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(TARGETS SDL3-shared
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 install(FILES "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf" "${font_dir}/LICENSE.HarmonyOS-Sans.txt" "${font_dir}/source.json"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/assets/fonts")
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView")

@@ -63,7 +63,8 @@ LiltView/
 | `liltview_contract_cpp23` | C++23 同类检查 | 测试开启且标准选择 23 |
 | `LiltView::imgui` | ImGui 核心封装，官方 SDL3 / OpenGL 后端单独编译 | 应用组件开启 |
 | `LiltView::ui` | UI 静态库：菜单、空画布、主题及关于 | 应用组件开启 |
-| `LiltView::app_model` | 翻译、语言选择及设置解析，无窗口依赖 | 应用组件开启 |
+| `LiltView::app_model` | 翻译、菜单、设置解析及安全文件替换，无窗口依赖 | 应用组件开启 |
+| `liltview_fonts` | 字体候选、资源校验和 ImGui 加载 | 应用组件开启 |
 | `LiltView::logging` | spdlog 日志回调静态库 | 应用组件开启 |
 | `liltview_core_tests` | Catch2 单元测试，CTest 自动发现 | 单元测试开启 |
 | `liltview_app_tests` | 翻译和设置 Catch2 测试 | 应用组件及单元测试开启 |
@@ -99,6 +100,8 @@ ctest --preset compat20
 ```
 
 C 核心始终为 C23。所有项目自身编译目标关闭 GNU 语言扩展，可用 `-DLILTVIEW_WARNINGS_AS_ERRORS=ON` 将警告视为错误。该设置不施加给第三方源码。
+
+自有 C++ 目标未使用模块，显式关闭 `CXX_SCAN_FOR_MODULES`，避免不必要的 GCC / Ninja 动态模块扫描和切换 20 / 23 时的 dyndep 问题。
 
 不使用 presets 时也可以：
 
@@ -160,7 +163,7 @@ cpp-httplib、TLS 库和更新检测均不在当前依赖图内。
 - 四个真实 gitlink 与本地检出已通过 `scripts/init_submodules.py --check`。
 - Wayland、X11、SDL offscreen 三种路径均完成窗口创建、渲染、调整尺寸、关于弹窗、关闭事件的冒烟测试；中英文截图已检查。
 - 普通事件循环退出和设置文件保存已验证；从 `/tmp` 启动仍可加载随包字体。Windows 尚未验证，IME 和跨屏高 DPI 需要后续人工验收。
-- 主程序的 C++20 兼容构建和 11 项测试通过，默认 C++23 构建为 12 项测试。Release 应用已构建、安装并整体迁移到临时目录，能通过相对 RPATH 使用随包 SDL3，且正确读取随包字体和许可证。
+- 主程序既有的 C++20 兼容、Release 安装迁移验证已完成；本轮已将 SDL 改为静态链接，最新项目级修复与测试数量见 [项目审查](PROJECT_REVIEW-2026-11-07.md)，不能以旧动态链接安装结果代替验证。
 
 ## 6. 下一步
 
@@ -187,7 +190,7 @@ cmake --install build/app-release --prefix "$PWD/build/package"
 ./build/package/bin/liltview
 ```
 
-安装包括 SDL3 动态库、字体和许可证；系统 OpenGL / Fontconfig / 窗口运行库仍需存在。默认 `release` 依旧是核心库构建。
+安装包含静态链接裁剪版 SDL3 的主程序、字体和许可证，不安装 SDL `.so`，不添加 SDL 专用 RPATH。系统 OpenGL / Fontconfig / GIO（全局菜单开启时）及窗口运行库仍需存在。默认 `release` 依旧是核心库构建。
 
 无需显示服务器的冒烟测试（要求 EGL / OpenGL offscreen 驱动）：
 
@@ -220,5 +223,7 @@ python3 scripts/register_desktop.py
 主界面原先的 64px 图标显示约 82 个逻辑像素，会放大而模糊。现采用 256px 嵌入源、mipmap 缩小采样和 framebuffer 像素对齐，覆盖常见 2x / 3x 显示。资源生成脚本为 `scripts/generate_icon.py`，仅重新生成资源时需要 ImageMagick，正常构建不需要它。
 
 本轮验证：17 项测试通过，包含三态主题解析、持久化、跟随优先级及互斥勾选；真实 D-Bus GetLayout / GetGroupProperties / Event / EventGroup / AboutToShowGroup、语言 / 主题 / 关于 / 退出动作及保存通过；Wayland 协议日志确认 app_id 和 appmenu 地址已送达合成器。Windows 全局菜单无此实现，使用窗口内菜单。
+
+上面的 17 项是主窗口阶段的历史结果；资源异常与设置文件回归加入后，开发配置为 23 项，启用 `LILTVIEW_BUILD_DESKTOP_TESTS=ON` 后为 26 项。后者要求 EGL / OpenGL offscreen、Python、gdbus、dbus-run-session，测试使用私有总线和临时目录。详见 [项目级审查报告](PROJECT_REVIEW-2026-11-07.md)。
 
 函数职责已集中审查，UI 区域、D-Bus 方法和生命周期、平台字体、菜单构造、参数解析和维护脚本均作了拆分；详见 [可读性审查记录](CODE_REVIEW-2026-11-07.md)。About 新增作者 hui-livio、邮箱 yuanfeng1897@gmail.com 和可点击的项目地址。

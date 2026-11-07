@@ -21,7 +21,7 @@
 | 软件更新 | 暂不实现，优先级后调，基础看图与性能主线完成后再排期 | 已明确 |
 | 网络库 | 后续更新检测优先使用 cpp-httplib，不再按 libhv 规划 | 首选已明确，具体版本与 TLS 后端待后续确定 |
 | 双语 | 中文与英文 | 已明确；首版具体地区标识建议为 `zh-CN` / `en-US` |
-| 窗口与渲染 | SDL3 + OpenGL 3.3，官方 ImGui 后端 | 已实现 |
+| 窗口与渲染 | 裁剪版 SDL3 静态链接 + 系统 OpenGL 3.3，官方 ImGui 后端 | 已实现 |
 | 默认字体 | HarmonyOS Sans SC Regular，原始 TTF 与原许可随程序分发 | 已接入 |
 | 系统菜单 | KDE 全局菜单，Wayland / X11 关联；不支持时保留 ImGui 菜单 | 已接入 |
 | 桌面身份 | `io.github.hui_livio.LiltView` 与 desktop / icon 名匹配 | 已接入 |
@@ -73,7 +73,7 @@ liltview_app_tests           翻译、版本比较等不依赖窗口的逻辑测
 - 需要编译的库使用 Git submodule，纯头文件库直接提交源码，均放到 `third_party/`；保留原许可证和来源记录。
 - ImGui、编译库形式的 spdlog、Catch2 声明为 submodule；由主仓库 gitlink 锁定提交，manifest 记录版本和来源。Git submodule 管理流程参考上游文档。[S1]
 - CMake 只读取已准备的本地依赖，不自动下载或更新；原 SYSTEM / FETCH 模式已移除。
-- ImGui、spdlog、SDL3、Catch2 四个 submodule 的 gitlink、清单与检出一致。主程序、全局菜单和 17 项测试已构建通过。KDE appmenu 协议描述以原文件、MIT 许可和来源校验保存，构建时由系统 wayland-scanner 生成接口；GIO、Wayland、X11 为系统集成依赖。详见 [第三方管理规则](../third_party/README.md)。
+- ImGui、spdlog、SDL3、Catch2 四个 submodule 的 gitlink、清单与检出一致。SDL3 使用 `SDL3::SDL3-static`，不安装 SDL `.so` 或附加 SDL RPATH；系统 OpenGL、GIO、Wayland、X11、Fontconfig 仍是平台依赖。KDE appmenu 协议描述保留原 MIT 许可，构建时生成接口。最新测试和逐项验收见 [项目审查](PROJECT_REVIEW-2026-11-07.md)。
 - 关闭第三方示例和不需要的功能；项目自己的测试与第三方项目的自测分别控制。
 - ImGui 使用锁定版本的源码和匹配后端；可以自建 CMake target，不假定每个依赖都提供相同的安装接口。
 - HTTP 客户端的 TLS、压缩等编译配置统一由一个 target 管理，避免不同编译单元配置不一致。

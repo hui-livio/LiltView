@@ -7,7 +7,10 @@ endfunction()
 
 function(liltview_configure_cxx_target target)
     set_target_properties(${target} PROPERTIES
-        CXX_STANDARD ${LILTVIEW_CXX_STANDARD} CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
+        CXX_STANDARD ${LILTVIEW_CXX_STANDARD} CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO
+        CXX_SCAN_FOR_MODULES OFF)
+    # No C++ modules are used. Avoid unnecessary GCC/Ninja dynamic dependency
+    # scanning, including stale dyndep edges when switching C++20/23 in a build.
     if(MSVC)
         target_compile_options(${target} PRIVATE /utf-8 /Zc:__cplusplus /permissive-)
     endif()

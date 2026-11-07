@@ -4,6 +4,7 @@
 #include "platform/global_menu.hpp"
 #include "resources/icon_rgba.hpp"
 #include "settings/settings.hpp"
+#include "settings/store.hpp"
 #include "ui/shell.hpp"
 #include "version.hpp"
 
@@ -146,17 +147,19 @@ private:
 
     void load_font()
     {
-        const auto font = find_application_font();
-        auto &io        = ImGui::GetIO();
-        if (!font.path.empty())
+        auto font   = find_application_font();
+        auto &io    = ImGui::GetIO();
+        bool loaded = load_font_candidate(font);
+        if (!loaded && font.bundled)
         {
-            ImFontConfig font_config;
-            font_config.FontNo = font.face_index;
-            if (io.Fonts->AddFontFromFileTTF(font.path.c_str(), 17.0f, &font_config) != nullptr)
-            {
-                chinese_font_ = font.chinese;
-                spdlog::info("UI font: {} (Chinese={})", font.path, chinese_font_);
-            }
+            spdlog::warn("Bundled font is unreadable or invalid; trying a system font");
+            font   = find_system_font();
+            loaded = load_font_candidate(font);
+        }
+        if (loaded)
+        {
+            chinese_font_ = font.chinese;
+            spdlog::info("UI font: {} (Chinese={})", font.path, chinese_font_);
         }
         if (io.Fonts->Fonts.empty())
             io.Fonts->AddFontDefault();
@@ -430,11 +433,9 @@ private:
     {
         if (settings_path_.empty() || smoke_test)
             return;
-        std::ofstream output(settings_path_, std::ios::trunc | std::ios::binary);
-        if (output)
-            output << serialize_settings(settings_);
-        if (!output)
-            spdlog::warn("Cannot save application settings");
+        std::error_code error;
+        if (!save_settings_file(settings_path_, settings_, error))
+            spdlog::warn("Cannot save application settings: {}", error.message());
     }
 
     void create_icon()

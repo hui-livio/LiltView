@@ -1,7 +1,14 @@
 #include "fonts.hpp"
 
 #include <SDL3/SDL.h>
+#include <array>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <imgui.h>
+#include <limits>
+#include <span>
+#include <vector>
 
 #if defined(__linux__)
     #include <fontconfig/fontconfig.h>
@@ -13,6 +20,31 @@ namespace liltview
 {
 namespace
 {
+constexpr auto crc32_table()
+{
+    std::array<std::uint32_t, 256> table{};
+    for (std::uint32_t index = 0; index < table.size(); ++index)
+    {
+        auto value = index;
+        for (unsigned bit = 0; bit < 8; ++bit)
+            value = (value >> 1) ^ ((value & 1U) != 0 ? 0xedb88320U : 0U);
+        table[index] = value;
+    }
+    return table;
+}
+
+std::uint32_t font_crc32(std::span<const unsigned char> bytes)
+{
+    static constexpr auto table = crc32_table();
+    const auto *lookup          = table.data();
+    std::uint32_t checksum      = 0xffffffffU;
+    // A table lookup per byte keeps validating the 8 MiB resource inexpensive,
+    // including unoptimized development builds.
+    for (const auto *byte = bytes.data(), *end = byte + bytes.size(); byte != end; ++byte)
+        checksum = lookup[(checksum ^ *byte) & 0xffU] ^ (checksum >> 8);
+    return checksum ^ 0xffffffffU;
+}
+
 SystemFont bundled_font()
 {
     SystemFont result;
@@ -29,6 +61,7 @@ SystemFont bundled_font()
             const auto utf8 = font.u8string();
             result.path.assign(reinterpret_cast<const char *>(utf8.data()), utf8.size());
             result.chinese = true;
+            result.bundled = true;
             return result;
         }
     }
@@ -113,5 +146,48 @@ SystemFont find_application_font()
     // 查找优先级与平台枚举分开；可直接看出“随包字体 → 系统字体”的回退顺序。
     const auto bundled = bundled_font();
     return bundled.path.empty() ? system_font() : bundled;
+}
+
+SystemFont find_system_font()
+{
+    return system_font();
+}
+
+bool load_font_candidate(const SystemFont &font)
+{
+    using FaceIndex = decltype(ImFontConfig::FontNo);
+    if (font.face_index < 0 || font.face_index > std::numeric_limits<FaceIndex>::max())
+        return false;
+    if (font.path.empty())
+        return false;
+    const auto path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(font.path.data()), font.path.size()));
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size <= 100 || size > 64 * 1024 * 1024)
+        return false;
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
+    std::ifstream input(path, std::ios::binary);
+    if (!input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size)))
+        return false;
+    // CRC detects a corrupted copy of our immutable bundled font before stb
+    // parses it. It is an integrity check, not a signature or trust mechanism.
+    if (font.bundled && (size != 8261128 || font_crc32(bytes) != 0x88e4e870U))
+        return false;
+    auto &io = ImGui::GetIO();
+    struct AssertionScope
+    {
+        ImGuiIO &io;
+        bool previous = io.ConfigErrorRecoveryEnableAssert;
+        ~AssertionScope()
+        {
+            io.ConfigErrorRecoveryEnableAssert = previous;
+        }
+    } scope{io};
+    io.ConfigErrorRecoveryEnableAssert = false;
+    ImFontConfig config;
+    config.FontNo                = static_cast<FaceIndex>(font.face_index);
+    config.FontDataOwnedByAtlas  = false; // ImGui makes its own owned copy.
+    config.Flags                |= ImFontFlags_NoLoadError;
+    return io.Fonts->AddFontFromMemoryTTF(bytes.data(), static_cast<int>(size), 17.0f, &config) != nullptr;
 }
 } // namespace liltview
