@@ -1,7 +1,7 @@
 # 图片格式与解码实现
 
 当前支持 JPEG、PNG、基础静态 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页的后台打开与 FIT 显示。
-UI 继续使用现有命令行、菜单 / Ctrl+O 和拖放入口；本轮不增加产品交互。
+UI 沿用命令行、菜单 / Ctrl+O 和拖放入口；静态区域格式可用 100%、滚轮缩放和拖动查看原始细节。
 本表是实际兼容范围；[总体设计](DESIGN-v0.1.md)中的扩展格式和完整 SVG 验收仍是后续规划。
 
 | 格式 | 后端 | 已实现范围 | 限制 |
@@ -12,13 +12,13 @@ UI 继续使用现有命令行、菜单 / Ctrl+O 和拖放入口；本轮不增�
 | BMP | 项目 C23 解码器 | 1 / 4 / 8 位调色板，16 / 24 / 32 位真彩，行对齐、上下行序，16 / 32 位 bitfields，RLE4 / RLE8 | 不支持内嵌 JPEG / PNG、OS/2 扩展压缩和色彩配置转换；RLE 不允许 top-down |
 | SVG | PlutoSVG 0.0.8 + 固定 PlutoVG 1.3.3 | 路径、基本几何、组、变换、fill / stroke、透明度、线性 / 径向渐变、viewBox，按 FIT 栅格化并允许放大 | 下述受限静态 profile，不等同于浏览器 SVG |
 | GIF | giflib 6.1.3 | GIF87a / GIF89a 动画会话，透明、交错、局部调色板、disposal 0..3、循环次数与源帧时长 | 普通尺寸顺序播放；静态 submit 仍可仅读首帧；无 seek / 超大动图 |
-| TIFF / TIF | LibTIFF 4.7.2 | Classic / BigTIFF 普通尺寸首页；大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 不支持页面切换、浮点 / CMYK；调色板 16 位等不受支持组合明确拒绝，仍受内存限制 |
+| TIFF / TIF | LibTIFF 4.7.2 | Classic / BigTIFF 首页及有界大图区域；大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 不支持页面切换、浮点 / CMYK；调色板 16 位等不受支持组合明确拒绝，仍受内存限制 |
 
 BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头，位域掩码必须连续、不重叠且在位深范围内。
 BI_RGB 32 位的第四字节视为保留位，统一不透明；只有显式 alpha mask 才使用 alpha。
 RLE 的跳过区域使用调色板第零项填充，检查 run、delta、绝对块、padding 和结束标记。
 
-GIF 已通过 ABI 2 会话及 UI 自动播放；TIFF / BigTIFF 显示普通尺寸首页。动画 WebP / APNG、多页切换、AVIF、HEIF / HEIC、静态超大图、REGION 和预读仍未实现。[GIF 动画接口与实现](CORE_ANIMATION-v0.2.md)。
+GIF 已通过 ABI 2 会话及 UI 自动播放；JPEG / PNG / 未压缩 BMP / TIFF 已支持静态大图和 REGION，16K 与 32K 验证见[实现说明](LARGE_IMAGES.md)。动画 WebP / APNG、多页切换、AVIF、HEIF / HEIC 和预读仍未实现。[GIF 动画接口与实现](CORE_ANIMATION-v0.2.md)。
 不支持 CAD、PSD / PSB 等专用设计源文件。
 后续开发范围分别为普通尺寸动图播放与静态超大图显示；超大动图明确不纳入范围。动画 FIT 缩小不能绕过源逻辑画布及实际工作集的限制，详见[动画范围约定](CORE_ANIMATION-v0.2.md#11-已确定的开发范围)。
 
@@ -49,29 +49,28 @@ UI poll → 上传 renderer → release event / pixels
 损坏输入异步返回 ERROR，worker 可继续接收下一张；单次请求至多一个终结事件。
 代码分为 `image.c` 共用准入 / FIT / tile / alpha 缩放，以及每格式独立文件；公共 C API 不暴露第三方依赖类型；动画会话接入后布局已升级为 ABI 2。
 
-query 对七类格式均返回静态 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 另报 ANIMATION，PNG / BMP / TIFF 无额外能力位。
-不报告 INCREMENTAL / REFINEMENT / REGION_DECODE。`load_mode` 仍是大小阈值分类，不代表已实现解码中逐步显示。
+query 对七类格式均返回静态 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 另报 ANIMATION；JPEG / PNG / BMP / TIFF 另报 REGION_DECODE，RLE BMP 的文件 INFO 不报告该能力。
+不报告 INCREMENTAL / REFINEMENT。`load_mode` 仍是大小阈值分类，不代表已实现解码中逐步显示。
 静态请求及每个动画帧请求都先完成解码与版本核验，再交付最终 tile；WebP 的增量输入仅用于在输入块之间检查取消。
 
 ## 像素、内存与取消
 
-所有输出为 top-left、紧密 RGBA8、straight alpha；没有完成 ICC / HDR 色彩管理，颜色语义为 UNKNOWN。
+所有输出为 top-left、RGBA8、straight alpha，stride 可大于 width × 4；没有完成 ICC / HDR 色彩管理，颜色语义为 UNKNOWN。
 PNG / BMP 的 FIT 使用 alpha 加权双线性，SVG 的原生 premultiplied ARGB 在交付前转换为 straight RGBA。
 JPEG 保留缩放解码加两行 FIT 缓冲的路径。
 
 | 项目 | 当前边界 |
 | --- | --- |
-| 位图源文件 | 最大 64 MiB；不代表此范围全部能在当前预算内显示 |
-| 位图原始 RGBA | 不超过 `min(large_pixel_bytes, 256 MiB)`，FIT 很小也不绕过源尺寸限制 |
-| SVG | 最大 1 MiB、8192 个元素、128 层嵌套；输出 RGBA 同样受上述像素限制 |
+| JPEG / PNG / 未压缩 BMP / TIFF 源 | 不设统一文件 / 原图 RGBA 大小上限；按格式与 codec 工作集准入 |
+| 单次输出区域 | 不超过 `min(large_pixel_bytes, 256 MiB)` 且须满足 CPU 预算，canvas 不等于分配 |
+| WebP / GIF / RLE BMP 源 | 保留 64 MiB 文件、原始 RGBA 的既有有界限制 |
+| SVG | 最大 1 MiB、8192 元素、128 层；输出仍有区域限制 |
 | UI 默认预算 | CPU 384 MiB、队列 4 MiB、renderer 图片 128 MiB |
-| 最终交付 | 提前预约完整 FIT 图及其全部 tile / 事件潜在峰值，队列按字节背压 |
+| 最终交付 | 直接 tiles 移交引用或连续输出的共享视图；无发布 / UI 深拷贝，队列按有效面积背压 |
 
-PNG 为 Adam7 保留完整原始 RGBA，再生成 FIT；BMP 保留完整文件与原始 RGBA，再生成 FIT。
-WebP 保留完整压缩输入，使用外部 FIT 输出缓冲，并保守预约内部解码工作集。
-SVG 保留源文本与文档树，直接绘制到 FIT 缓冲。GIF 动画保留 decoder、完整逻辑画布和 disposal 备份，最多另外生成一帧 FIT 候选；驻留总子预算默认 min(CPU/2, 128 MiB)，UI 两张纹理均受现有 GPU 预算约束。
-因此低于硬尺寸限制的图片仍可能因实际 CPU / GPU 预算返回 MEMORY_BUDGET。
-这轮不是超大图的低内存解码实现。
+非交错 PNG / JPEG 复用两行 RGBA，未压缩 BMP 复用文件行及 RGBA 行，TIFF 复用局部解码块，直接写最终 tiles；缩小 TIFF 当前用最近邻。顺序 codec 的 REGION 可能重新扫描整个文件。Adam7 仍需完整合并图，progressive JPEG 仍需系数工作集，因此可能因预算失败。
+WebP 保留压缩输入并直接生成最终连续输出；SVG 直接栅格化。静态 GIF / RLE BMP 在无需缩放时也直接写最终连续输出。连续图块仅创建共享 backing 的描述符，不复制图片数据。
+GIF 动画仍保留逻辑画布、disposal 备份和一帧不可变输出；这些是解码合成开销，不会在最终事件发布时再复制一份。超大动图不在范围内。所有 codec 的实际工作集仍须满足预算；详情见[大图与所有权](LARGE_IMAGES.md)。
 
 可追踪的输入、原始图、FIT、tile 和事件分配进入 core 账本；外部分配按保守 allowance 提前预约。
 第三方内部 allocator、C runtime 和线程栈未完全纳入追踪，预算不承诺进程 RSS 硬上限。

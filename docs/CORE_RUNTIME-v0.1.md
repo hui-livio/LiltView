@@ -1,7 +1,7 @@
 # LiltView Core 调用时序、内存与生命周期契约 v0.1
 
 - 日期：2026-11-07。
-- 状态：运行契约；Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 已实现。预读、REGION、缓存、多 worker 和扩展格式仍为后续约束，当前返回不支持；各格式内存、取消与兼容限制见[图片格式说明](IMAGE_FORMATS.md)，具体范围见 [Core API §1.2](CORE_API-v0.1.md#12-当前实现范围)。
+- 状态：运行契约；Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 已实现。静态 JPEG / PNG / 未压缩 BMP / TIFF 的 REGION 已实现；预读、缓存、多 worker 和扩展格式仍未实现；各格式内存、取消与兼容限制见[图片格式说明](IMAGE_FORMATS.md)，具体范围见 [Core API §1.2](CORE_API-v0.1.md#12-当前实现范围)。
 - 接口入口：[Core API](CORE_API-v0.1.md) · [公共头文件](../core/include/liltview/core.h)。
 - 本文约束现有静态运行时；GIF 动画会话、帧事件、取消和预算扩展已按 [v0.2](CORE_ANIMATION-v0.2.md) 实施，普通静态路径保持下述契约。
 - 原始数据、子图选择、高精度 / 多平面与参数身份的补充要求见 [接口 Review](CORE_INTERFACE_REVIEW-2026-11-08.md) 和 [待开发扩展方案](CORE_FORMAT_EXTENSION_PLAN.md)；新增描述的深拷贝、metadata / plane 寿命、预算和取消须沿用本契约，不代表新增能力已实现。
@@ -66,7 +66,7 @@ sequenceDiagram
 - 每次唤醒后 poll 到 EMPTY，或达到每帧预算后主动安排下一帧继续消费。不能在队列仍非空时只等待下次边沿唤醒。
 - 所有事件先核对 request_id / user_tag。过期事件也必须 release，不能只忽略指针。
 - IMAGE_INFO 决定画布、方向和源版本。通过检查后才接受该请求的像素；拒绝版本时使请求不可展示并 cancel。用作 FIT 底图版本锚点的 INFO 保留到该底图不再用于细节组合，其他 INFO 可处理后立即 release。
-- REGION_READY 的像素可以同步复制 / 上传后立刻释放事件；延后访问原数据则先 retain pixels，再释放事件。
+- REGION_READY 的像素通过指针借用并同步上传后立刻释放事件，不深拷贝像素；延后访问原数据则先 retain pixels，再释放事件。
 - COMPLETE 表示核心生产结束。UI 记录它，但仍完成此前已提交的上传；终结事件可立即 release，不必保留到 GPU 完成。
 - 小图的 AT_COMPLETE 只控制呈现，不阻止提前上传和归还 CPU 内存。UI 不得等 COMPLETE 后才开始消费所有像素。
 - 切图时先将旧请求移出可展示集合，再 cancel，再尝试 submit 新请求。若返回 BUSY，继续消费并归还旧事件，后续帧重试，不忙等。
@@ -179,7 +179,7 @@ cancel 与终结提交互斥地作出一次决定：
 ### 4.2 同步与延迟上传
 
 ```text
-同步消费：poll → view → 复制到渲染层自有内存或完成对源数据的读取 → event_release
+同步消费：poll → view → 借用原指针及 stride 完成 GPU 上传 → event_release
 
 延迟消费：poll → pixels_retain → event_release
                           ↓
@@ -190,7 +190,7 @@ cancel 与终结提交互斥地作出一次决定：
                     pixels_release
 ```
 
-释放依据是“后端不再读取这块 CPU 源数据”，不是一律等到显示完成。渲染层已经复制到自有 staging 内存后可释放核心引用；直接延后读取核心指针则必须继续持有。具体同步点由渲染后端负责。
+释放依据是“后端不再读取这块 CPU 源数据”，不是一律等到显示完成。当前同步上传不新建 CPU 像素副本；延后读取核心指针则必须继续持有引用。具体同步点由渲染后端负责。
 
 每块 pixels 的 size 等于 region.rect 的宽高，data 对应该矩形的局部左上角；不能按完整 canvas 的坐标偏移再次访问它。RGBA8 的 stride 至少为 width × 4，byte_count 至少覆盖 `(height - 1) × stride + width × 4`，所有运算受检且可在当前地址空间表示。行可有填充，不能假定紧密排列。
 
@@ -201,6 +201,14 @@ cancel 与终结提交互斥地作出一次决定：
 - 不能让同一引用的最后 release 与 get_view / retain 竞争；引用计数线程安全并不能修复调用方的悬空指针。
 - join 只结束核心 worker 和回调，不等待应用的上传线程。最终 destroy 前，应用须同步确认所有外部 view / retain / release 调用已经返回，且不会再启动新的访问。
 - JOINED 后的归还只做内存回收，不再调用应用日志 / 唤醒回调。
+
+### 4.4 当前实现：零深拷贝交接与复用
+
+最终输出在 decoder、事件、UI 之间通过原指针及引用计数交接，不复制像素块。直接 tiles 在发布成功时移交引用，失败由 decoder 负责释放；连续输出通过带 stride 的视图保留 backing owner。视图、数据指针和实际分配不可混为一个所有权对象，保留小视图可能延长整个连续 backing 的寿命。
+
+借出的事件 / retain 像素始终不可变，取消、新任务、终结释放和 shutdown 不回收它们。最后引用归零后才可进入私有空闲池；池上限为 128 个分配及 `min(CPU/16, 8 MiB)`，计入 accounted_cpu_bytes，预算不足立即清理，关闭时清空。队列 / pinned 统计按有效像素面积，物理 backing 按实际分配统计一次，二者不应直接相加推算 RSS。
+
+同步 renderer 上传不保留指针、不新建 CPU 像素副本；上传返回后可 release。未来异步上传必须另行设计保留 / 完成机制，不能沿用裸指针的调用期借用规则。codec 内部重采样、格式转换及 GIF disposal 仍属于解码工作集，不宣称算法内部完全没有内存复制。完整过程与验收见[大图与所有权说明](LARGE_IMAGES.md)。
 
 ## 5. 预算、队列与进度保证
 
@@ -240,7 +248,7 @@ submit 接受不代表已获准分配完整解码工作集。worker 先为有界
 
 ### 5.4 发布背压
 
-- 输出块必须能单独装入队列限额；后端的全图跨度不能使一个小 rect 隐性携带整张图。必要时复制成局部块，复制峰值计入计划。
+- 输出视图的有效像素面积必须能单独装入队列限额；不为适配跨度而复制成局部块。共享 backing 的完整驻留量独立计入 CPU 预算，不能用小视图面积隐瞒实际分配。
 - 队列满时等待，释放相关队列锁后再等待；不得持有阻止 poll / release / cancel 的锁。
 - 可替换尚未 poll 的同 tile 中间版本，不修改借出内存；每个必要最终块不得被合并掉。revision / sequence 允许因合并跳号。
 - 已发布数据占用预约产生的内存后，后续发布可因队列或外部持有而等待；消费和归还会唤醒内部资源等待。
@@ -249,7 +257,7 @@ submit 接受不代表已获准分配完整解码工作集。worker 先为有界
 ## 6. 关闭与回收时序
 
 1. UI 停止提交新请求，使所有请求不可展示，调用 begin_shutdown。该调用不等 worker，丢弃全部未 poll 事件，唤醒所有队列 / 预算等待；尚未释放的终结槽在关闭清理中统一回收。
-2. 渲染 / 上传线程停止取新工作，完成、复制或丢弃在途上传，并归还其事件 / pixels。该步骤可与核心 join 的非阻塞检查并行进行，不要求先等 join 才 release。
+2. 渲染 / 上传线程停止取新工作，完成或丢弃在途上传，并归还其事件 / pixels。该步骤可与核心 join 的非阻塞检查并行进行，不要求先等 join 才 release。
 3. UI 用 join(0) 或短超时继续处理事件循环。TIMEOUT 保持 CLOSING，core、userdata、通知目标仍必须有效；不能超时后强行 free 或退出资源所有者。
 4. join 返回 OK 后确认不会再发生核心回调，此时可撤销日志适配器和平台唤醒目标。此前已投递的平台通知可能仍在应用事件队列中，通知处理器须识别退出状态，不能再用失效 core 指针。
 5. 确认应用所有引用与并发访问均已结束，再 destroy。成功时 *core 置空；BUSY 保留指针，继续归还 / 等待，稍后重试。

@@ -11,7 +11,7 @@ void lv_discard_tiles_locked(lv_core *core, lv_request_id id)
         if (lv_event_pixels(event) && (!id || event->view.request_id == id))
         {
             *link               = event->next;
-            core->queued_bytes -= lv_event_pixels(event)->view.byte_count;
+            core->queued_bytes -= lv_pixels_payload(lv_event_pixels(event));
             lv_event_drop_locked(event);
         }
         else
@@ -113,6 +113,17 @@ int lv_worker_main(void *data)
         }
         if (!r)
         {
+            // Shutdown can start after the cleanup pass but before this lock.
+            // Recheck under the same mutex as begin_shutdown before exiting.
+            bool cleanup_pending = false;
+            for (uint32_t i = 0; i < core->config.animation.max_sessions; ++i)
+                if (core->animations[i].id && core->animations[i].closing && !core->animations[i].cleaned)
+                    cleanup_pending = true;
+            if (cleanup_pending)
+            {
+                mtx_unlock(&core->mutex);
+                continue;
+            }
             mtx_unlock(&core->mutex);
             lv_notify(core);
             mtx_lock(&core->mutex);

@@ -156,7 +156,7 @@ lv_status lv_validate_request(const lv_request_desc *r)
         return LV_INVALID_ARGUMENT;
     if (r->path.encoding == LV_PATH_UTF8 && !valid_utf8(r->path.data, r->path.byte_count))
         return LV_INVALID_ARGUMENT;
-    if (r->kind != LV_REQUEST_DISPLAY || r->target.kind != LV_TARGET_FIT)
+    if (r->kind != LV_REQUEST_DISPLAY)
         return LV_UNSUPPORTED;
     return LV_OK;
 }
@@ -212,6 +212,7 @@ lv_status lv_accept_locked(lv_core *core, const lv_request_desc *desc, lv_animat
     {
         return LV_LIMIT_REACHED;
     }
+    lv_pixels_trim_locked(core, length);
     if ((uint64_t)length > core->config.cpu_budget_bytes - core->used - core->reserved)
     {
         return LV_BUSY;
@@ -311,9 +312,9 @@ lv_status LV_CALL lv_core_poll_event(lv_core *core, lv_event **out)
     if (lv_event_pixels(event))
     {
         lv_pixels *p        = lv_event_pixels(event);
-        core->queued_bytes -= p->view.byte_count;
+        core->queued_bytes -= lv_pixels_payload(p);
         if (p->outside_refs++ == 0)
-            core->pinned_bytes += p->view.byte_count;
+            core->pinned_bytes += lv_pixels_payload(p);
     }
     *out = event;
     cnd_broadcast(&core->condition);
@@ -334,7 +335,10 @@ lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format, lv_forma
     const lv_capabilities capabilities = format == LV_FORMAT_SVG ? LV_CAP_VECTOR_RASTERIZE :
         (format == LV_FORMAT_JPEG || format == LV_FORMAT_WEBP)   ? LV_CAP_SCALED_DECODE :
                                                                    0;
-    *out                               = (lv_format_support){1, capabilities | (format == LV_FORMAT_GIF ? LV_CAP_ANIMATION : 0)};
+    const bool region =
+        format == LV_FORMAT_JPEG || format == LV_FORMAT_PNG || format == LV_FORMAT_BMP || format == LV_FORMAT_TIFF;
+    *out = (lv_format_support){
+        1, capabilities | (format == LV_FORMAT_GIF ? LV_CAP_ANIMATION : 0) | (region ? LV_CAP_REGION_DECODE : 0)};
     return LV_OK;
 }
 lv_status LV_CALL lv_core_get_stats(lv_core *core, lv_core_stats *out)
@@ -367,6 +371,7 @@ lv_status LV_CALL lv_core_begin_shutdown(lv_core *core)
         return LV_INVALID_ARGUMENT;
     mtx_lock(&core->mutex);
     core->closing = true;
+    lv_pixels_trim_locked(core, 0);
     for (uint32_t i = 0; i < core->config.animation.max_sessions; ++i)
         if (core->animations[i].id)
             core->animations[i].closing = true;
@@ -378,7 +383,7 @@ lv_status LV_CALL lv_core_begin_shutdown(lv_core *core)
         lv_event *event = core->head;
         core->head      = event->next;
         if (lv_event_pixels(event))
-            core->queued_bytes -= lv_event_pixels(event)->view.byte_count;
+            core->queued_bytes -= lv_pixels_payload(lv_event_pixels(event));
         lv_event_drop_locked(event);
     }
     core->tail = nullptr;

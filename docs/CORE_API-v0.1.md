@@ -15,15 +15,15 @@
 
 ### 1.2 当前实现范围
 
-- 所有公共函数已有真实实现；query 对七类格式均报告静态显示可用，GIF 另报 ANIMATION；JPEG / WebP 为 SCALED_DECODE，SVG 为 VECTOR_RASTERIZE，PNG / BMP / TIFF 无额外能力位。不报告增量预览或随机区域能力。
-- 仅 Linux 常规本地文件、DISPLAY / FIT、一个前台 worker。PREFETCH / REGION 请求同步返回 UNSUPPORTED；多前台 worker、非零 cache / disk cache 预算在 create 返回 UNSUPPORTED。配置初值保留，prefetch_workers 当前不创建线程，也不使预读可用。
-- libjpeg-turbo 3.1.2，8 位 RGB / 灰度、baseline / progressive JPEG 最终结果、EXIF 1..8。CMYK / YCCK、12 位 JPEG 和超大图未接入；12 位 / 尺寸超过当前范围为 DIMENSION_LIMIT，颜色空间不支持为 FORMAT_UNSUPPORTED。
-- PNG 的透明 / 索引色 / Adam7 / 高位深转换、静态 WebP、BMP 常见位深 / bitfields / RLE、SVG 基础静态 profile 已实现。GIF 支持合成首帧、TIFF / BigTIFF 支持普通尺寸首页，静态 submit 仍为首帧，UI 另使用 GIF 动画会话自动播放；TIFF 翻页未实现；APNG / 动画 WebP 拒绝；SVG 文字、裁剪、内嵌位图等未实现。详见[格式兼容表](IMAGE_FORMATS.md)。
-- 位图文件最多 64 MiB；原始 `width × height × 4` 不超过 large_pixel_bytes 和 256 MiB 硬限制中的较小值，实际解码还须满足工作集预算。不因 FIT 输出很小而宣称支持超大源图。
-- JPEG 先做缩放解码并以两行缓冲双线性生成完整 FIT CPU 图，再复制为最终 tile 通过有界队列交付；当前不发布解码中的行或渐进扫描。tile 可分帧上传，小图超时显示由 UI 计时器控制。
-- 当前普通图计划预留 codec 保守 allowance、完整 FIT 图及其全部输出 tile 的潜在峰值。队列仍以单块 / 字节限流；这不是后续超大图的低内存扫描实现。第三方内部 / C runtime 分配不是 RSS 硬上限，accounted_cpu_bytes 不含未实际分配的预约。
-- 当前 app 设置 CPU 384 MiB、队列 4 MiB、GPU images 128 MiB。它们是首版可调整工程初值，不是格式标准。INFO 可在 decode 前交付，实际像素在校验解码和源版本后发布。
-- 收到 INFO 后再次修改文件的检测、取消竞争、单块背压、retained pixels、INFO 跨终结寿命和关闭有运行测试；预读 / 缓存 / REGION 条目仍是后续设计约束；四种新增格式也覆盖源修改与取消测试。
+- 所有公共函数已有实现；七类格式报告静态显示可用。JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 报 ANIMATION；JPEG / PNG / BMP / TIFF 的构建级能力另报 REGION_DECODE，具体文件 INFO 再收窄（RLE BMP 不报 REGION）。不报告解码中的增量扫描预览。
+- Linux 常规本地文件、DISPLAY / FIT，以及 JPEG / PNG / 未压缩 BMP / TIFF 的 DISPLAY / REGION；一个前台 worker。PREFETCH 同步返回 UNSUPPORTED，不支持 REGION 的 codec 异步返回 TARGET_UNSUPPORTED；多 worker、非零 cache / disk cache 预算仍在 create 返回 UNSUPPORTED。
+- 16K JPEG / PNG / BMP 与 32K TIFF 大图已验证，16K 不是源尺寸上限。REGION canvas 只表示坐标空间，分配取决于实际区域及 codec 工作集；不能承诺 JPEG / PNG 随机读取延迟。progressive JPEG 和 Adam7 PNG 仍可能因完整系数 / 合并工作集超过预算而失败。
+- 常规格式和 GIF 动画范围见[格式兼容表](IMAGE_FORMATS.md)；不支持超大动图、TIFF 翻页、APNG / 动画 WebP、SVG 文字 / 裁剪 / 内嵌位图。JPEG 保持 8 位 RGB / 灰度、baseline / progressive 最终结果和 EXIF 1..8。
+- 流式静态路径取消统一 64 MiB 文件和 256 MiB 原图 RGBA 上限；单次输出区域仍不超过 `min(large_pixel_bytes, 256 MiB)`，并须满足 CPU 预算。WebP / GIF / RLE BMP 等保留原有有界范围，SVG 另有文本 / 文档限制。
+- JPEG / PNG / 未压缩 BMP / TIFF 直接写最终像素 tiles；连续输出路径发布共享 backing 的带 stride 视图。从最终输出到事件和 UI 不深拷贝像素。最后一个引用释放后才允许有界复用；细节及所有权见[大图实现](LARGE_IMAGES.md)。
+- 所有像素在解码和源版本核验后发布。INFO 可更早交付；tile 可分帧上传，UI 超时揭示不代表 core 已提供扫描中预览。内部 codec 合成 / 重采样工作不等同于传输深拷贝。
+- CPU 账本包含已分配像素、共享 backing、元数据和空闲池；预约不计入 accounted_cpu_bytes。空闲池不是解码内容缓存。第三方内部及 C runtime 内存按保守 allowance 准入，预算不承诺 RSS 硬上限。
+- app 当前 CPU / 队列 / GPU 图片预算为 384 / 4 / 128 MiB。版本、取消、引用存活、关闭、REGION 覆盖、大尺寸坐标和真实 OpenGL 边界像素均有测试；缓存 / 预读仍未实现。
 
 ## 2. 核心对象与函数
 
@@ -178,7 +178,7 @@ pixels_release → 归还额外 retain 的引用
 - 事件中的 diagnostic 指针随事件失效，需要留存时复制。
 - 像素可能有行填充；使用 stride_bytes 和 byte_count 验证范围。v0.1 RGBA8 为字节 R/G/B/A，非预乘 alpha，像素原点为左上角，方向由 UI 应用。
 - 颜色转换未完成时报告 UNKNOWN，不把带未知配置的内容标记为已转换 sRGB。
-- 不允许以 stack copy 的 event_view 延长内部指针寿命；使用 retain 或复制数据。
+- 不允许以 stack copy 的 event_view 延长内部指针寿命；像素使用 retain 延长寿命，仅小型元数据可按值复制。
 - retain 必须在已有引用仍有效时执行，不能从失效指针复活对象。
 
 ## 8. 队列、背压与线程

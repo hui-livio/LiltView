@@ -9,6 +9,7 @@ typedef struct png_state
     lv_request *request;
     lv_input *input;
     lv_frame frame;
+    lv_rows rows;
     png_structp decoder;
     png_infop metadata;
     uint8_t *image;
@@ -96,7 +97,7 @@ static bool png_header(png_state *s, lv_error_info *error, lv_size_u32 *size)
     png_structp d  = s->decoder;
     png_infop info = s->metadata;
     png_set_read_fn(d, s, png_input);
-    png_set_user_limits(d, 67108864, 67108864);
+    png_set_user_limits(d, PNG_UINT_31_MAX, PNG_UINT_31_MAX);
     png_set_chunk_cache_max(d, 128);
     png_set_chunk_malloc_max(d, 1024 * 1024);
     // Do not retain arbitrary metadata or compressed ICC/text chunks.
@@ -104,8 +105,11 @@ static bool png_header(png_state *s, lv_error_info *error, lv_size_u32 *size)
     png_set_crc_action(d, PNG_CRC_ERROR_QUIT, PNG_CRC_ERROR_QUIT);
     png_read_info(d, info);
     *size = (lv_size_u32){png_get_image_width(d, info), png_get_image_height(d, info)};
-    if (!lv_bitmap_size(s->core, size->width, size->height, error))
+    if (!size->width || !size->height)
+    {
+        error->code = LV_ERROR_DIMENSION_LIMIT;
         return false;
+    }
     const int depth = png_get_bit_depth(d, info), color = png_get_color_type(d, info);
     const bool transparency = png_get_valid(d, info, PNG_INFO_tRNS) != 0;
     if (depth == 16)
@@ -123,40 +127,75 @@ static bool png_header(png_state *s, lv_error_info *error, lv_size_u32 *size)
     return true;
 }
 
+static bool stored_row(void *userdata, uint32_t y, uint8_t *out, lv_error_info *error)
+{
+    (void)error;
+    png_state *s = userdata;
+    memcpy(out, s->image + (size_t)y * s->rows.source.width * 4, (size_t)s->rows.source.width * 4);
+    return true;
+}
 static void png_run(png_state *s, lv_error_info *error)
 {
-    lv_size_u32 size;
-    if (!png_header(s, error, &size))
+    lv_size_u32 size, canvas;
+    if (!png_header(s, error, &size) || !lv_target_canvas(s->request, size, LV_ORIENTATION_NORMAL, &canvas, error))
         return;
-    const lv_size_u32 canvas = lv_fit_size(size, s->request->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
-    s->image_bytes           = (size_t)size.width * size.height * 4;
-    if (!lv_frame_prepare(&s->frame, size, canvas, LV_FORMAT_PNG, 0, s->image_bytes, error))
-        return;
-    s->image = lv_workspace_allocate(s->core, s->request, s->image_bytes);
-    if (!s->image)
+    const int passes        = png_set_interlace_handling(s->decoder);
+    const uint64_t original = (uint64_t)size.width * size.height * 4;
+    if (passes > 1)
     {
-        error->code = LV_ERROR_OUT_OF_MEMORY;
-        return;
+        // Adam7 still needs an in-memory merge image; only the noninterlaced
+        // path is row-streamed. Report a budget limit rather than fake support.
+        if (original > SIZE_MAX || original > s->core->config.large_pixel_bytes || original > UINT64_C(256) * 1024 * 1024)
+        {
+            error->code = LV_ERROR_MEMORY_BUDGET;
+            return;
+        }
+        s->image_bytes = (size_t)original;
     }
-    const int passes = png_set_interlace_handling(s->decoder);
+    if (!lv_frame_prepare(&s->frame, size, canvas, LV_FORMAT_PNG, LV_CAP_REGION_DECODE, s->image_bytes + (uint64_t)size.width * 8,
+                          error))
+        return;
+    if (!lv_rows_init(&s->rows, &s->frame, size, error))
+        return;
+    if (passes > 1)
+    {
+        s->image = lv_workspace_allocate(s->core, s->request, s->image_bytes);
+        if (!s->image)
+        {
+            error->code = LV_ERROR_OUT_OF_MEMORY;
+            return;
+        }
+        memset(s->image, 0, s->image_bytes);
+    }
     png_read_update_info(s->decoder, s->metadata);
     if (png_get_rowbytes(s->decoder, s->metadata) != (size_t)size.width * 4)
         png_error(s->decoder, "Unexpected PNG row layout");
     if (!lv_frame_info(&s->frame, error))
         return;
-    // Adam7 combines each pass into these initialized full-size rows.
-    memset(s->image, 0, s->image_bytes);
     for (int pass = 0; pass < passes; ++pass)
         for (uint32_t y = 0; y < size.height; ++y)
         {
             if (lv_stopped(s->core, s->request))
                 return;
-            png_read_row(s->decoder, s->image + (size_t)y * size.width * 4, nullptr);
+            png_bytep row = passes > 1 ? s->image + (size_t)y * size.width * 4 : lv_rows_buffer(&s->rows, y);
+            png_read_row(s->decoder, row, nullptr);
+            if (passes == 1)
+                lv_rows_push(&s->rows, y);
         }
     png_read_end(s->decoder, nullptr);
-    if (!lv_resample_rgba(s->core, s->request, s->image, size, s->frame.data, canvas))
-        return;
+    if (passes > 1)
+    {
+        // Reuse the allocated pair of rows, keeping the merge image immutable.
+        for (uint32_t y = 0; y < size.height; ++y)
+        {
+            if (lv_stopped(s->core, s->request))
+                return;
+            stored_row(s, y, lv_rows_buffer(&s->rows, y), error);
+            lv_rows_push(&s->rows, y);
+        }
+    }
     png_destroy_read_struct(&s->decoder, &s->metadata, nullptr);
+    lv_rows_release(&s->rows);
     lv_workspace_release(s->core, s->request, s->image, s->image_bytes);
     s->image = nullptr;
     lv_frame_finish(&s->frame, error);
@@ -166,7 +205,7 @@ void lv_decode_png(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
 {
     if (!png_static_source(core, r, input, error))
         return;
-    const uint64_t allowance = sizeof(png_state) + UINT64_C(4) * 1024 * 1024 + input->version.bytes;
+    const uint64_t allowance = sizeof(png_state) + UINT64_C(4) * 1024 * 1024;
     if (!lv_reserve(core, r, allowance))
     {
         error->code = LV_ERROR_MEMORY_BUDGET;
@@ -198,6 +237,7 @@ void lv_decode_png(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
     }
     if (s->decoder)
         png_destroy_read_struct(&s->decoder, &s->metadata, nullptr);
+    lv_rows_release(&s->rows);
     lv_workspace_release(core, r, s->image, s->image_bytes);
     lv_frame_release(&s->frame);
     lv_workspace_release(core, r, s, sizeof *s);

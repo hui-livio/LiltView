@@ -37,25 +37,26 @@ void lv_decode_image(lv_core *core, lv_request *r, lv_error_info *error)
         *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_SYSTEM_ERRNO, .system_code = code};
         return;
     }
-    if (input.version.bytes > UINT64_C(64) * 1024 * 1024)
+    uint8_t magic[512];
+    const size_t count  = fread(magic, 1, sizeof magic, input.file);
+    r->bytes_read      += count;
+    decode_func decode  = detect_format(magic, count);
+    const bool regional =
+        decode == lv_decode_jpeg || decode == lv_decode_png || decode == lv_decode_bmp || decode == lv_decode_tiff;
+    if (ferror(input.file))
+        error->code = LV_ERROR_IO;
+    else if (count < 2)
+        error->code = LV_ERROR_CORRUPT_DATA;
+    else if (!decode)
+        error->code = LV_ERROR_FORMAT_UNSUPPORTED;
+    else if (r->desc.target.kind == LV_TARGET_REGION && !regional)
+        error->code = LV_ERROR_TARGET_UNSUPPORTED;
+    else if (!regional && input.version.bytes > UINT64_C(64) * 1024 * 1024)
         error->code = LV_ERROR_DIMENSION_LIMIT;
-    else
-    {
-        uint8_t magic[512];
-        size_t count        = fread(magic, 1, sizeof magic, input.file);
-        r->bytes_read      += count;
-        decode_func decode  = detect_format(magic, count);
-        if (ferror(input.file))
-            error->code = LV_ERROR_IO;
-        else if (count < 2)
-            error->code = LV_ERROR_CORRUPT_DATA;
-        else if (!decode)
-            error->code = LV_ERROR_FORMAT_UNSUPPORTED;
-        else if (fseek(input.file, 0, SEEK_SET))
-            error->code = LV_ERROR_IO;
-        else if (!lv_stopped(core, r))
-            decode(core, r, &input, error);
-    }
+    else if (fseek(input.file, 0, SEEK_SET))
+        error->code = LV_ERROR_IO;
+    else if (!lv_stopped(core, r))
+        decode(core, r, &input, error);
     lv_file_close(input.file);
 }
 
@@ -102,44 +103,106 @@ bool lv_bitmap_size(lv_core *core, uint32_t width, uint32_t height, lv_error_inf
     return true;
 }
 
+static bool prepare_tiles(lv_frame *f, lv_error_info *error)
+{
+    const lv_rect_u32 region = f->info.region;
+    const uint32_t edge      = f->info.tile_edge;
+    const uint64_t columns   = ((uint64_t)f->info.canvas.width + edge - 1) / edge;
+    f->tiles                 = lv_workspace_allocate(f->core, f->request, f->tile_count * sizeof *f->tiles);
+    if (!f->tiles)
+        goto failed;
+    memset(f->tiles, 0, f->tile_count * sizeof *f->tiles);
+    size_t at = 0;
+    for (uint64_t gy = (uint64_t)(region.y / edge) * edge; gy < (uint64_t)region.y + region.height; gy += edge)
+        for (uint64_t gx = (uint64_t)(region.x / edge) * edge; gx < (uint64_t)region.x + region.width; gx += edge)
+        {
+            const uint32_t x = (uint32_t)(gx < region.x ? region.x : gx), y = (uint32_t)(gy < region.y ? region.y : gy);
+            const uint64_t right = gx + edge < (uint64_t)region.x + region.width ? gx + edge : (uint64_t)region.x + region.width;
+            const uint64_t bottom =
+                gy + edge < (uint64_t)region.y + region.height ? gy + edge : (uint64_t)region.y + region.height;
+            lv_frame_tile *tile = &f->tiles[at++];
+            tile->rect          = (lv_rect_u32){x, y, (uint32_t)(right - x), (uint32_t)(bottom - y)};
+            tile->id            = (gy / edge) * columns + gx / edge;
+            tile->pixels        = lv_pixels_new(f->core, f->request, tile->rect.width, tile->rect.height);
+            if (!tile->pixels)
+                goto failed;
+        }
+    return true;
+failed:
+    error->code = LV_ERROR_OUT_OF_MEMORY;
+    lv_frame_release(f); // Includes partial allocation; callers may release again.
+    return false;
+}
+
 bool lv_frame_prepare(lv_frame *f, lv_size_u32 source, lv_size_u32 canvas, lv_format format, lv_capabilities caps,
                       uint64_t scratch, lv_error_info *error)
 {
-    if (!lv_bitmap_size(f->core, canvas.width, canvas.height, error))
+    const lv_rect_u32 region = f->request->desc.target.kind == LV_TARGET_REGION ?
+        f->request->desc.target.as.region.rect :
+        (lv_rect_u32){0, 0, canvas.width, canvas.height};
+    if (!lv_bitmap_size(f->core, region.width, region.height, error))
         return false;
-    const uint64_t bytes = (uint64_t)canvas.width * canvas.height * 4;
-    const uint64_t edge  = f->core->config.tile_edge;
-    const uint64_t count = ((canvas.width + edge - 1) / edge) * ((canvas.height + edge - 1) / edge);
-    f->bytes             = (size_t)bytes;
-    f->tile_reserve      = bytes + count * (sizeof(lv_pixels) + sizeof(lv_event));
-    const uint64_t plan  = bytes + f->tile_reserve + scratch;
+    const uint64_t bytes   = (uint64_t)region.width * region.height * 4;
+    const uint64_t edge    = f->core->config.tile_edge;
+    const uint64_t columns = ((uint64_t)region.x + region.width - 1) / edge - region.x / edge + 1;
+    const uint64_t count   = columns * (((uint64_t)region.y + region.height - 1) / edge - region.y / edge + 1);
+    const bool tiled       = (caps & LV_CAP_REGION_DECODE) && !f->request->animation;
+    f->bytes               = (size_t)bytes;
+    f->tile_reserve        = count * (sizeof(lv_event) + (tiled ? 0 : sizeof(lv_pixels)));
+    const uint64_t plan    = tiled ? bytes + count * (sizeof(lv_frame_tile) + sizeof(lv_pixels) + sizeof(lv_event)) + scratch :
+                                     bytes + sizeof(lv_pixels) + f->tile_reserve + scratch;
     if (!lv_reserve(f->core, f->request, plan))
     {
         *error = (lv_error_info){
             .code = LV_ERROR_MEMORY_BUDGET, .required_bytes = plan, .limit_bytes = f->core->config.cpu_budget_bytes};
         return false;
     }
-    f->data = lv_workspace_allocate(f->core, f->request, f->bytes);
-    if (!f->data)
-    {
-        error->code = LV_ERROR_OUT_OF_MEMORY;
-        return false;
-    }
-    const uint64_t original = format == LV_FORMAT_SVG ? bytes : (uint64_t)source.width * source.height * 4;
+    const uint64_t pixels   = (uint64_t)source.width * source.height;
+    const bool large        = format != LV_FORMAT_SVG && pixels > f->core->config.large_pixel_bytes / 4;
+    const uint64_t original = format == LV_FORMAT_SVG ? bytes : pixels > UINT64_MAX / 4 ? UINT64_MAX : pixels * 4;
     f->info                 = (lv_image_info){.format       = format,
                                               .flags        = LV_INFO_SOURCE_SIZE_KNOWN | LV_INFO_FILE_BYTES_KNOWN,
                                               .source_size  = source,
                                               .file_bytes   = f->input->version.bytes,
                                               .orientation  = LV_ORIENTATION_NORMAL,
                                               .capabilities = caps,
-                                              .load_mode    = original <= f->core->config.small_pixel_bytes &&
+                                              .load_mode    = large ? LV_LOAD_LARGE :
+                                                  original <= f->core->config.small_pixel_bytes &&
                                                       f->input->version.bytes <= f->core->config.small_file_bytes ?
-                                                  LV_LOAD_SMALL :
-                                                  LV_LOAD_INCREMENTAL,
+                                                                   LV_LOAD_SMALL :
+                                                                   LV_LOAD_INCREMENTAL,
                                               .canvas       = canvas,
-                                              .region       = {0, 0, canvas.width, canvas.height},
+                                              .region       = region,
                                               .tile_edge    = (uint32_t)edge};
-    return true;
+    if (tiled)
+    {
+        f->tile_count   = (size_t)count;
+        f->tile_columns = (size_t)columns;
+        return prepare_tiles(f, error);
+    }
+    f->output = lv_pixels_new(f->core, f->request, region.width, region.height);
+    if (f->output)
+    {
+        f->data = f->output->data;
+        return true;
+    }
+    error->code = LV_ERROR_OUT_OF_MEMORY;
+    return false;
+}
+
+uint8_t *lv_frame_span(lv_frame *f, uint32_t x, uint32_t y, uint32_t *width)
+{
+    const lv_rect_u32 region = f->info.region;
+    if (!f->tiles)
+    {
+        *width = region.width - x;
+        return f->data + ((size_t)y * region.width + x) * 4;
+    }
+    const uint32_t gx = region.x + x, gy = region.y + y, edge = f->info.tile_edge;
+    const size_t col = gx / edge - region.x / edge, row = gy / edge - region.y / edge;
+    lv_frame_tile *tile = &f->tiles[row * f->tile_columns + col];
+    *width              = tile->rect.width - (gx - tile->rect.x);
+    return tile->pixels->data + ((size_t)(gy - tile->rect.y) * tile->rect.width + gx - tile->rect.x) * 4;
 }
 
 bool lv_frame_info(lv_frame *f, lv_error_info *error)
@@ -150,31 +213,38 @@ bool lv_frame_info(lv_frame *f, lv_error_info *error)
     return false;
 }
 
-bool lv_publish_rgba(lv_core *core, lv_request *r, const uint8_t *data, lv_size_u32 size, lv_error_info *error)
+static bool publish_slices(lv_frame *f, lv_error_info *error)
 {
-    const uint32_t edge    = core->config.tile_edge;
-    const uint64_t columns = ((uint64_t)size.width + edge - 1) / edge;
-    for (uint32_t y = 0; y < size.height; y += edge)
-        for (uint32_t x = 0; x < size.width; x += edge)
+    lv_core *core            = f->core;
+    lv_request *r            = f->request;
+    const lv_size_u32 canvas = f->info.canvas;
+    const lv_rect_u32 region = f->info.region;
+    const uint32_t edge      = core->config.tile_edge;
+    const uint64_t columns   = ((uint64_t)canvas.width + edge - 1) / edge;
+    for (uint64_t grid_y = (uint64_t)(region.y / edge) * edge; grid_y < (uint64_t)region.y + region.height; grid_y += edge)
+        for (uint64_t grid_x = (uint64_t)(region.x / edge) * edge; grid_x < (uint64_t)region.x + region.width; grid_x += edge)
         {
             if (lv_stopped(core, r))
                 return false;
-            const uint32_t w = size.width - x < edge ? size.width - x : edge;
-            const uint32_t h = size.height - y < edge ? size.height - y : edge;
-            if (r->reservation < sizeof(lv_pixels) + (uint64_t)w * h * 4 + sizeof(lv_event))
+            const uint32_t x = (uint32_t)(grid_x < region.x ? region.x : grid_x);
+            const uint32_t y = (uint32_t)(grid_y < region.y ? region.y : grid_y);
+            const uint64_t end_x =
+                grid_x + edge < (uint64_t)region.x + region.width ? grid_x + edge : (uint64_t)region.x + region.width;
+            const uint64_t end_y =
+                grid_y + edge < (uint64_t)region.y + region.height ? grid_y + edge : (uint64_t)region.y + region.height;
+            const uint32_t w = (uint32_t)(end_x - x), h = (uint32_t)(end_y - y);
+            if (r->reservation < sizeof(lv_pixels) + sizeof(lv_event))
             {
                 error->code = LV_ERROR_MEMORY_BUDGET;
                 return false;
             }
-            lv_pixels *p = lv_pixels_new(core, r, w, h);
+            lv_pixels *p = lv_pixels_slice(core, r, f->output, (lv_rect_u32){x - region.x, y - region.y, w, h});
             if (!p)
             {
                 error->code = LV_ERROR_OUT_OF_MEMORY;
                 return false;
             }
-            for (uint32_t row = 0; row < h; ++row)
-                memcpy(p->data + (size_t)row * w * 4, data + ((size_t)(y + row) * size.width + x) * 4, (size_t)w * 4);
-            if (!lv_publish_tile(core, r, p, (lv_rect_u32){x, y, w, h}, (uint64_t)(y / edge) * columns + x / edge))
+            if (!lv_publish_tile(core, r, p, (lv_rect_u32){x, y, w, h}, (grid_y / edge) * columns + grid_x / edge))
             {
                 mtx_lock(&core->mutex);
                 lv_pixels_drop_locked(p, false);
@@ -185,7 +255,6 @@ bool lv_publish_rgba(lv_core *core, lv_request *r, const uint8_t *data, lv_size_
         }
     return true;
 }
-
 bool lv_frame_finish(lv_frame *f, lv_error_info *error)
 {
     if (lv_stopped(f->core, f->request))
@@ -195,17 +264,50 @@ bool lv_frame_finish(lv_frame *f, lv_error_info *error)
         error->code = LV_ERROR_SOURCE_CHANGED;
         return false;
     }
-    // Call only after freeing codec scratch. Queue waits retain just the FIT image.
+    // Only event records remain reserved. Decoder-owned tiles are already live.
     mtx_lock(&f->core->mutex);
     f->core->reserved       -= f->request->reservation - f->tile_reserve;
     f->request->reservation  = f->tile_reserve;
     mtx_unlock(&f->core->mutex);
-    return lv_publish_rgba(f->core, f->request, f->data, f->info.canvas, error);
+    if (!f->tiles)
+        return publish_slices(f, error);
+    for (size_t i = 0; i < f->tile_count; ++i)
+    {
+        lv_frame_tile *tile = &f->tiles[i];
+        // Success moves the sole reference into the event. Never write it again.
+        // Failure leaves ownership here for lv_frame_release, including cancel.
+        if (!lv_publish_tile(f->core, f->request, tile->pixels, tile->rect, tile->id))
+        {
+            if (!lv_stopped(f->core, f->request))
+                error->code = LV_ERROR_OUT_OF_MEMORY;
+            return false;
+        }
+        tile->pixels = nullptr;
+    }
+    return true;
 }
 
 void lv_frame_release(lv_frame *f)
 {
-    lv_workspace_release(f->core, f->request, f->data, f->bytes);
+    if (f->tiles)
+    {
+        mtx_lock(&f->core->mutex);
+        for (size_t i = 0; i < f->tile_count; ++i)
+            if (f->tiles[i].pixels)
+                lv_pixels_drop_locked(f->tiles[i].pixels, false);
+        mtx_unlock(&f->core->mutex);
+        lv_workspace_release(f->core, f->request, f->tiles, f->tile_count * sizeof *f->tiles);
+    }
+    if (f->output)
+    {
+        mtx_lock(&f->core->mutex);
+        lv_pixels_drop_locked(f->output, false);
+        mtx_unlock(&f->core->mutex);
+        f->output = nullptr;
+    }
+    f->tiles      = nullptr;
+    f->data       = nullptr;
+    f->tile_count = f->tile_columns = 0;
 }
 
 uint8_t *lv_input_read_all(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)

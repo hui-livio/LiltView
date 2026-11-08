@@ -323,7 +323,7 @@ TEST_CASE("TIFF grayscale palette low bit depths and CCITT are supported", "[for
     }
 }
 
-TEST_CASE("GIF and TIFF oversized dimensions and unsupported TIFF codecs reject early", "[formats][gif][tiff][limits]")
+TEST_CASE("GIF bounds and malformed TIFF dimensions or unsupported codecs reject", "[formats][gif][tiff][limits]")
 {
     auto large_gif = gif();
     std::fill(large_gif.begin() + 6, large_gif.begin() + 10, 255);
@@ -334,7 +334,7 @@ TEST_CASE("GIF and TIFF oversized dimensions and unsupported TIFF codecs reject 
     change_tiff_tag(large_tiff, TIFFTAG_IMAGEWIDTH, 1u << 30);
     result = decode(large_tiff, {1, 1});
     REQUIRE(result.terminal == LV_EVENT_ERROR);
-    CHECK(result.error.code == LV_ERROR_DIMENSION_LIMIT);
+    CHECK(result.error.code == LV_ERROR_CORRUPT_DATA);
     auto unsupported = tiff_fixture();
     change_tiff_tag(unsupported, TIFFTAG_COMPRESSION, COMPRESSION_ZSTD);
     result = decode(unsupported);
@@ -418,6 +418,6 @@ TEST_CASE("GIF TIFF capabilities memory budgets and cancelled metadata gates", "
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);
         CHECK(support.available == 1);
-        CHECK(support.capabilities == (format == LV_FORMAT_GIF ? LV_CAP_ANIMATION : 0));
+        CHECK(support.capabilities == (format == LV_FORMAT_GIF ? LV_CAP_ANIMATION : LV_CAP_REGION_DECODE));
     }
 }

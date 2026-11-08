@@ -48,6 +48,7 @@ struct Engine
     std::condition_variable changed;
     std::uint64_t notifications = 0;
     bool gate = false, entered = false, proceed = false;
+    std::chrono::seconds timeout{5};
     static void LV_CALL wake(void *userdata)
     {
         auto &self = *static_cast<Engine *>(userdata);
@@ -62,13 +63,13 @@ struct Engine
         }
     }
     explicit Engine(std::uint32_t max = 1, std::uint64_t memory = 64ULL * 1024 * 1024, std::uint32_t sessions = 2,
-                    std::uint64_t resident = 0)
+                    std::uint64_t resident = 0, std::uint32_t tile_edge = 16)
     {
         lv_core_config config;
         lv_core_config_init(&config);
         config.cpu_budget_bytes                = memory;
-        config.tile_edge                       = 16;
-        config.queue_pixel_bytes               = 16 * 16 * 4;
+        config.tile_edge                       = tile_edge;
+        config.queue_pixel_bytes               = static_cast<std::uint64_t>(tile_edge) * tile_edge * 4;
         config.max_requests                    = max;
         config.wakeup                          = wake;
         config.wakeup_userdata                 = this;
@@ -102,7 +103,7 @@ struct Engine
     }
     lv_event *next()
     {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
         for (;;)
         {
             std::unique_lock lock(mutex);

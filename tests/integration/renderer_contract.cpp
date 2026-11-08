@@ -77,6 +77,32 @@ void exercise(liltview::render::Renderer &renderer)
     }
     check(rejected, "texture limit rejection");
 }
+void verify_magnification(liltview::render::Renderer &renderer)
+{
+    using namespace liltview::render;
+    auto image = renderer.create_image({{2, 2}, false, ImageDesc::Magnification::nearest});
+    // Pixel blocks inside one texture: linear filtering would blur these edges.
+    const std::array<std::uint8_t, 16> board{255, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 255};
+    renderer.update_image(image, {0, 0, 2, 2}, {board.data(), board.size(), 8, {2, 2}});
+    renderer.begin_frame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    renderer.add_image(ImGui::GetForegroundDrawList(), image, {0, 0}, {128, 128});
+    ImGui::Render();
+    renderer.render_frame(ImGui::GetDrawData());
+    const auto pixels = renderer.readback();
+    for (unsigned y = 1; y < 127; ++y)
+        for (unsigned x = 1; x < 127; ++x)
+        {
+            const bool white = (x >= 64) != (y >= 64);
+            const auto at    = (static_cast<std::size_t>(y) * pixels.size.width + x) * 3;
+            check(pixels.rgb[at] == 255 && pixels.rgb[at + 1] == (white ? 255 : 0) && pixels.rgb[at + 2] == (white ? 255 : 0),
+                  "Magnified pixel boundary was interpolated");
+        }
+    renderer.present();
+    renderer.destroy_image(image);
+}
+
 } // namespace
 int main()
 {
@@ -95,6 +121,7 @@ int main()
         platform = liltview::initialize_imgui_platform(window);
         check(platform, "SDL platform backend");
         exercise(*renderer);
+        verify_magnification(*renderer);
         renderer.reset();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();

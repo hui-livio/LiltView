@@ -49,6 +49,8 @@ struct lv_pixels
     lv_pixel_view view;
     uint32_t refs, outside_refs;
     uint64_t allocation;
+    lv_pixels *owner;     // A strided tile view retains its immutable backing pixels.
+    lv_pixels *next_free; // Only linked after the last live reference is released.
     uint8_t data[];
 };
 struct lv_event
@@ -100,6 +102,9 @@ struct lv_core
     uint32_t accepted, borrowed, pixel_refs, live_pixels;
     uint64_t base, resident, next_animation;
     bool resource_notify;
+    lv_pixels *free_pixels;
+    uint64_t free_pixel_bytes;
+    uint32_t free_pixel_count;
 };
 
 uint64_t lv_clock_ns(void);
@@ -110,6 +115,13 @@ void lv_deallocate(lv_core *, void *, size_t bytes);
 void *lv_workspace_allocate(lv_core *, lv_request *, size_t bytes);
 void lv_workspace_release(lv_core *, lv_request *, void *, size_t bytes);
 lv_pixels *lv_pixels_new(lv_core *, lv_request *, uint32_t width, uint32_t height);
+lv_pixels *lv_pixels_slice(lv_core *, lv_request *, lv_pixels *, lv_rect_u32);
+static inline uint64_t lv_pixels_payload(const lv_pixels *p)
+{
+    return (uint64_t)p->view.size.width * p->view.size.height * 4;
+}
+// Mutex held; reclaim idle buffers until required admission fits (0 frees all).
+void lv_pixels_trim_locked(lv_core *, uint64_t required);
 bool lv_publish_info(lv_core *, lv_request *, lv_image_info *, const lv_file_version *);
 bool lv_publish_tile(lv_core *, lv_request *, lv_pixels *, lv_rect_u32, uint64_t tile);
 void lv_decode_image(lv_core *, lv_request *, lv_error_info *);

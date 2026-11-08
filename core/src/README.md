@@ -1,6 +1,6 @@
 # 核心实现分区
 
-已实现 Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 链路和所有公共函数入口。未接入的 PREFETCH、REGION、缓存、多 worker 与扩展格式返回明确不支持，不提供伪成功实现。
+已实现 Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 链路和所有公共函数入口。JPEG / PNG / 未压缩 BMP / TIFF 另支持 DISPLAY / REGION；未接入的 PREFETCH、缓存、多 worker 与扩展格式返回明确不支持，不提供伪成功实现。
 
 现有分工与后续扩展：
 
@@ -16,3 +16,5 @@
 核心不链接 ImGui、spdlog、Catch2 或网络库。新增 `.c` 文件由 C23 编译器编译。动画会话 / 单 worker 生命周期见 api/animation.c 与 engine/animation.c / worker.c，GIF 持久解码见 codecs/gif_animation.c。
 
 所有 codec 依赖由固定 submodule 静态构建；JPEG 采用独立 ExternalProject，PNG / WebP / SVG 采用本地 CMake。格式兼容范围见[图片格式与解码实现](../../docs/IMAGE_FORMATS.md)。当前解码器内部内存使用保守预约，未拦截其分配，不把账本当进程 RSS 硬上限。运行约束详见 [Core API 当前实现范围](../../docs/CORE_API-v0.1.md#12-当前实现范围)。
+
+大图、直接图块输出、共享连续 backing 与缓冲回收规则见[大图与像素所有权](../../docs/LARGE_IMAGES.md)。`codecs/raster.c` 负责有界行采样；`image.c` 在最终发布时只转移引用或创建视图，不复制像素。

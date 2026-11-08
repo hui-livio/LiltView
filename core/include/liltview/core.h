@@ -1,7 +1,7 @@
 #ifndef LILTVIEW_CORE_H
 #define LILTVIEW_CORE_H
 
-/* Runtime ABI v2: static DISPLAY/FIT and bounded GIF animation sessions.
+/* Runtime ABI v2: static DISPLAY/FIT/REGION and bounded GIF animation sessions.
  * Contracts: docs/CORE_API-v0.1.md and docs/CORE_RUNTIME-v0.1.md.
  * Animation contract: docs/CORE_ANIMATION-v0.2.md.
  * C23 implementation, C++20/23 consumers.
@@ -205,8 +205,8 @@ enum
 typedef struct lv_pixel_view
 {
     const uint8_t *data;
-    uint64_t byte_count;
-    uint64_t stride_bytes;
+    uint64_t byte_count;   /* Valid address span; may include row gaps. */
+    uint64_t stride_bytes; /* At least width * 4; not necessarily tightly packed. */
     lv_size_u32 size;
     lv_pixel_format format;     /* v0.1: byte order R,G,B,A; straight alpha. */
     lv_color_space color_space; /* UNKNOWN is not a claim of sRGB accuracy. */
@@ -235,7 +235,7 @@ typedef struct lv_core_config
     uint64_t queue_pixel_bytes;       /* Required nonzero; queue payload cap. */
     uint64_t small_file_bytes;        /* init: 16 MiB */
     uint64_t small_pixel_bytes;       /* init: 64 MiB */
-    uint64_t large_pixel_bytes;       /* init: 256 MiB */
+    uint64_t large_pixel_bytes;       /* init: 256 MiB; source classification / bounded output, not a universal source cap. */
     uint32_t progressive_after_ms;    /* init: 100; UI also schedules reveal timer. */
     uint32_t update_interval_ms;      /* init: 33; 0 disables time coalescing. */
     uint32_t tile_edge;               /* init: 256; power of two, 16..1024. */
@@ -468,7 +468,7 @@ typedef struct lv_core_stats
     uint64_t accounted_cpu_bytes;
     uint64_t cache_bytes;        /* Subset of accounted_cpu_bytes. */
     uint64_t queued_pixel_bytes; /* Logical queue payload, not extra RSS. */
-    uint64_t pinned_pixel_bytes; /* Live borrowed pixels; can overlap cache. */
+    uint64_t pinned_pixel_bytes; /* Logical area of borrowed views, excludes row gaps; not physical backing size. */
     uint64_t disk_cache_bytes;
     uint32_t accepted_requests; /* Includes unreleased terminal events. */
     uint32_t running_requests;
@@ -523,7 +523,10 @@ LV_API lv_status LV_CALL lv_core_close_animation(lv_core *core, lv_animation_id 
 /* poll transfers event ownership; the event owns any region-pixels reference.
  * Views are borrowed; retain pixels before releasing the event for delayed use.
  * Release an event exactly once. release/retain(NULL) are no-ops; view(NULL) is NULL.
- * Retained INFO anchors source identity; it survives terminal release/slot reuse. */
+ * Retained INFO anchors source identity; it survives terminal release/slot reuse.
+ * Published pixels are immutable. Views may share backing storage and use a
+ * larger stride; do not free data or assume packed rows. Last-reference release
+ * permits bounded buffer reuse. Pointer addresses are not object identities. */
 LV_API const lv_event_view *LV_CALL lv_event_get_view(const lv_event *event);
 LV_API void LV_CALL lv_event_release(lv_event *event);
 LV_API const lv_pixel_view *LV_CALL lv_pixels_get_view(const lv_pixels *pixels);

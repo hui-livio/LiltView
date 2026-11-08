@@ -124,7 +124,8 @@ public:
         glGenTextures(1, &name);
         glBindTexture(GL_TEXTURE_2D, name);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, desc.mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                        desc.magnification == ImageDesc::Magnification::nearest ? GL_NEAREST : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(desc.size.width), static_cast<GLsizei>(desc.size.height), 0,
@@ -153,10 +154,13 @@ public:
         validate_upload(texture.desc.size, destination, source);
         UploadState state(bind_buffer_);
         glBindTexture(GL_TEXTURE_2D, texture.name);
-        const auto row = static_cast<std::size_t>(source.size.width) * 4;
         // Non-multiple-of-four pitches are legal. Upload rows without staging a full image.
-        if (source.stride_bytes == row)
+        if (source.stride_bytes % 4 == 0 &&
+            source.stride_bytes / 4 <= static_cast<std::uint64_t>(std::numeric_limits<GLint>::max()))
+        {
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(source.stride_bytes / 4));
             upload_rows(destination, source.data);
+        }
         else
             for (std::uint32_t y = 0; y < destination.height; ++y)
                 upload_rows({destination.x, destination.y + y, destination.width, 1},

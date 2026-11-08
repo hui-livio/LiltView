@@ -112,6 +112,8 @@ void Viewer::advance_animation()
         {
             renderer_.destroy_image(display_);
             display_ = {};
+            lv_event_release(preview_anchor_);
+            preview_anchor_ = nullptr;
         }
         std::swap(display_, pending_);
         info_ = pending_info_;

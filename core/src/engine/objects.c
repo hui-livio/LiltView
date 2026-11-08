@@ -51,6 +51,7 @@ bool lv_reserve(lv_core *core, lv_request *request, uint64_t bytes)
             mtx_unlock(&core->mutex);
             return false;
         }
+        lv_pixels_trim_locked(core, bytes);
         if (bytes <= core->config.cpu_budget_bytes - core->used - core->reserved)
             break;
         cnd_wait(&core->condition, &core->mutex);
@@ -114,36 +115,120 @@ void lv_workspace_release(lv_core *core, lv_request *request, void *data, size_t
     lv_deallocate(core, data, bytes);
 }
 
+void lv_pixels_trim_locked(lv_core *core, uint64_t required)
+{
+    while (core->free_pixels && (!required || required > core->config.cpu_budget_bytes - core->used - core->reserved))
+    {
+        lv_pixels *pixels       = core->free_pixels;
+        core->free_pixels       = pixels->next_free;
+        core->free_pixel_bytes -= pixels->allocation;
+        --core->free_pixel_count;
+        core->used -= pixels->allocation;
+        free(pixels);
+    }
+}
+
 lv_pixels *lv_pixels_new(lv_core *core, lv_request *request, uint32_t width, uint32_t height)
 {
-    const size_t bytes = (size_t)width * height * 4;
-    lv_pixels *pixels  = lv_allocate(core, request, sizeof(lv_pixels) + bytes);
-    if (!pixels)
+    const size_t bytes = (size_t)width * height * 4, allocation = sizeof(lv_pixels) + bytes;
+    mtx_lock(&core->mutex);
+    if (allocation > request->reservation)
+    {
+        mtx_unlock(&core->mutex);
         return nullptr;
+    }
+    // Best fit with bounded internal fragmentation. A pinned/borrowed allocation
+    // is never on this list and cannot be mutated by a subsequent decode.
+    lv_pixels **best = nullptr;
+    for (lv_pixels **link = &core->free_pixels; *link; link = &(*link)->next_free)
+        if ((*link)->allocation >= allocation && (*link)->allocation - allocation <= allocation / 4 &&
+            (!best || (*link)->allocation < (*best)->allocation))
+            best = link;
+    lv_pixels *pixels;
+    if (best)
+    {
+        pixels                  = *best;
+        *best                   = pixels->next_free;
+        core->free_pixel_bytes -= pixels->allocation;
+        --core->free_pixel_count;
+    }
+    else
+    {
+        pixels = malloc(allocation);
+        if (!pixels)
+        {
+            mtx_unlock(&core->mutex);
+            return nullptr;
+        }
+        pixels->allocation  = allocation;
+        core->used         += allocation;
+    }
+    const uint64_t capacity  = pixels->allocation;
+    core->reserved          -= allocation;
+    request->reservation    -= allocation;
     *pixels = (lv_pixels){.core = core,
                           .view = {pixels->data, bytes, (uint64_t)width * 4, {width, height}, LV_PIXEL_RGBA8, LV_COLOR_UNKNOWN},
                           .refs = 1,
-                          .allocation = sizeof(lv_pixels) + bytes};
-    mtx_lock(&core->mutex);
+                          .allocation = capacity};
     ++core->live_pixels;
     mtx_unlock(&core->mutex);
     return pixels;
+}
+
+lv_pixels *lv_pixels_slice(lv_core *core, lv_request *r, lv_pixels *owner, lv_rect_u32 rect)
+{
+    lv_pixels *slice = lv_allocate(core, r, sizeof *slice);
+    if (!slice)
+        return nullptr;
+    const uint64_t stride = owner->view.stride_bytes;
+    *slice                = (lv_pixels){.core       = core,
+                                        .refs       = 1,
+                                        .allocation = sizeof *slice,
+                                        .owner      = owner,
+                                        .view       = {owner->view.data + (size_t)rect.y * stride + (size_t)rect.x * 4,
+                                                       (uint64_t)(rect.height - 1) * stride + (uint64_t)rect.width * 4,
+                                                       stride,
+                                                       {rect.width, rect.height},
+                                                       LV_PIXEL_RGBA8,
+                                                       LV_COLOR_UNKNOWN}};
+    mtx_lock(&core->mutex);
+    ++owner->refs;
+    ++core->live_pixels;
+    mtx_unlock(&core->mutex);
+    return slice;
 }
 
 void lv_pixels_drop_locked(lv_pixels *pixels, bool outside)
 {
     lv_core *core = pixels->core;
     if (outside && --pixels->outside_refs == 0)
-        core->pinned_bytes -= pixels->view.byte_count;
+        core->pinned_bytes -= lv_pixels_payload(pixels);
     if (--pixels->refs == 0)
     {
-        core->used -= pixels->allocation;
         --core->live_pixels;
-        free(pixels);
+        lv_pixels *owner     = pixels->owner;
+        const uint64_t limit = core->config.cpu_budget_bytes / 16 < UINT64_C(8) * 1024 * 1024 ?
+            core->config.cpu_budget_bytes / 16 :
+            UINT64_C(8) * 1024 * 1024;
+        if (!owner && !core->closing && core->free_pixel_count < 128 && pixels->allocation <= limit - core->free_pixel_bytes)
+        {
+            pixels->next_free       = core->free_pixels;
+            core->free_pixels       = pixels;
+            core->free_pixel_bytes += pixels->allocation;
+            ++core->free_pixel_count;
+        }
+        else
+        {
+            core->used -= pixels->allocation;
+            free(pixels);
+        }
+        if (owner)
+            lv_pixels_drop_locked(owner, false);
     }
     cnd_broadcast(&core->condition);
     core->resource_notify = true;
 }
+
 const lv_pixel_view *LV_CALL lv_pixels_get_view(const lv_pixels *pixels)
 {
     return pixels ? &pixels->view : nullptr;
@@ -157,7 +242,7 @@ void LV_CALL lv_pixels_retain(lv_pixels *pixels)
     ++pixels->refs;
     ++core->pixel_refs;
     if (pixels->outside_refs++ == 0)
-        core->pinned_bytes += pixels->view.byte_count;
+        core->pinned_bytes += lv_pixels_payload(pixels);
     mtx_unlock(&core->mutex);
 }
 void LV_CALL lv_pixels_release(lv_pixels *pixels)
@@ -288,7 +373,7 @@ bool lv_publish_tile(lv_core *core, lv_request *request, lv_pixels *pixels, lv_r
         return false;
     *event = (lv_event){.core = core};
     mtx_lock(&core->mutex);
-    while (!lv_stopped(core, request) && pixels->view.byte_count > core->config.queue_pixel_bytes - core->queued_bytes)
+    while (!lv_stopped(core, request) && lv_pixels_payload(pixels) > core->config.queue_pixel_bytes - core->queued_bytes)
         cnd_wait(&core->condition, &core->mutex);
     if (lv_stopped(core, request))
     {
@@ -303,7 +388,7 @@ bool lv_publish_tile(lv_core *core, lv_request *request, lv_pixels *pixels, lv_r
         event->view.as.frame_region = (lv_animation_region_info){request->frame.key, region};
     else
         event->view.as.region = region;
-    core->queued_bytes += pixels->view.byte_count;
+    core->queued_bytes += lv_pixels_payload(pixels);
     request->partial    = true;
     ++request->final_tiles;
     lv_enqueue_locked(core, event, request, animated ? LV_EVENT_ANIMATION_REGION_READY : LV_EVENT_REGION_READY);

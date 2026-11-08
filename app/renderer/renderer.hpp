@@ -74,6 +74,11 @@ struct ImageDesc
 {
     Size size;
     bool mipmaps = false;
+    enum class Magnification
+    {
+        linear,
+        nearest
+    } magnification = Magnification::linear;
 };
 struct Capabilities
 {

@@ -1,3 +1,4 @@
+#include "../fixtures/checkerboard.hpp"
 #include "viewer/viewer.hpp"
 
 #include <SDL3/SDL.h>
@@ -25,6 +26,7 @@ public:
     {
         Size size;
         std::uint64_t bytes;
+        liltview::render::ImageDesc::Magnification magnification;
     };
     std::unordered_map<std::uint32_t, Texture> textures;
     std::uint32_t next         = 1;
@@ -32,6 +34,7 @@ public:
     unsigned uploads           = 0;
     unsigned creates           = 0;
     std::uint64_t image_budget = 16 * 1024 * 1024;
+    std::uint32_t max_edge     = 4096;
 
     liltview::render::Capabilities capabilities() const override
     {
@@ -41,7 +44,7 @@ public:
             (void)id;
             bytes += texture.bytes;
         }
-        return {liltview::render::Backend::opengl3, 4096, image_budget, bytes};
+        return {liltview::render::Backend::opengl3, max_edge, image_budget, bytes};
     }
     Size framebuffer_size() const override
     {
@@ -49,9 +52,11 @@ public:
     }
     Image create_image(liltview::render::ImageDesc desc) override
     {
+        REQUIRE(desc.size.width <= max_edge);
+        REQUIRE(desc.size.height <= max_edge);
         ++creates;
         const auto slot = next++;
-        textures.emplace(slot, Texture{desc.size, liltview::render::image_storage_bytes(desc)});
+        textures.emplace(slot, Texture{desc.size, liltview::render::image_storage_bytes(desc), desc.magnification});
         return {1, slot, 1};
     }
     void update_image(Image image, Rect rect, Pixels pixels) override
@@ -247,4 +252,99 @@ TEST_CASE("animation GPU budget failure keeps the last complete texture", "[view
     CHECK(viewer.has_image());
     CHECK(renderer.creates == 1);
     CHECK(renderer.textures.size() == 1);
+}
+
+TEST_CASE("static details use local textures and rapid pan cancels obsolete regions", "[viewer][region]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    renderer.max_edge = 128;
+    liltview::Viewer viewer(renderer);
+    auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-viewer-region-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    const auto path = folder / "board.png";
+    liltview::test::checkerboard(path, 2048, 2048, 128);
+    viewer.open(path);
+    loop.settle(viewer);
+    REQUIRE(viewer.has_image());
+    CHECK(viewer.can_actual_size());
+    viewer.set_viewport({0, 0}, {512, 512});
+    viewer.actual_size();
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    CHECK(viewer.detail_ready());
+    CHECK(renderer.textures.size() > 2);
+    unsigned nearest = 0;
+    for (const auto &[id, texture] : renderer.textures)
+    {
+        (void)id;
+        nearest += texture.magnification == liltview::render::ImageDesc::Magnification::nearest;
+    }
+    CHECK(nearest > 1);
+    for (unsigned i = 0; i < 8; ++i)
+    {
+        viewer.pan(-80, 0);
+        viewer.pump();
+    }
+    loop.settle(viewer);
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.detail_ready());
+    viewer.fit();
+    viewer.pump();
+    CHECK(renderer.textures.size() == 1);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    std::filesystem::remove_all(folder);
+}
+TEST_CASE("changed file details cannot mix with an older FIT preview", "[viewer][region][source]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-viewer-source-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    const auto path = folder / "board.png";
+    liltview::test::checkerboard(path, 1024, 1024, 128);
+    viewer.open(path);
+    loop.settle(viewer);
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::app);
+        out.put('x');
+    }
+    viewer.set_viewport({0, 0}, {128, 96});
+    viewer.actual_size();
+    loop.settle(viewer);
+    CHECK(viewer.error() == LV_ERROR_SOURCE_CHANGED);
+    CHECK(viewer.has_image());
+    CHECK_FALSE(viewer.detail_ready());
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("failed replacement preserves the displayed source for sharp regional zoom", "[viewer][region][source]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    auto folder = std::filesystem::temp_directory_path() /
+        ("liltview-viewer-failed-replacement-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    const auto path = folder / "board.png";
+    liltview::test::checkerboard(path, 1024, 1024, 17);
+    viewer.open(path);
+    loop.settle(viewer);
+    REQUIRE(viewer.has_image());
+    viewer.open(folder / "missing.png");
+    loop.settle(viewer);
+    CHECK(viewer.error() == LV_ERROR_IO);
+    REQUIRE(viewer.has_image());
+    viewer.set_viewport({0, 0}, {128, 96});
+    viewer.actual_size();
+    loop.settle(viewer);
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.detail_ready());
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
 }

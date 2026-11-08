@@ -1,6 +1,6 @@
 # LiltView 目录与 CMake 构建
 
-已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 七类静态显示格式引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；超大图、扩展格式、REGION、预读及目录导航未实现。
+已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 七类静态显示格式引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；JPEG / PNG / 未压缩 BMP / TIFF 已支持大图 REGION，扩展格式、预读及目录导航仍未实现。
 
 ## 1. 当前目录
 
@@ -68,7 +68,7 @@ GIF 动画会话和逐帧请求已实现为 ABI 2，正式声明在 `core/includ
 
 | 目标 | 当前内容 | 启用条件 |
 | --- | --- | --- |
-| `LiltView::core` / `liltview_core` | C23 静态库：七类静态格式 FIT、队列、取消、像素与生命周期 | 总是 |
+| `LiltView::core` / `liltview_core` | C23 静态库：七类 FIT、四类 REGION、队列、取消、共享像素与生命周期 | 总是 |
 | `LiltView::renderer` | 统一 image / frame API 和 OpenGL 后端 | 应用组件开启 |
 | `liltview_viewer` | core 请求、像素上传和图片显示 | 应用组件开启 |
 | `liltview_jpeg` | ExternalProject 导入的静态 JPEG 库 | 总是 |
@@ -253,3 +253,5 @@ python3 scripts/register_desktop.py
 上面的 17 项是主窗口阶段的历史结果；资源异常与设置文件回归加入后，开发配置为 23 项，启用 `LILTVIEW_BUILD_DESKTOP_TESTS=ON` 后为 26 项。后者要求 EGL / OpenGL offscreen、Python、gdbus、dbus-run-session，测试使用私有总线和临时目录。详见 [项目级审查报告](PROJECT_REVIEW-2026-11-07.md)。
 
 函数职责已集中审查，UI 区域、D-Bus 方法和生命周期、平台字体、菜单构造、参数解析和维护脚本均作了拆分；详见 [可读性审查记录](CODE_REVIEW-2026-11-07.md)。About 新增作者 hui-livio、邮箱 yuanfeng1897@gmail.com 和可点击的项目地址。
+
+大图模块包括 `core/src/codecs/raster.c`（行采样）、`app/viewer/viewport.*`（双精度相机）、`tiles.*`（局部纹理所有权）、`details.cpp`（区域请求与版本验证）。`liltview_pixel_ownership` 比较真实指针及引用寿命；`liltview_make_checkerboard` 有界生成样本；可选的 `LILTVIEW_BUILD_LARGE_IMAGE_TESTS=ON` 增加 16K / 32K 验收，详见[实现与复现](LARGE_IMAGES.md)。

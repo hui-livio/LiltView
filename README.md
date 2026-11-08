@@ -4,7 +4,7 @@
 
 已支持 JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页的后台加载与显示，可通过命令行、打开菜单 / Ctrl+O 或拖放进入。支持适应窗口、EXIF 方向、中英双语错误提示，以及原有的系统顶栏菜单、主题和设置。渲染为独立模块：Linux 使用 OpenGL 3.3，接口为后续 Win32 + DX11 保持一致。
 
-位图文件上限 64 MiB、原始 RGBA 上限 256 MiB，还须满足 CPU / GPU 预算；SVG 另限制为 1 MiB、8192 元素、128 层。透明图按 straight RGBA8 显示；SVG 为基础静态子集，文字、裁剪、滤镜和内嵌图片等暂不支持。普通 GIF 已支持循环、透明合成和按时长自动播放；动画 WebP / APNG、静态超大图、渐进预览、目录导航及 REGION 暂未实现。完整范围见[格式兼容表](docs/IMAGE_FORMATS.md)。
+静态 JPEG、非交错 PNG、未压缩 BMP 和 TIFF 已支持大图预览与原尺寸区域显示：已验证 16K / 32K，16K 不是源尺寸上限。放大按原始像素显示，最终输出到 UI 通过指针及引用计数交付，不深拷贝像素。progressive JPEG / Adam7 PNG 等仍受 codec 工作集限制；普通动画、WebP、SVG 与 RLE BMP 保留各自有界范围。具体所有权、内存复用及测试见[大图实现](docs/LARGE_IMAGES.md)，格式子集见[兼容表](docs/IMAGE_FORMATS.md)。预读、缓存、扫描中渐进预览和目录导航仍待实现。
 
 ## 构建与检查
 

@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <string.h>
 #include "codec.h"
 
@@ -161,7 +162,7 @@ static bool bmp_rows(lv_core *core, lv_request *r, const uint8_t *data, const bm
         {
             if (h->depth <= 8)
             {
-                const uint32_t bit   = x * h->depth;
+                const uint64_t bit   = (uint64_t)x * h->depth;
                 const uint32_t index = ((uint32_t)p[bit / 8] >> (8 - h->depth - bit % 8)) & ((1u << h->depth) - 1);
                 if (!palette_pixel(data, h, index, out))
                     return false;
@@ -260,8 +261,13 @@ static bool bmp_rle(lv_core *core, lv_request *r, const uint8_t *data, size_t by
     return false; // End-of-bitmap escape is mandatory for an RLE stream.
 }
 
-void lv_decode_bmp(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)
+static void decode_rle_file(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)
 {
+    if (input->version.bytes > UINT64_C(64) * 1024 * 1024)
+    {
+        error->code = LV_ERROR_DIMENSION_LIMIT;
+        return;
+    }
     uint8_t *data = lv_input_read_all(core, r, input, error);
     if (!data)
         return;
@@ -277,9 +283,10 @@ void lv_decode_bmp(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
         goto done;
     image_bytes        = (size_t)h.size.width * h.size.height * 4;
     lv_size_u32 canvas = lv_fit_size(h.size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
-    if (!lv_frame_prepare(&f, h.size, canvas, LV_FORMAT_BMP, 0, image_bytes, error))
+    const bool native  = canvas.width == h.size.width && canvas.height == h.size.height;
+    if (!lv_frame_prepare(&f, h.size, canvas, LV_FORMAT_BMP, 0, native ? 0 : image_bytes, error))
         goto done;
-    image = lv_workspace_allocate(core, r, image_bytes);
+    image = native ? f.data : lv_workspace_allocate(core, r, image_bytes);
     if (!image)
     {
         error->code = LV_ERROR_OUT_OF_MEMORY;
@@ -294,15 +301,123 @@ void lv_decode_bmp(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
         error->code = LV_ERROR_CORRUPT_DATA;
         goto done;
     }
-    if (!lv_resample_rgba(core, r, image, h.size, f.data, canvas))
+    if (!native && !lv_resample_rgba(core, r, image, h.size, f.data, canvas))
         goto done;
-    lv_workspace_release(core, r, image, image_bytes);
+    if (image != f.data)
+        lv_workspace_release(core, r, image, image_bytes);
     image = nullptr;
     lv_workspace_release(core, r, data, (size_t)input->version.bytes + 1);
     data = nullptr;
     lv_frame_finish(&f, error);
 done:
-    lv_workspace_release(core, r, image, image_bytes);
+    if (image != f.data)
+        lv_workspace_release(core, r, image, image_bytes);
     lv_workspace_release(core, r, data, (size_t)input->version.bytes + 1);
     lv_frame_release(&f);
+}
+
+typedef struct bmp_input
+{
+    lv_request *request;
+    lv_input *input;
+    const uint8_t *header;
+    bmp_header layout;
+    uint8_t *packed;
+} bmp_input;
+
+static bool read_bmp_row(void *userdata, uint32_t y, uint8_t *out, lv_error_info *error)
+{
+    bmp_input *s          = userdata;
+    const bmp_header *h   = &s->layout;
+    const uint32_t file_y = h->top_down ? y : h->size.height - y - 1;
+    const uint64_t offset = h->offset + (uint64_t)file_y * h->row_bytes;
+    if (offset > LONG_MAX || fseek(s->input->file, (long)offset, SEEK_SET))
+    {
+        error->code = LV_ERROR_IO;
+        return false;
+    }
+    const size_t count      = fread(s->packed, 1, h->row_bytes, s->input->file);
+    s->request->bytes_read += count;
+    if (count != h->row_bytes)
+    {
+        error->code = ferror(s->input->file) ? LV_ERROR_IO : LV_ERROR_CORRUPT_DATA;
+        return false;
+    }
+    const uint8_t *p = s->packed;
+    for (uint32_t x = 0; x < h->size.width; ++x, out += 4)
+    {
+        if (h->depth <= 8)
+        {
+            const uint64_t bit   = (uint64_t)x * h->depth;
+            const uint32_t index = ((uint32_t)p[bit / 8] >> (8 - h->depth - bit % 8)) & ((1u << h->depth) - 1);
+            if (!palette_pixel(s->header, h, index, out))
+            {
+                error->code = LV_ERROR_CORRUPT_DATA;
+                return false;
+            }
+        }
+        else if (h->depth == 24)
+        {
+            out[0] = p[(size_t)x * 3 + 2];
+            out[1] = p[(size_t)x * 3 + 1];
+            out[2] = p[(size_t)x * 3];
+            out[3] = 255;
+        }
+        else
+        {
+            const uint32_t pixel = h->depth == 16 ? u16(p + (size_t)x * 2) : u32(p + (size_t)x * 4);
+            for (unsigned c = 0; c < 4; ++c)
+                out[c] = channel(pixel, h->masks[c]);
+        }
+    }
+    return true;
+}
+
+void lv_decode_bmp(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)
+{
+    uint8_t header[4096]  = {0};
+    const size_t count    = fread(header, 1, sizeof header, input->file);
+    r->bytes_read        += count;
+    bmp_input source      = {.request = r, .input = input, .header = header};
+    error->code           = LV_ERROR_CORRUPT_DATA;
+    if (count < 26 || (uint64_t)14 + u32(header + 14) > count || input->version.bytes > SIZE_MAX ||
+        !bmp_header_read(header, (size_t)input->version.bytes, &source.layout, error))
+        return;
+    if (source.layout.palette + (uint64_t)source.layout.colors * source.layout.palette_stride > count)
+        return;
+    error->code         = 0;
+    const bmp_header *h = &source.layout;
+    if (h->compression == 1 || h->compression == 2)
+    {
+        if (r->desc.target.kind == LV_TARGET_REGION)
+        {
+            error->code = LV_ERROR_TARGET_UNSUPPORTED;
+            return;
+        }
+        if (fseek(input->file, 0, SEEK_SET))
+        {
+            error->code = LV_ERROR_IO;
+            return;
+        }
+        decode_rle_file(core, r, input, error);
+        return;
+    }
+    lv_size_u32 canvas;
+    if (!lv_target_canvas(r, h->size, LV_ORIENTATION_NORMAL, &canvas, error))
+        return;
+    lv_frame frame = {.core = core, .request = r, .input = input};
+    if (!lv_frame_prepare(&frame, h->size, canvas, LV_FORMAT_BMP, LV_CAP_REGION_DECODE,
+                          h->row_bytes + (uint64_t)h->size.width * 8, error))
+        return;
+    source.packed = lv_workspace_allocate(core, r, h->row_bytes);
+    if (!source.packed)
+        error->code = LV_ERROR_OUT_OF_MEMORY;
+    else if (lv_frame_info(&frame, error) && lv_raster_read(&frame, h->size, read_bmp_row, &source, error))
+    {
+        lv_workspace_release(core, r, source.packed, h->row_bytes);
+        source.packed = nullptr;
+        lv_frame_finish(&frame, error);
+    }
+    lv_workspace_release(core, r, source.packed, h->row_bytes);
+    lv_frame_release(&frame);
 }

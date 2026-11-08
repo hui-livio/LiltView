@@ -336,7 +336,7 @@ TEST_CASE("unsupported features reject synchronously and clear the request ID", 
     CHECK(e.view().as.error.code == LV_ERROR_IO);
 }
 
-TEST_CASE("oversized JPEG source is rejected even for a tiny FIT target", "[jpeg][limits]")
+TEST_CASE("JPEG format dimension limit is distinct from streaming large-file support", "[jpeg][limits]")
 {
     Files files;
     auto data    = jpeg();
@@ -351,16 +351,7 @@ TEST_CASE("oversized JPEG source is rejected even for a tiny FIT target", "[jpeg
         }
     }
     REQUIRE(changed);
-    // The codec itself rejects 65535; also exercise our lower original-RGBA cap.
-    for (std::size_t i = 0; i + 8 < data.size(); ++i)
-    {
-        if (data[i] == 0xff && data[i + 1] == 0xc0)
-        {
-            data[i + 5] = data[i + 7] = 0x40;
-            data[i + 6] = data[i + 8] = 0;
-            break;
-        }
-    }
+    // JPEG itself limits dimensions; this is not an application 16K cap.
     {
         Engine engine;
         engine.submit(files.write("huge-dimensions.jpg", data), {1, 1});
@@ -372,7 +363,5 @@ TEST_CASE("oversized JPEG source is rejected even for a tiny FIT target", "[jpeg
     std::filesystem::resize_file(path, 64ULL * 1024 * 1024 + 1);
     Engine engine;
     engine.submit(path, {1, 1});
-    Event error(engine.next());
-    REQUIRE(error.view().type == LV_EVENT_ERROR);
-    CHECK(error.view().as.error.code == LV_ERROR_DIMENSION_LIMIT);
+    CHECK(collect(engine).terminal == LV_EVENT_COMPLETE);
 }

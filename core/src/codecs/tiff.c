@@ -152,8 +152,12 @@ static bool tiff_header(lv_core *core, TIFF *tif, lv_size_u32 *size, uint16_t *o
         error->code = LV_ERROR_CORRUPT_DATA;
         return false;
     }
-    if (!lv_bitmap_size(core, size->width, size->height, error))
+    (void)core;
+    if (!size->width || !size->height || size->width > INT32_MAX || size->height > INT32_MAX)
+    {
+        error->code = LV_ERROR_DIMENSION_LIMIT;
         return false;
+    }
     uint16_t depth = 0, samples = 0, sample_format = 0, compression = 0, photo = 0;
     TIFFGetFieldDefaulted(tif, TIFFTAG_BITSPERSAMPLE, &depth);
     TIFFGetFieldDefaulted(tif, TIFFTAG_SAMPLESPERPIXEL, &samples);
@@ -177,11 +181,9 @@ static bool tiff_header(lv_core *core, TIFF *tif, lv_size_u32 *size, uint16_t *o
     return true;
 }
 
-static bool tiff_rgba(tiff_input *source, TIFF *tif, uint32_t *raster, lv_size_u32 size, lv_error_info *error)
+static bool tiff_rgba(tiff_input *source, TIFF *tif, uint32_t *raster, lv_size_u32 size, uint32_t origin_x, uint32_t origin_y,
+                      lv_error_info *error)
 {
-    uint16_t extras = 0, *types = nullptr;
-    TIFFGetFieldDefaulted(tif, TIFFTAG_EXTRASAMPLES, &extras, &types);
-    const bool alpha = extras > 0 && types && (types[0] == EXTRASAMPLE_ASSOCALPHA || types[0] == EXTRASAMPLE_UNASSALPHA);
     char message[1024];
     TIFFRGBAImage image;
     if (!TIFFRGBAImageBegin(&image, tif, 1, message))
@@ -190,76 +192,131 @@ static bool tiff_rgba(tiff_input *source, TIFF *tif, uint32_t *raster, lv_size_u
         return false;
     }
     // Keep raw source coordinates. The existing viewer applies all 8 orientations.
+    image.col_offset      = (int32_t)origin_x;
+    image.row_offset      = (int32_t)origin_y;
     image.orientation     = ORIENTATION_TOPLEFT;
     image.req_orientation = ORIENTATION_TOPLEFT;
     const bool ok         = TIFFRGBAImageGet(&image, raster, size.width, size.height) != 0;
     TIFFRGBAImageEnd(&image);
     if (!ok || source->failure)
         return false;
-    for (uint32_t y = 0; y < size.height; ++y)
+
+    return true;
+}
+
+static bool tiff_sample_blocks(tiff_input *source, TIFF *tif, lv_frame *f, uint32_t *raster, lv_size_u32 block,
+                               lv_error_info *error)
+{
+    uint16_t extras = 0, *types = nullptr;
+    TIFFGetFieldDefaulted(tif, TIFFTAG_EXTRASAMPLES, &extras, &types);
+    const bool alpha         = extras > 0 && types && (types[0] == EXTRASAMPLE_ASSOCALPHA || types[0] == EXTRASAMPLE_UNASSALPHA);
+    const lv_rect_u32 region = f->info.region;
+    const lv_size_u32 size = f->info.source_size, canvas = f->info.canvas;
+    for (uint32_t y = 0; y < region.height;)
     {
-        if (lv_stopped(source->core, source->request))
-            return false;
-        for (uint32_t x = 0; x < size.width; ++x)
+        const uint32_t sy = lv_sample_nearest(region.y + y, size.height, canvas.height);
+        const uint32_t by = sy / block.height * block.height;
+        uint32_t end_y    = y + 1;
+        while (end_y < region.height &&
+               lv_sample_nearest(region.y + end_y, size.height, canvas.height) / block.height == by / block.height)
+            ++end_y;
+        for (uint32_t x = 0; x < region.width;)
         {
-            uint32_t *pixel      = raster + (size_t)y * size.width + x;
-            const uint32_t value = *pixel;
-            const uint32_t a     = alpha ? TIFFGetA(value) : 255;
-            uint8_t *out         = (uint8_t *)pixel;
-            // libtiff returns premultiplied numeric ABGR, independent of endian.
-            const uint32_t colors[3] = {TIFFGetR(value), TIFFGetG(value), TIFFGetB(value)};
-            for (unsigned c = 0; c < 3; ++c)
+            if (lv_stopped(source->core, source->request))
+                return false;
+            const uint32_t sx = lv_sample_nearest(region.x + x, size.width, canvas.width);
+            const uint32_t bx = sx / block.width * block.width;
+            uint32_t end_x    = x + 1;
+            while (end_x < region.width &&
+                   lv_sample_nearest(region.x + end_x, size.width, canvas.width) / block.width == bx / block.width)
+                ++end_x;
+            const lv_size_u32 extent = {size.width - bx < block.width ? size.width - bx : block.width,
+                                        size.height - by < block.height ? size.height - by : block.height};
+            if (!tiff_rgba(source, tif, raster, extent, bx, by, error))
+                return false;
+
+            for (uint32_t oy = y; oy < end_y; ++oy)
             {
-                uint32_t v = a ? (colors[c] * 255 + a / 2) / a : 0;
-                out[c]     = (uint8_t)(v > 255 ? 255 : v);
+                const uint32_t py  = lv_sample_nearest(region.y + oy, size.height, canvas.height) - by;
+                uint8_t *out       = nullptr;
+                uint32_t remaining = 0;
+                for (uint32_t ox = x; ox < end_x; ++ox, out += 4, --remaining)
+                {
+                    if (!remaining)
+                        out = lv_frame_span(f, ox, oy, &remaining);
+                    const uint32_t px    = lv_sample_nearest(region.x + ox, size.width, canvas.width) - bx;
+                    const uint32_t value = raster[(size_t)py * extent.width + px], a = alpha ? TIFFGetA(value) : 255;
+                    const uint32_t channels[3] = {TIFFGetR(value), TIFFGetG(value), TIFFGetB(value)};
+                    for (unsigned c = 0; c < 3; ++c)
+                    {
+                        const uint32_t v = a ? (channels[c] * 255 + a / 2) / a : 0;
+                        out[c]           = (uint8_t)(v > 255 ? 255 : v);
+                    }
+                    out[3] = (uint8_t)a;
+                }
             }
-            out[3] = (uint8_t)a;
+            x = end_x;
         }
+        y = end_y;
     }
     return true;
 }
 
 void lv_decode_tiff(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)
 {
-    // The per-handle cumulative allocator limit also bounds malicious IFD tables.
     if (!lv_reserve(core, r, UINT64_C(16) * 1024 * 1024))
     {
         error->code = LV_ERROR_MEMORY_BUDGET;
         return;
     }
-    tiff_input source = {.core = core, .request = r, .input = input};
-    TIFF *tif         = tiff_open(&source, error);
-    lv_frame f        = {.core = core, .request = r, .input = input};
-    uint8_t *raster = nullptr, *raw = nullptr;
-    size_t bytes = 0, raw_bytes = 0;
+    tiff_input source  = {.core = core, .request = r, .input = input};
+    TIFF *tif          = tiff_open(&source, error);
+    lv_frame frame     = {.core = core, .request = r, .input = input};
+    uint32_t *raster   = nullptr;
+    uint8_t *raw       = nullptr;
+    size_t block_bytes = 0, raw_bytes = 0;
     if (!tif || source.failure)
         goto done;
-    lv_size_u32 size     = {0};
-    uint16_t orientation = 1;
-    if (!tiff_header(core, tif, &size, &orientation, error))
+    lv_size_u32 size     = {0}, canvas;
+    uint16_t orientation = 1, compression = 0;
+    if (!tiff_header(core, tif, &size, &orientation, error) || !lv_target_canvas(r, size, orientation, &canvas, error))
         goto done;
-    uint16_t compression = 0;
     TIFFGetFieldDefaulted(tif, TIFFTAG_COMPRESSION, &compression);
+    lv_size_u32 block = {256, 256};
+    if (!TIFFIsTiled(tif))
+    {
+        uint32_t strip_height = 1;
+        TIFFGetFieldDefaulted(tif, TIFFTAG_ROWSPERSTRIP, &strip_height);
+        block.width  = size.width < 1024 ? size.width : 1024;
+        block.height = strip_height < 64 ? strip_height : 64;
+        if (!block.height)
+            block.height = 1;
+    }
     if (TIFFIsTiled(tif) && compression == COMPRESSION_NONE)
     {
-        const tmsize_t tile_bytes = TIFFTileSize(tif);
-        if (tile_bytes <= 0)
+        const tmsize_t tile = TIFFTileSize(tif);
+        if (tile <= 0)
         {
             error->code = LV_ERROR_CORRUPT_DATA;
             goto done;
         }
-        if (tile_bytes > 8 * 1024 * 1024)
+        if (tile > 8 * 1024 * 1024)
         {
             error->code = LV_ERROR_MEMORY_BUDGET;
             goto done;
         }
-        raw_bytes = (size_t)tile_bytes;
+        raw_bytes = (size_t)tile;
     }
-    const lv_size_u32 canvas = lv_fit_size(size, r->desc.target.as.fit_bounds, orientation);
-    bytes                    = (size_t)size.width * size.height * 4;
-    // Raw RGBA plus conservative JPEG/zlib workspace outside TIFF's allocator.
-    if (!lv_frame_prepare(&f, size, canvas, LV_FORMAT_TIFF, 0, (uint64_t)bytes * 2 + raw_bytes, error))
+    block_bytes = (size_t)block.width * block.height * 4;
+    if (!lv_frame_prepare(&frame, size, canvas, LV_FORMAT_TIFF, LV_CAP_REGION_DECODE, block_bytes + raw_bytes, error))
         goto done;
+    frame.info.orientation = orientation;
+    raster                 = lv_workspace_allocate(core, r, block_bytes);
+    if (!raster)
+    {
+        error->code = LV_ERROR_OUT_OF_MEMORY;
+        goto done;
+    }
     if (raw_bytes)
     {
         raw = lv_workspace_allocate(core, r, raw_bytes);
@@ -268,34 +325,25 @@ void lv_decode_tiff(lv_core *core, lv_request *r, lv_input *input, lv_error_info
             error->code = LV_ERROR_OUT_OF_MEMORY;
             goto done;
         }
-        // LibTIFF 4.7.2 validates uncompressed tile size against the read-buffer
-        // capacity. Its default rounding breaks small tiles; supply exact storage.
         if (!TIFFReadBufferSetup(tif, raw, (tmsize_t)raw_bytes))
             goto done;
     }
-    f.info.orientation = orientation;
-    raster             = lv_workspace_allocate(core, r, bytes);
-    if (!raster)
+    if (lv_frame_info(&frame, error) && tiff_sample_blocks(&source, tif, &frame, raster, block, error))
     {
-        error->code = LV_ERROR_OUT_OF_MEMORY;
-        goto done;
+        TIFFClose(tif);
+        tif = nullptr;
+        lv_workspace_release(core, r, raster, block_bytes);
+        raster = nullptr;
+        lv_workspace_release(core, r, raw, raw_bytes);
+        raw = nullptr;
+        lv_frame_finish(&frame, error);
     }
-    if (!lv_frame_info(&f, error) || !tiff_rgba(&source, tif, (uint32_t *)raster, size, error) ||
-        !lv_resample_rgba(core, r, raster, size, f.data, canvas))
-        goto done;
-    TIFFClose(tif);
-    tif = nullptr;
-    lv_workspace_release(core, r, raw, raw_bytes);
-    raw = nullptr;
-    lv_workspace_release(core, r, raster, bytes);
-    raster = nullptr;
-    lv_frame_finish(&f, error);
 done:
     if (tif)
         TIFFClose(tif);
-    lv_workspace_release(core, r, raw, raw_bytes);
     if (!error->code && !r->final_tiles && !lv_stopped(core, r))
         error->code = source.failure ? source.failure : LV_ERROR_CORRUPT_DATA;
-    lv_workspace_release(core, r, raster, bytes);
-    lv_frame_release(&f);
+    lv_workspace_release(core, r, raster, block_bytes);
+    lv_workspace_release(core, r, raw, raw_bytes);
+    lv_frame_release(&frame);
 }

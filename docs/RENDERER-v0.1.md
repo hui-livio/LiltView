@@ -79,12 +79,12 @@ public:
 
 - `create_image` 分配指定尺寸并初始化透明像素，未上传区域不暴露未定义显存；不放大或解码源图。
 - `update_image` 检查源大小、行步长、`byte_count` 和目标矩形，所有地址计算都受检；目标矩形必须落在纹理边界内。
-- 所有纹理创建 / 更新 / 销毁都发生在 render thread。`update_image` 返回后不再读取调用者的 data；后端若不能直接完成复制，应先复制到 renderer 持有的 staging 内存。调用方可以随后释放 core event / pixels。
-- 一张纹理可以更新多个矩形；首版 JPG 将 core 最终 tiles 分帧更新到一张 FIT 纹理。默认线性过滤，边缘 clamp。UV、FIT、缩放和平移由 viewer 决定，core 像素保持未旋转的左上原点。
+- 所有纹理创建 / 更新 / 销毁都发生在 render thread。`update_image` 返回后不再读取调用者的 data；当前后端直接按源 stride 上传，不创建 CPU 像素副本；未来异步上传需要显式设计引用保留与完成通知。调用方可以随后释放 core event / pixels。
+- 一张纹理可以更新多个矩形；首版 JPG 将 core 最终 tiles 分帧更新到一张 FIT 纹理。默认线性过滤，边缘 clamp；原始分辨率细节的 ImageDesc::Magnification::nearest 在放大时保留像素边界。UV、FIT、缩放和平移由 viewer 决定，core 像素保持未旋转的左上原点。
 - alpha 遵循 core straight-alpha 约定。透明图像的棋盘背景由 viewer 绘制，renderer 不修改像素值。
 - 句柄使用 owner + slot + generation；销毁后代数递增，耗尽不复用。访问失效 / 外来句柄抛 invalid_handle，destroy 对失效句柄幂等。当前帧已引用的 image 必须在 render_frame 完成后销毁，后端处理 GPU 指令中的资源引用。
 
-core 像素同步上传后即可释放，不由 renderer 保留。后续如测量证明上传瓶颈，再添加 renderer 自己所有的 PBO / D3D staging，不改变调用方像素借用规则。
+core 像素同步上传后即可释放，不由 renderer 保留。后续如测量证明上传瓶颈，可评估 PBO / D3D 上传资源；不得引入额外 CPU 图片深拷贝，异步保留需先设计显式引用和完成通知。
 
 ### 3.2 帧时序
 
@@ -120,7 +120,7 @@ CPU 像素仍在 update_image 返回后 release，无需将 core 引用保留到
 - `backend/opengl/` 是唯一包含 `SDL_opengl.h`、OpenGL loader 和 `imgui_impl_opengl3.h` 的应用模块。
 - SDL Window 创建后，由 renderer 创建并 make-current GL context，设置 swap interval，初始化 ImGui OpenGL3 backend。
 - 初始化查询 `GL_MAX_TEXTURE_SIZE` 与 framebuffer 像素尺寸。
-- 图片使用 RGBA8 texture；上传适配 core 行步长，保存并恢复会影响纹理上传和 ImGui 的 GL state；需要时将像素复制到 renderer staging。
+- 图片使用 RGBA8 texture；上传适配 core 行步长，保存并恢复会影响纹理上传和 ImGui 的 GL state；用 GL_UNPACK_ROW_LENGTH 或逐行提交处理跨度，不创建 CPU staging 副本。
 - 每帧由 renderer 设置 viewport / clear，调用 ImGui OpenGL3 backend，然后通过 SDL 交换缓冲。
 - 应用图标、About 图像和截图也通过 renderer API；Application 不调用任何 `gl*`。
 
@@ -136,7 +136,7 @@ CPU 像素仍在 update_image 返回后 release，无需将 core 引用保留到
 
 ## 5. 图片范围和失败行为
 
-首版显示一张 RGBA8 FIT 纹理，解码格式差异留在 C core；不实现 tiled GPU image、区域缓存、原尺寸超大画布、多级纹理或 page table。输出受设备纹理尺寸、renderer GPU image budget 和 framebuffer 可视范围共同约束。100% 仅在 FIT 未缩小源图时启用；细节、缩放到超出 FIT 输出质量和区域分块作为后续工作。
+当前预览使用有界 RGBA8 FIT 纹理，静态 REGION 细节使用多个局部 GPU image；100% 和滚轮放大请求原始分辨率细节，缩放 / 平移及双精度相机由 viewer 负责。源图尺寸无需满足单纹理边长，分块分配仍遵守 GPU 总预算。不实现磁盘缓存或虚拟纹理 page table；见[大图实现](LARGE_IMAGES.md)。
 
 纹理尺寸超限、预算不足、分配失败和非法像素视图必须返回明确 renderer 状态。UI 显示双语错误，同时保留窗口和重新打开操作；目录导航仍待实现。不能回退到把 GL / D3D 原始 ID 传进 Shell。
 
@@ -160,3 +160,5 @@ CPU 与 GPU 预算独立。renderer 不持有 core 像素引用；一次同步�
 1. Dear ImGui v1.92.0 官方后端文档：<https://github.com/ocornut/imgui/blob/v1.92.0/docs/BACKENDS.md>
 2. Microsoft Direct3D 11 `UpdateSubresource`：<https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-updatesubresource>
 3. Microsoft DXGI `ResizeBuffers`：<https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiswapchain-resizebuffers>
+
+2026-11-08 补充验证：真实 OpenGL 单张 2×2 棋盘放大逐像素检查、32K 源在最大 128px 局部纹理下的 FIT / 原尺寸 / 放大 / 平移 / 缩小回读，以及 core 指针交付、stride 视图、引用存活和池复用。未来 DX11 需实现同一 magnification 与源 row pitch 契约；目前仍未实现或验证 Windows。

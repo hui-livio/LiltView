@@ -3,7 +3,7 @@
 - 正式项目名：LiltView
 - 文档版本：v0.1
 - 日期：2026-11-06
-- 状态：独立 renderer 和 JPEG / PNG / 基础 SVG / 静态 WebP / BMP 显示已实现；预读、超大图与扩展格式待实现
+- 状态：独立 renderer 和 JPEG / PNG / 基础 SVG / 静态 WebP / BMP 显示已实现；静态大图 REGION 已实现；预读与扩展格式待实现
 - 首发平台：Arch Linux
 - 后续方向：复用 C 核心，增加 Windows / Win32 界面
 
@@ -376,7 +376,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 8. 公共 C API 契约草案
 
-本节是接口摘要。完整声明见 [Core API v0.1](CORE_API-v0.1.md)，调用时序、内存管理、生命周期和边界验收见 [Core Runtime](CORE_RUNTIME-v0.1.md)；七类格式 DISPLAY / FIT 及 GIF 会话已实现，缓存和静态超大图仍是后续约束。
+本节是接口摘要。完整声明见 [Core API v0.1](CORE_API-v0.1.md)，调用时序、内存管理、生命周期和边界验收见 [Core Runtime](CORE_RUNTIME-v0.1.md)；七类格式 DISPLAY / FIT 及 GIF 会话已实现，静态大图 REGION 已实现，缓存仍为后续约束；实际边界及所有权见[大图说明](LARGE_IMAGES.md)。
 
 ### 8.1 操作
 
@@ -434,7 +434,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 10. 建议代码结构
 
-以下展示完整规划结构；实际目录和目标以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前已有七类格式解码、GIF 播放、renderer、主窗口、双语、日志和设置；规划目录不等于超大图、缓存和扩展格式已实现。
+以下展示完整规划结构；实际目录和目标以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前已有七类格式解码、GIF 播放、renderer、主窗口、双语、日志和设置；静态大图已实现，规划目录仍不代表缓存和扩展格式已完成。
 
 ```text
 LiltView/

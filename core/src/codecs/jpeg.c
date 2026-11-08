@@ -15,8 +15,9 @@ typedef struct jpeg_state
     jmp_buf escape;
     FILE *file;
     bool created, warning;
-    uint8_t *row, *image;
-    size_t row_bytes, image_bytes;
+    lv_frame frame;
+    lv_rows rows;
+    bool reading_header;
     lv_error_code failure;
     lv_orientation orientation;
     struct jpeg_source_mgr input;
@@ -73,6 +74,11 @@ static boolean input_fill(j_decompress_ptr d)
             s->failure = LV_ERROR_IO;
         ERREXIT(d, JERR_INPUT_EOF);
     }
+    if (s->reading_header && s->request->bytes_read + bytes > UINT64_C(2) * 1024 * 1024)
+    {
+        s->failure = LV_ERROR_DIMENSION_LIMIT;
+        longjmp(s->escape, 1);
+    }
     s->remaining             -= bytes;
     s->request->bytes_read   += bytes;
     s->input.next_input_byte  = s->input_buffer;
@@ -128,47 +134,20 @@ static void exif_marker(j_decompress_ptr decoder)
     }
 }
 
-static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s, lv_size_u32 canvas)
+static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s)
 {
     struct jpeg_decompress_struct *d = &s->decoder;
-    uint32_t output_y                = 0;
     while (d->output_scanline < d->output_height)
     {
         if (lv_stopped(core, request))
             return false;
-        const uint32_t input_y = d->output_scanline;
-        JSAMPROW row           = s->row + (size_t)(input_y & 1u) * d->output_width * 4;
+        const uint32_t y = d->output_scanline;
+        JSAMPROW row     = lv_rows_buffer(&s->rows, y);
         if (jpeg_read_scanlines(d, &row, 1) != 1)
             return false;
-        while (output_y < canvas.height)
-        {
-            uint64_t sy = ((uint64_t)output_y * 2 + 1) * d->output_height * 65536 / ((uint64_t)canvas.height * 2);
-            sy          = sy >= 32768 ? sy - 32768 : 0;
-            uint32_t y0 = (uint32_t)(sy >> 16), y1 = y0 + 1 < d->output_height ? y0 + 1 : y0;
-            if (y1 > input_y)
-                break;
-            const uint32_t fy     = (uint32_t)(sy & 65535);
-            const uint8_t *top    = s->row + (size_t)(y0 & 1u) * d->output_width * 4;
-            const uint8_t *bottom = s->row + (size_t)(y1 & 1u) * d->output_width * 4;
-            uint8_t *out          = s->image + (size_t)output_y * canvas.width * 4;
-            for (uint32_t x = 0; x < canvas.width; ++x)
-            {
-                uint64_t sx     = ((uint64_t)x * 2 + 1) * d->output_width * 65536 / ((uint64_t)canvas.width * 2);
-                sx              = sx >= 32768 ? sx - 32768 : 0;
-                const size_t x0 = (size_t)(sx >> 16), x1 = x0 + 1 < d->output_width ? x0 + 1 : x0;
-                const uint32_t fx = (uint32_t)(sx & 65535);
-                for (unsigned c = 0; c < 3; ++c)
-                {
-                    const uint64_t a       = (uint64_t)top[x0 * 4 + c] * (65536 - fx) + (uint64_t)top[x1 * 4 + c] * fx;
-                    const uint64_t b       = (uint64_t)bottom[x0 * 4 + c] * (65536 - fx) + (uint64_t)bottom[x1 * 4 + c] * fx;
-                    out[(size_t)x * 4 + c] = (uint8_t)((a * (65536 - fy) + b * fy + (UINT64_C(1) << 31)) >> 32);
-                }
-                out[(size_t)x * 4 + 3] = 255;
-            }
-            ++output_y;
-        }
+        lv_rows_push(&s->rows, y);
     }
-    return output_y == canvas.height;
+    return s->rows.next_y == s->frame.info.region.height;
 }
 
 static void read_header(jpeg_state *s, const lv_file_version *version)
@@ -182,25 +161,23 @@ static void read_header(jpeg_state *s, const lv_file_version *version)
     jpeg_create_decompress(d);
     // Bounded header input and image limits keep marker/coefficient memory finite.
     jpeg_save_markers(d, JPEG_APP0 + 1, 65535);
-    s->remaining = version->bytes;
-    s->input     = (struct jpeg_source_mgr){.init_source       = input_init,
-                                            .fill_input_buffer = input_fill,
-                                            .skip_input_data   = input_skip,
-                                            .resync_to_restart = jpeg_resync_to_restart,
-                                            .term_source       = input_term};
-    d->src       = &s->input;
+    s->remaining      = version->bytes;
+    s->input          = (struct jpeg_source_mgr){.init_source       = input_init,
+                                                 .fill_input_buffer = input_fill,
+                                                 .skip_input_data   = input_skip,
+                                                 .resync_to_restart = jpeg_resync_to_restart,
+                                                 .term_source       = input_term};
+    d->src            = &s->input;
+    s->reading_header = true;
     jpeg_read_header(d, TRUE);
+    s->reading_header = false;
     exif_marker(d);
 }
 
-// Reserve the whole ordinary-image plan before the decoder grows its working set.
-static bool prepare_output(lv_core *core, lv_request *r, jpeg_state *s, lv_error_info *error, lv_size_u32 *canvas_out,
-                           uint64_t *reserve_out)
+static bool prepare_output(lv_request *r, jpeg_state *s, lv_error_info *error)
 {
     struct jpeg_decompress_struct *d = &s->decoder;
-    const uint64_t original          = (uint64_t)d->image_width * d->image_height * 4;
-    if (!d->image_width || !d->image_height || original > core->config.large_pixel_bytes ||
-        original > UINT64_C(256) * 1024 * 1024 || d->data_precision != 8)
+    if (!d->image_width || !d->image_height || d->data_precision != 8)
     {
         error->code = LV_ERROR_DIMENSION_LIMIT;
         return false;
@@ -210,121 +187,52 @@ static bool prepare_output(lv_core *core, lv_request *r, jpeg_state *s, lv_error
         error->code = LV_ERROR_FORMAT_UNSUPPORTED;
         return false;
     }
-    const lv_size_u32 canvas =
-        lv_fit_size((lv_size_u32){d->image_width, d->image_height}, r->desc.target.as.fit_bounds, s->orientation);
+    const lv_size_u32 source = {d->image_width, d->image_height};
+    lv_size_u32 canvas;
+    if (!lv_target_canvas(r, source, s->orientation, &canvas, error))
+        return false;
     d->out_color_space = JCS_EXT_RGBA;
-    for (unsigned numerator = 1; numerator <= 8; ++numerator)
+    for (unsigned n = 1; n <= 8; ++n)
     {
-        d->scale_num   = numerator;
+        d->scale_num   = n;
         d->scale_denom = 8;
         jpeg_calc_output_dimensions(d);
         if (d->output_width >= canvas.width && d->output_height >= canvas.height)
             break;
     }
-    const uint64_t image_bytes = (uint64_t)canvas.width * canvas.height * 4;
-    const uint64_t row_bytes   = (uint64_t)d->output_width * 8;
-    if (image_bytes > SIZE_MAX || row_bytes > SIZE_MAX)
-    {
-        error->code = LV_ERROR_DIMENSION_LIMIT;
+    const uint64_t original = (uint64_t)source.width * source.height * 4;
+    const uint64_t codec    = d->progressive_mode ? original * 2 : (uint64_t)d->image_width * 4 * 128;
+    if (!lv_frame_prepare(&s->frame, source, canvas, LV_FORMAT_JPEG, LV_CAP_SCALED_DECODE | LV_CAP_REGION_DECODE,
+                          codec + (uint64_t)d->output_width * 8, error))
         return false;
-    }
-    s->row_bytes   = (size_t)row_bytes; // Two rows for bilinear FIT resampling.
-    s->image_bytes = (size_t)image_bytes;
-    // Codec internal allocations cannot be intercepted: conservative allowance plus measured limits, not an RSS cap.
-    const uint64_t allowance      = s->header_allowance + original * (d->progressive_mode ? 2 : 1);
-    const uint64_t edge           = core->config.tile_edge;
-    const uint64_t count          = ((canvas.width + edge - 1) / edge) * ((canvas.height + edge - 1) / edge);
-    const uint64_t output_reserve = s->image_bytes + count * (sizeof(lv_pixels) + sizeof(lv_event));
-    if (!lv_reserve(core, r, allowance + s->row_bytes + s->image_bytes + output_reserve - s->header_allowance))
-    {
-        error->code           = LV_ERROR_MEMORY_BUDGET;
-        error->required_bytes = allowance + s->row_bytes + s->image_bytes + output_reserve;
-        error->limit_bytes    = core->config.cpu_budget_bytes;
-        return false;
-    }
-    s->row   = lv_workspace_allocate(core, r, s->row_bytes);
-    s->image = lv_workspace_allocate(core, r, s->image_bytes);
-    if (!s->row || !s->image)
-    {
-        error->code = LV_ERROR_OUT_OF_MEMORY;
-        return false;
-    }
-    *canvas_out  = canvas;
-    *reserve_out = output_reserve;
-    return true;
-}
-
-static bool publish_metadata(lv_core *core, lv_request *r, jpeg_state *s, lv_error_info *error, const lv_file_version *version,
-                             lv_size_u32 canvas)
-{
-    struct jpeg_decompress_struct *d = &s->decoder;
-    const uint64_t original          = (uint64_t)d->image_width * d->image_height * 4;
-    lv_image_info info = {.format       = LV_FORMAT_JPEG,
-                          .flags        = LV_INFO_SOURCE_SIZE_KNOWN | LV_INFO_FILE_BYTES_KNOWN,
-                          .source_size  = {d->image_width, d->image_height},
-                          .file_bytes   = version->bytes,
-                          .orientation  = s->orientation,
-                          .capabilities = LV_CAP_SCALED_DECODE,
-                          .load_mode =
-                              original <= core->config.small_pixel_bytes && version->bytes <= core->config.small_file_bytes ?
-                              LV_LOAD_SMALL :
-                              LV_LOAD_INCREMENTAL,
-                          .canvas    = canvas,
-                          .region    = {0, 0, canvas.width, canvas.height},
-                          .tile_edge = core->config.tile_edge};
-    if (!lv_publish_info(core, r, &info, version))
-    {
-        error->code = LV_ERROR_INTERNAL;
-        return false;
-    }
-    return true;
+    s->frame.info.orientation = s->orientation;
+    return lv_rows_init(&s->rows, &s->frame, (lv_size_u32){d->output_width, d->output_height}, error);
 }
 
 static void run_decode(lv_core *core, lv_request *r, jpeg_state *s, lv_input *input, lv_error_info *error)
 {
-    const lv_file_version version = input->version;
-    lv_size_u32 canvas;
-    uint64_t output_reserve = 0;
-    s->file                 = input->file;
-    s->header_allowance     = 2ULL * 1024 * 1024 + version.bytes * 2;
+    s->file  = input->file;
+    s->frame = (lv_frame){.core = core, .request = r, .input = input};
+    // Saved EXIF markers are bounded by the 2 MiB header-input limit.
+    s->header_allowance = UINT64_C(8) * 1024 * 1024;
     if (!lv_reserve(core, r, s->header_allowance))
     {
         error->code = LV_ERROR_MEMORY_BUDGET;
         return;
     }
-    read_header(s, &version);
-    if (!prepare_output(core, r, s, error, &canvas, &output_reserve))
+    read_header(s, &input->version);
+    if (!prepare_output(r, s, error) || !lv_frame_info(&s->frame, error) || lv_stopped(core, r))
         return;
-    if (!publish_metadata(core, r, s, error, &version, canvas))
-        return;
-    struct jpeg_decompress_struct *d = &s->decoder;
-    if (lv_stopped(core, r))
-        return;
-    jpeg_start_decompress(d);
-    if (!decode_rows(core, r, s, canvas))
+    jpeg_start_decompress(&s->decoder);
+    if (!decode_rows(core, r, s) || !jpeg_finish_decompress(&s->decoder) || s->warning)
     {
         error->code = LV_ERROR_CORRUPT_DATA;
         return;
     }
-    jpeg_finish_decompress(d);
-    if (s->warning)
-    {
-        error->code = LV_ERROR_CORRUPT_DATA;
-        return;
-    }
-    if (!lv_file_unchanged(s->file, r->path, &version))
-    {
-        error->code = LV_ERROR_SOURCE_CHANGED;
-        return;
-    }
-    // Codec has finished: release its allowance before queue backpressure can wait.
-    jpeg_destroy_decompress(d);
+    jpeg_destroy_decompress(&s->decoder);
     s->created = false;
-    mtx_lock(&core->mutex);
-    core->reserved -= r->reservation - output_reserve;
-    r->reservation  = output_reserve;
-    mtx_unlock(&core->mutex);
-    lv_publish_rgba(core, r, s->image, canvas, error);
+    lv_rows_release(&s->rows);
+    lv_frame_finish(&s->frame, error);
 }
 
 void lv_decode_jpeg(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)
@@ -347,7 +255,8 @@ void lv_decode_jpeg(lv_core *core, lv_request *r, lv_input *input, lv_error_info
         run_decode(core, r, s, input, error);
     if (s->created)
         jpeg_destroy_decompress(&s->decoder);
-    lv_workspace_release(core, r, s->row, s->row_bytes);
-    lv_workspace_release(core, r, s->image, s->image_bytes);
+    lv_rows_release(&s->rows);
+    if (s->frame.core)
+        lv_frame_release(&s->frame);
     lv_workspace_release(core, r, s, sizeof *s);
 }

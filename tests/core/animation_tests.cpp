@@ -467,3 +467,43 @@ TEST_CASE("idle animation residents cannot deadlock single-worker static admissi
     CHECK(collect(engine).terminal == LV_EVENT_COMPLETE);
     CHECK(lv_core_close_animation(engine.core, second) == LV_OK);
 }
+
+TEST_CASE("idle animation shutdown reclaims every session allocation", "[animation][shutdown][lifetime]")
+{
+    Files files;
+    const auto path = files.write("shutdown", animation({Frame{}, Frame{.index = 1}}));
+    for (unsigned iteration = 0; iteration < 32; ++iteration)
+    {
+        CAPTURE(iteration);
+        Engine engine;
+        lv_core_stats before{};
+        REQUIRE(lv_core_get_stats(engine.core, &before) == LV_OK);
+        const auto [id, request] = open(engine, path);
+        (void)request;
+        REQUIRE(drain(engine).terminal == LV_EVENT_COMPLETE);
+        REQUIRE(next(engine, id).terminal == LV_EVENT_COMPLETE);
+        REQUIRE(lv_core_begin_shutdown(engine.core) == LV_OK);
+        REQUIRE(lv_core_join(engine.core, 5000) == LV_OK);
+        lv_core_stats after{};
+        REQUIRE(lv_core_get_stats(engine.core, &after) == LV_OK);
+        CHECK(after.accounted_cpu_bytes == before.accounted_cpu_bytes);
+        CHECK(after.accepted_requests == 0);
+        REQUIRE(lv_core_destroy(&engine.core) == LV_OK);
+    }
+}
+
+TEST_CASE("static REGION support does not enable animation REGION requests", "[animation][target]")
+{
+    Files files;
+    Engine engine;
+    const auto path = files.write("region", animation({Frame{}}));
+    lv_animation_open_desc desc;
+    lv_animation_open_desc_init(&desc);
+    desc.path               = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+    desc.target             = {LV_TARGET_REGION, {.region = {{4, 3}, {0, 0, 2, 2}}}};
+    lv_animation_id session = 17;
+    lv_request_id request   = 18;
+    CHECK(lv_core_open_animation(engine.core, &desc, &session, &request) == LV_UNSUPPORTED);
+    CHECK(session == 0);
+    CHECK(request == 0);
+}

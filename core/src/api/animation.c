@@ -30,6 +30,8 @@ lv_status LV_CALL lv_core_open_animation(lv_core *core, const lv_animation_open_
     lv_status status = lv_validate_request(&request);
     if (status != LV_OK)
         return status;
+    if (request.target.kind != LV_TARGET_FIT)
+        return LV_UNSUPPORTED; // Static REGION support does not enable tiled animations.
     mtx_lock(&core->mutex);
     if (core->closing)
         status = LV_CLOSING;

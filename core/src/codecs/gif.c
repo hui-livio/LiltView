@@ -144,9 +144,10 @@ void lv_decode_gif(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
     image_bytes              = (size_t)size.width * size.height * 4;
     row_bytes                = (size_t)desc->Width;
     const lv_size_u32 canvas = lv_fit_size(size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
-    if (!lv_frame_prepare(&f, size, canvas, LV_FORMAT_GIF, 0, image_bytes + row_bytes, error))
+    const bool native        = canvas.width == size.width && canvas.height == size.height;
+    if (!lv_frame_prepare(&f, size, canvas, LV_FORMAT_GIF, 0, (native ? 0 : image_bytes) + row_bytes, error))
         goto done;
-    image = lv_workspace_allocate(core, r, image_bytes);
+    image = native ? f.data : lv_workspace_allocate(core, r, image_bytes);
     row   = lv_workspace_allocate(core, r, row_bytes);
     if (!image || !row)
     {
@@ -155,11 +156,12 @@ void lv_decode_gif(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
     }
     if (!lv_frame_info(&f, error) || !gif_canvas(gif, &control, image, size) || !gif_rows(gif, &control, image, row))
         goto done;
-    if (!lv_resample_rgba(core, r, image, size, f.data, canvas))
+    if (!native && !lv_resample_rgba(core, r, image, size, f.data, canvas))
         goto done;
     DGifCloseFile(gif, &code);
     gif = nullptr;
-    lv_workspace_release(core, r, image, image_bytes);
+    if (image != f.data)
+        lv_workspace_release(core, r, image, image_bytes);
     image = nullptr;
     lv_workspace_release(core, r, row, row_bytes);
     row = nullptr;
@@ -174,7 +176,8 @@ done:
         error->code = source.io_error        ? LV_ERROR_IO :
             code == D_GIF_ERR_NOT_ENOUGH_MEM ? LV_ERROR_OUT_OF_MEMORY :
                                                LV_ERROR_CORRUPT_DATA;
-    lv_workspace_release(core, r, image, image_bytes);
+    if (image != f.data)
+        lv_workspace_release(core, r, image, image_bytes);
     lv_workspace_release(core, r, row, row_bytes);
     lv_frame_release(&f);
 }

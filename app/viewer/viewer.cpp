@@ -18,33 +18,23 @@ void LV_CALL wake_core(void *)
     event.type = SDL_EVENT_USER;
     SDL_PushEvent(&event);
 }
-// Orientation is a UV transform; pixels and renderer stay backend independent.
-std::array<ImVec2, 4> oriented_uv(lv_orientation orientation)
-{
-    constexpr std::array<std::array<unsigned, 4>, 8> order{{{{0, 1, 2, 3}},
-                                                            {{1, 0, 3, 2}},
-                                                            {{2, 3, 0, 1}},
-                                                            {{3, 2, 1, 0}},
-                                                            {{0, 3, 2, 1}},
-                                                            {{3, 0, 1, 2}},
-                                                            {{2, 1, 0, 3}},
-                                                            {{1, 2, 3, 0}}}};
-    const std::array<ImVec2, 4> corners{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
-    const auto &indices = order[std::clamp(orientation, 1u, 8u) - 1];
-    return {corners[indices[0]], corners[indices[1]], corners[indices[2]], corners[indices[3]]};
-}
 } // namespace
 
 Viewer::Viewer(render::Renderer &renderer) :
-    renderer_(renderer)
+    renderer_(renderer),
+    detail_(renderer),
+    pending_detail_(renderer)
 {
     lv_core_config config;
     lv_core_config_init(&config);
     config.cpu_budget_bytes  = 384ULL * 1024 * 1024;
     config.queue_pixel_bytes = 4ULL * 1024 * 1024;
     config.prefetch_workers  = 0;
-    config.wakeup            = wake_core;
-    const auto result        = lv_core_create(&config, &core_);
+    const auto max_edge      = renderer_.capabilities().max_texture_edge;
+    while (config.tile_edge > max_edge && config.tile_edge > 16)
+        config.tile_edge /= 2;
+    config.wakeup     = wake_core;
+    const auto result = lv_core_create(&config, &core_);
     if (result != LV_OK)
         throw std::runtime_error("Cannot initialize image core: " + std::to_string(result));
 }
@@ -75,6 +65,10 @@ void Viewer::shutdown()
     {
     }
     discard_pending();
+    detail_.clear();
+    pending_detail_.clear();
+    lv_event_release(preview_anchor_);
+    preview_anchor_ = nullptr;
     renderer_.destroy_image(display_);
     display_ = {};
     if (lv_core_destroy(&core_) != LV_OK)
@@ -100,18 +94,22 @@ void Viewer::open(const std::filesystem::path &path)
     try_animation_   = true;
     reset_animation_ = false;
     completed_plays_ = 0;
-    pending_path_    = absolute;
-    filename_        = absolute.filename().string();
-    error_           = 0;
-    loading_         = true;
-    actual_size_     = false;
+    clear_details();
+    viewport_.reset();
+    opening_path_ = absolute;
+    pending_path_ = absolute;
+    filename_     = absolute.filename().string();
+    error_        = 0;
+    loading_      = true;
 }
 
 void Viewer::discard_pending()
 {
     renderer_.destroy_image(pending_);
-    pending_         = {};
-    pending_info_    = {};
+    pending_      = {};
+    pending_info_ = {};
+    lv_event_release(pending_anchor_);
+    pending_anchor_  = nullptr;
     pending_content_ = false;
 }
 
@@ -125,8 +123,12 @@ void Viewer::submit_pending()
     request.path     = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
     request.user_tag = generation_;
     // Decode a bounded ordinary image once; window fit/100% is a GPU transform.
-    const auto bounds            = renderer_.framebuffer_size();
-    const auto edge              = renderer_.capabilities().max_texture_edge;
+    const auto bounds = renderer_.framebuffer_size();
+    // Bound preview storage by device and budget. Source dimensions are logical
+    // and may be much larger than any single texture.
+    const auto caps        = renderer_.capabilities();
+    const auto budget_edge = static_cast<std::uint32_t>(std::sqrt(static_cast<double>(caps.image_budget_bytes) / 16.0));
+    const auto edge        = std::max(1u, std::min(caps.max_texture_edge, try_animation_ ? caps.max_texture_edge : budget_edge));
     request.target.as.fit_bounds = {std::clamp(bounds.width, 1u, edge), std::clamp(bounds.height, 1u, edge)};
     lv_status status;
     if (try_animation_)
@@ -161,11 +163,15 @@ void Viewer::submit_pending()
 void Viewer::accept_completed()
 {
     renderer_.destroy_image(display_);
-    display_ = pending_;
-    pending_ = {};
-    info_    = pending_info_;
-    loading_ = false;
-    error_   = 0;
+    display_    = pending_;
+    pending_    = {};
+    info_       = pending_info_;
+    image_path_ = opening_path_; // Keep the displayed source after a later open fails.
+    lv_event_release(preview_anchor_);
+    preview_anchor_ = pending_anchor_;
+    pending_anchor_ = nullptr;
+    loading_        = false;
+    error_          = 0;
     spdlog::info("Image displayed: {}, {}x{}, orientation={}", filename_, info_.source_size.width, info_.source_size.height,
                  info_.orientation);
 }
@@ -175,6 +181,11 @@ void Viewer::consume(const lv_event_view &view)
     if (view.request_id != request_)
         return;
     const bool current = view.user_tag == generation_ && submitted_generation_ == generation_;
+    if (current && work_ == Work::static_detail)
+    {
+        consume_details(view);
+        return;
+    }
     if (current && work_ != Work::static_image)
     {
         consume_animation(view);
@@ -218,13 +229,28 @@ void Viewer::pump()
             (view.type == LV_EVENT_COMPLETE || view.type == LV_EVENT_ERROR || view.type == LV_EVENT_CANCELLED);
         try
         {
+            const bool anchor = view.type == LV_EVENT_IMAGE_INFO && work_ == Work::static_image && view.user_tag == generation_ &&
+                view.request_id == request_;
             consume(*lv_event_get_view(event.get()));
+            if (anchor && view.user_tag == generation_)
+            {
+                lv_event_release(pending_anchor_);
+                pending_anchor_ = event.release();
+            }
         } catch (const std::exception &error)
         {
             spdlog::error("Image upload: {}", error.what());
             if (request_)
                 lv_core_cancel(core_, request_);
-            fail(LV_ERROR_MEMORY_BUDGET);
+            if (work_ == Work::static_detail)
+            {
+                ++generation_;
+                pending_detail_.clear();
+                detail_failed_ = true;
+                error_         = LV_ERROR_MEMORY_BUDGET;
+            }
+            else
+                fail(LV_ERROR_MEMORY_BUDGET);
         }
         // Even an exception while processing a terminal must allow the next request.
         if (terminal)
@@ -234,27 +260,39 @@ void Viewer::pump()
         wake_core(nullptr); // Continue draining next frame even without another queue edge.
     submit_pending();
     advance_animation();
+    submit_details();
 }
 
 void Viewer::draw(render::Point min, render::Point max, float density)
 {
-    const bool reveal_pending = work_ == Work::static_image && pending_ && pending_content_ && loading_ &&
+    const bool reveal = work_ == Work::static_image && pending_ && pending_content_ && loading_ &&
         std::chrono::steady_clock::now() - submitted_at_ >= std::chrono::milliseconds(100);
-    const auto image       = reveal_pending ? pending_ : display_;
-    const auto &image_info = reveal_pending ? pending_info_ : info_;
+    const auto image       = reveal ? pending_ : display_;
+    const auto &image_info = reveal ? pending_info_ : info_;
     if (!image)
         return;
-    float width = static_cast<float>(image_info.canvas.width), height = static_cast<float>(image_info.canvas.height);
-    if (image_info.orientation >= 5)
-        std::swap(width, height);
-    const float scale = actual_size_ ?
-        1.0f / std::max(density, 1.0f) :
-        std::min({(max.x - min.x) / width, (max.y - min.y) / height, 1.0f / std::max(density, 1.0f)});
-    const float x = min.x + (max.x - min.x - width * scale) * 0.5f, y = min.y + (max.y - min.y - height * scale) * 0.5f;
-    const auto uv = oriented_uv(image_info.orientation);
-    renderer_.add_image_quad(ImGui::GetWindowDrawList(), image,
-                             {{{x, y}, {x + width * scale, y}, {x + width * scale, y + height * scale}, {x, y + height * scale}}},
-                             {{{uv[0].x, uv[0].y}, {uv[1].x, uv[1].y}, {uv[2].x, uv[2].y}, {uv[3].x, uv[3].y}}});
+    viewport_.update(min, max, density, image_info.format == LV_FORMAT_SVG ? image_info.canvas : image_info.source_size,
+                     image_info.orientation);
+    if (!loading_ && !playback_.started() && (info_.capabilities & LV_CAP_REGION_DECODE) && ImGui::IsWindowHovered())
+    {
+        const auto &io = ImGui::GetIO();
+        if (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y)
+        {
+            if (io.MouseWheel)
+                viewport_.zoom(io.MouseWheel, {io.MousePos.x, io.MousePos.y});
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+                viewport_.pan(io.MouseDelta.x, io.MouseDelta.y);
+        }
+    }
+    queue_details();
+    auto *list = ImGui::GetWindowDrawList();
+    list->PushClipRect({min.x, min.y}, {max.x, max.y}, true);
+    constexpr std::array<render::Point, 4> uv{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+    renderer_.add_image_quad(list, image,
+                             viewport_.quad({0, 0, image_info.canvas.width, image_info.canvas.height}, image_info.canvas), uv);
+    if (!loading_ && !playback_.started())
+        detail_.draw(viewport_, list);
+    list->PopClipRect();
 }
 
 bool Viewer::has_visible_image() const
