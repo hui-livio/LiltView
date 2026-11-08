@@ -71,6 +71,7 @@ python3 scripts/register_desktop.py
 - [CLI11 命令行与 iguana YAML 配置](docs/CONFIGURATION.md)
 - [工程落地与中英双语方案](docs/IMPLEMENTATION-v0.1.md)
 - [Core API 设计](docs/CORE_API-v0.1.md) · [调用时序与生命周期契约](docs/CORE_RUNTIME-v0.1.md) · [公共 C 头文件](core/include/liltview/core.h)
+- [Core 接口兼容性 Review](docs/CORE_INTERFACE_REVIEW-2026-11-08.md) · [格式兼容接口扩展方案（待开发）](docs/CORE_FORMAT_EXTENSION_PLAN.md)
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)
 - [第三方源码与 submodule 管理](third_party/README.md)
 - [默认鸿蒙字体与授权来源](assets/fonts/README.md)

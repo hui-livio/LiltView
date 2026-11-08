@@ -5,6 +5,7 @@
 - 公共头文件：[core/include/liltview/core.h](../core/include/liltview/core.h)
 - 相关设计：[总体设计](DESIGN-v0.1.md)、[工程落地](IMPLEMENTATION-v0.1.md)。
 - 调用时序、所有权、生命周期及边界契约：[Core Runtime](CORE_RUNTIME-v0.1.md)。
+- 新增格式与原始 RGB / YUV / Bayer 的 [接口 Review](CORE_INTERFACE_REVIEW-2026-11-08.md) 和 [兼容扩展方案](CORE_FORMAT_EXTENSION_PLAN.md) 已记录；其中候选输入 / 选择 / 颜色 / 输出 / 诊断描述均为待开发，不是当前 ABI 2 的声明，不改变本文件现有调用契约。
 
 ## 1. 设计边界
 

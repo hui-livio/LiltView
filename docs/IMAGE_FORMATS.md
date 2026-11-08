@@ -30,6 +30,8 @@ YUV 覆盖 4:4:4、4:2:2、4:2:0 的具体存储布局，包括 YUYV / YUY2、UY
 
 这些条目均为 **待开发**，没有变更上方已实现能力声明。待办、边界和验收条件以 [FORMAT_ROADMAP.md](FORMAT_ROADMAP.md) 为准；原始像素参数和布局见 [RAW_PIXEL_INPUT.md](RAW_PIXEL_INPUT.md)，对应性能测试见 [TEST_PLAN.md](../benchmarks/TEST_PLAN.md)。新增格式的输入样本待补充，尚无性能实测结论。
 
+相关 core 接口已完成 [兼容性 Review](CORE_INTERFACE_REVIEW-2026-11-08.md)，后续按 [扩展方案](CORE_FORMAT_EXTENSION_PLAN.md) 补充输入描述、选择器、颜色 / 输出、结果身份、预算及诊断；先行 RGBA8 预览与完整高精度 / HDR / 多平面支持分别验收。
+
 ## 共用加载链路
 
 ```text

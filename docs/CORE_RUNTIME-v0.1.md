@@ -4,6 +4,7 @@
 - 状态：运行契约；Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 已实现。预读、REGION、缓存、多 worker 和扩展格式仍为后续约束，当前返回不支持；各格式内存、取消与兼容限制见[图片格式说明](IMAGE_FORMATS.md)，具体范围见 [Core API §1.2](CORE_API-v0.1.md#12-当前实现范围)。
 - 接口入口：[Core API](CORE_API-v0.1.md) · [公共头文件](../core/include/liltview/core.h)。
 - 本文约束现有静态运行时；GIF 动画会话、帧事件、取消和预算扩展已按 [v0.2](CORE_ANIMATION-v0.2.md) 实施，普通静态路径保持下述契约。
+- 原始数据、子图选择、高精度 / 多平面与参数身份的补充要求见 [接口 Review](CORE_INTERFACE_REVIEW-2026-11-08.md) 和 [待开发扩展方案](CORE_FORMAT_EXTENSION_PLAN.md)；新增描述的深拷贝、metadata / plane 寿命、预算和取消须沿用本契约，不代表新增能力已实现。
 
 当前普通图片路径在准入时保留完整 FIT CPU 图及最终 tile 的峰值，再通过有界队列交付。它遵循下述所有权、终结竞争和三阶段关闭规则，但尚未实现一般性的低内存扫描 / 预读抢占。第三方内部内存仅按保守 allowance 预约，不能据此宣称硬 RSS 限制。
 
@@ -299,7 +300,7 @@ submit 接受不代表已获准分配完整解码工作集。worker 先为有界
 | 不支持增量的合法文件 | 后台完整解码后发布，保持 UI 可交互，不承诺提前有像素 |
 | SVG 无自然尺寸 / 比例 | FIT 依据后端有效 viewport 规则；无法确定目标则 TARGET_UNSUPPORTED，不除零 |
 | SVG 引用外部文件 / 网络资源 | 首版不访问外部资源；不能正确独立栅格化的文件报 FORMAT_UNSUPPORTED，内嵌资源也计解析 / 解码预算 |
-| 动画 WebP / APNG 等多帧内容 | 不提供播放 API；仅在后端可正确生成首个显示帧时按静态图支持，否则 FORMAT_UNSUPPORTED |
+| 动画 WebP / APNG 等多帧内容 | 可复用现有动画会话 API，但相应后端仍未接入；当前明确拒绝。后续若提供静态首帧模式，须单独定义真实显示帧选择，不能视作完整播放支持 |
 | 存在未知颜色配置 | 输出报告 UNKNOWN，不宣称已经准确转换 sRGB |
 
 UTF-8 / POSIX 路径禁止内嵌零字节；Windows 原生 UTF-16 路径禁止内嵌零代码单元，而不是禁止所有零字节。UTF-16 字节数须为偶数且满足对齐，原生路径语义交给平台适配，不先做有损 UTF-8 往返。

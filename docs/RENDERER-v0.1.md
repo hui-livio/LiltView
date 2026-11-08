@@ -4,6 +4,7 @@
 - 状态：统一 renderer 模块、OpenGL 3.3 后端和JPEG / PNG / SVG / WebP / BMP 上传已实现；DX11 尚未实现或在 Windows 验证。
 - 目标：将图片纹理、GPU 能力、帧提交与 Dear ImGui 绘制后端从应用生命周期中分离。
 - 相关契约：[首版设计](DESIGN-v0.1.md)、[Core API](CORE_API-v0.1.md)、[Core Runtime](CORE_RUNTIME-v0.1.md)。
+- [Core 接口 Review](CORE_INTERFACE_REVIEW-2026-11-08.md) 已记录 RGBA8 单平面限制；高精度 / 原生 YUV plane / GPU 转换须按 [扩展方案](CORE_FORMAT_EXTENSION_PLAN.md#4-像素输出颜色与-renderer) 联合协商，当前接口不因此获得这些能力，CPU RGBA8 预览仍可复用现有上传路径。
 
 ## 1. 边界与模块位置
 

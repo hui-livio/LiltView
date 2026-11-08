@@ -4,6 +4,7 @@
 - 状态：ABI 2 已实现普通 GIF 会话、逐帧合成和 UI 自动播放；动画 WebP / APNG 与超大图显示尚未实现。
 - 正式声明：[core.h](../core/include/liltview/core.h)。原 docs/api 草案入口仅转发到正式头文件，不再包含独立替换布局。
 - 相关契约：[静态 API](CORE_API-v0.1.md)、[生命周期与预算](CORE_RUNTIME-v0.1.md)、[实际格式范围](IMAGE_FORMATS.md)。
+- AVIF / JPEG XL 等后续动画、codec-neutral adapter、精确源时间与多平面帧的补充建议见 [兼容扩展方案](CORE_FORMAT_EXTENSION_PLAN.md#10-动画与多帧)。现有 GIF 的 NEXT / RESET、epoch、整帧交付和 UI 时钟规则继续保留；新后端均为待开发。
 
 ## 1. 边界与分工
 
