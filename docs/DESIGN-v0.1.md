@@ -3,7 +3,7 @@
 - 正式项目名：LiltView
 - 文档版本：v0.1
 - 日期：2026-11-06
-- 状态：独立 renderer 和常规 JPEG 加载显示已实现；其余格式、预读与超大图待扩展
+- 状态：独立 renderer 和 JPEG / PNG / 基础 SVG / 静态 WebP / BMP 显示已实现；预读、超大图与扩展格式待实现
 - 首发平台：Arch Linux
 - 后续方向：复用 C 核心，增加 Windows / Win32 界面
 
@@ -11,7 +11,7 @@
 
 CMake 目标、依赖边界、日志、更新检测、Catch2 测试及中英双语的详细方案见 [工程落地与中英双语方案](IMPLEMENTATION-v0.1.md)。
 
-公共接口已形成 [Core API v0.1 草案](CORE_API-v0.1.md)及 [C 头文件](../core/include/liltview/core.h)。常规 JPEG 引擎已实现，当前能力以 API 文档 §1.2 为准；当前目录与构建入口见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。
+公共接口已形成 [Core API v0.1 草案](CORE_API-v0.1.md)及 [C 头文件](../core/include/liltview/core.h)。五类格式已接入，当前兼容子集以[格式兼容表](IMAGE_FORMATS.md)及 API §1.2 为准；当前目录与构建入口见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。
 
 ## 1. 目标与当前决策
 
@@ -42,7 +42,7 @@ CMake 目标、依赖边界、日志、更新检测、Catch2 测试及中英双�
 | Linux 窗口后端 | SDL3，固定 submodule 提交，裁剪后静态链接 | 已用于主窗口；不分发裁剪版动态库 |
 | 渲染后端 | OpenGL 3.3 + ImGui 官方后端 | 已用于主窗口 |
 | 渲染模块 | 跨平台统一接口，后端构建时可选；Linux 首版 OpenGL 3.3，Windows 后续 D3D11 | 设计已明确 |
-| 解码库 | JPEG 使用 libjpeg-turbo 3.1.2 静态库，其他格式单独选型 | JPEG 已接入 |
+| 解码库 | libjpeg-turbo、libpng + zlib、libwebp、PlutoSVG + PlutoVG、C BMP | 已接入，兼容范围见 IMAGE_FORMATS |
 | OpenCV | 不列为基础依赖；有明确处理需求时再评估 | 建议 |
 | C 语言标准 | 核心使用 C23，不降级到更早标准 | 已明确 |
 | C++ 语言标准 | 界面优先 C++23；目标工具链不具备所需能力时，最低 C++20 | 已明确；当前环境采用 C++23 |
@@ -111,8 +111,8 @@ BMP 需要建立兼容样本表：24 / 32 位真彩、1 / 4 / 8 位调色板、1
 
 SVG 描述矢量图形，也可能含位图和动态内容，不能直接等同于按扫描行解码的位图格式。[R7] 本项目建议以静态图片浏览为首版基线：
 
-- 由 C 核心统一接收请求，通过 C 接口的解析 / 栅格化适配层输出像素；具体依赖库待选。
-- 首轮覆盖基本形状、路径、变换、填充 / 描边、渐变、透明度与常用裁剪；文本、字体、滤镜、蒙版和内嵌位图须建立兼容样本和明确支持范围。
+- 由 C 核心统一接收请求，通过 C 接口的解析 / 栅格化适配层输出像素；使用 PlutoSVG / PlutoVG，具体兼容范围见[格式说明](IMAGE_FORMATS.md)。
+- 当前覆盖基本形状、路径、变换、填充 / 描边、渐变与透明度。常用裁剪、文本、字体、滤镜、蒙版和内嵌位图未实现，作为后续扩展明确拒绝。
 - 脚本执行、交互文档和 SVG 动画不列入首版静态显示范围；不能宣称等同于浏览器的完整 SVG 实现。
 - 明确外部图片和字体引用的解析策略，默认不自动访问网络；不支持或缺失的资源需向用户反馈。
 - 栅格化目标取决于视口、缩放和 DPI。先显示合适分辨率，再按需请求更清晰结果；不直接分配无上限的“原尺寸 SVG 位图”。
@@ -371,7 +371,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 8. 公共 C API 契约草案
 
-本节是接口摘要。完整声明见 [Core API v0.1](CORE_API-v0.1.md)，调用时序、内存管理、生命周期和边界验收见 [Core Runtime](CORE_RUNTIME-v0.1.md)；JPEG DISPLAY / FIT 已实现，其他格式、缓存和超大图仍是后续约束。
+本节是接口摘要。完整声明见 [Core API v0.1](CORE_API-v0.1.md)，调用时序、内存管理、生命周期和边界验收见 [Core Runtime](CORE_RUNTIME-v0.1.md)；五类格式 DISPLAY / FIT 已实现，缓存和超大图仍是后续约束。
 
 ### 8.1 操作
 
@@ -429,7 +429,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 10. 建议代码结构
 
-以下展示完整规划结构；实际目录和目标以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前已有 JPEG 引擎、renderer、主窗口、双语、日志和设置；规划目录不等于其他格式或超大图已实现。
+以下展示完整规划结构；实际目录和目标以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前已有五类格式解码、renderer、主窗口、双语、日志和设置；规划目录不等于超大图、缓存和扩展格式已实现。
 
 ```text
 LiltView/

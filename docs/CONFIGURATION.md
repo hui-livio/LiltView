@@ -5,7 +5,7 @@
 ## 命令行
 
 ```bash
-liltview [options] [image.jpg]
+liltview [options] [image]
 liltview --language zh-CN --config-dir /tmp/liltview-settings photo.jpg
 liltview --help
 ```

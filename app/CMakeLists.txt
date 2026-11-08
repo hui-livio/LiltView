@@ -125,6 +125,16 @@ install(FILES "${PROJECT_SOURCE_DIR}/third_party/iguana/LICENSE-Boost"
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/LICENSE.md"
     "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/README.ijg"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libjpeg-turbo")
+foreach(codec libpng zlib plutosvg)
+    install(FILES "${PROJECT_SOURCE_DIR}/third_party/${codec}/LICENSE"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/${codec}")
+endforeach()
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/libwebp/COPYING" "${PROJECT_SOURCE_DIR}/third_party/libwebp/PATENTS"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libwebp")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/LICENSE"
+    "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/source/FTL.TXT"
+    "${PROJECT_SOURCE_DIR}/third_party/PlutoVG-NOTICES.txt"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/PlutoVG")
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(app_id "io.github.hui_livio.LiltView")

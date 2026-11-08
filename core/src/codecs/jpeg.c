@@ -1,7 +1,7 @@
-#include "../internal.h"
+#include "codec.h"
 
-#include <jpeglib.h>
 #include <jerror.h>
+#include <jpeglib.h>
 #include <limits.h>
 #include <setjmp.h>
 #include <stdlib.h>
@@ -128,32 +128,6 @@ static void exif_marker(j_decompress_ptr decoder)
     }
 }
 
-static lv_size_u32 fit_size(lv_size_u32 original, lv_size_u32 bounds, lv_orientation orientation)
-{
-    if (orientation >= 5)
-    {
-        uint32_t t    = bounds.width;
-        bounds.width  = bounds.height;
-        bounds.height = t;
-    }
-    lv_size_u32 size = original;
-    if (size.width > bounds.width)
-    {
-        size.height = (uint32_t)((uint64_t)original.height * bounds.width / original.width);
-        size.width  = bounds.width;
-    }
-    if (size.height > bounds.height)
-    {
-        size.width  = (uint32_t)((uint64_t)original.width * bounds.height / original.height);
-        size.height = bounds.height;
-    }
-    if (!size.width)
-        size.width = 1;
-    if (!size.height)
-        size.height = 1;
-    return size;
-}
-
 static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s, lv_size_u32 canvas)
 {
     struct jpeg_decompress_struct *d = &s->decoder;
@@ -197,81 +171,6 @@ static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s, lv_si
     return output_y == canvas.height;
 }
 
-static bool publish_tiles(lv_core *core, lv_request *r, jpeg_state *s, lv_size_u32 canvas)
-{
-    const uint32_t edge    = core->config.tile_edge;
-    const uint64_t columns = ((uint64_t)canvas.width + edge - 1) / edge;
-    for (uint32_t y = 0; y < canvas.height; y += edge)
-        for (uint32_t x = 0; x < canvas.width; x += edge)
-        {
-            if (lv_stopped(core, r))
-                return false;
-            const uint32_t w          = canvas.width - x < edge ? canvas.width - x : edge;
-            const uint32_t h          = canvas.height - y < edge ? canvas.height - y : edge;
-            const uint64_t allocation = sizeof(lv_pixels) + (uint64_t)w * h * 4 + sizeof(lv_event);
-            if (r->reservation < allocation)
-            {
-                s->failure = LV_ERROR_MEMORY_BUDGET;
-                return false;
-            }
-            lv_pixels *pixels = lv_pixels_new(core, r, w, h);
-            if (!pixels)
-            {
-                s->failure = LV_ERROR_OUT_OF_MEMORY;
-                return false;
-            }
-            for (uint32_t row = 0; row < h; ++row)
-                memcpy(pixels->data + (size_t)row * w * 4, s->image + ((size_t)(y + row) * canvas.width + x) * 4, (size_t)w * 4);
-            if (!lv_publish_tile(core, r, pixels, (lv_rect_u32){x, y, w, h}, (uint64_t)(y / edge) * columns + x / edge))
-            {
-                mtx_lock(&core->mutex);
-                lv_pixels_drop_locked(pixels, false);
-                mtx_unlock(&core->mutex);
-                s->failure = LV_ERROR_OUT_OF_MEMORY;
-                return false;
-            }
-        }
-    return true;
-}
-
-// File open and header parsing stay on the worker; submit only copies the path.
-static bool open_source(lv_core *core, lv_request *r, jpeg_state *s, lv_error_info *error, lv_file_version *version)
-{
-    uint32_t system_code = 0;
-    s->file              = lv_file_open(r->path, version, &system_code);
-    if (!s->file)
-    {
-        *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_SYSTEM_ERRNO, .system_code = system_code};
-        return false;
-    }
-    // First edition deliberately bounds compressed and original RGBA sizes.
-    if (version->bytes > 64ULL * 1024 * 1024)
-    {
-        error->code = LV_ERROR_DIMENSION_LIMIT;
-        return false;
-    }
-    unsigned char magic[2];
-    if (fread(magic, 1, 2, s->file) != 2)
-    {
-        error->code = LV_ERROR_CORRUPT_DATA;
-        return false;
-    }
-    if (magic[0] != 0xff || magic[1] != 0xd8)
-    {
-        error->code = LV_ERROR_FORMAT_UNSUPPORTED;
-        return false;
-    }
-    rewind(s->file);
-    // Reserve bounded header/marker space before the codec allocates any metadata.
-    s->header_allowance = 2ULL * 1024 * 1024 + version->bytes * 2;
-    if (!lv_reserve(core, r, s->header_allowance))
-    {
-        error->code = LV_ERROR_MEMORY_BUDGET;
-        return false;
-    }
-    return true;
-}
-
 static void read_header(jpeg_state *s, const lv_file_version *version)
 {
     struct jpeg_decompress_struct *d = &s->decoder;
@@ -312,7 +211,7 @@ static bool prepare_output(lv_core *core, lv_request *r, jpeg_state *s, lv_error
         return false;
     }
     const lv_size_u32 canvas =
-        fit_size((lv_size_u32){d->image_width, d->image_height}, r->desc.target.as.fit_bounds, s->orientation);
+        lv_fit_size((lv_size_u32){d->image_width, d->image_height}, r->desc.target.as.fit_bounds, s->orientation);
     d->out_color_space = JCS_EXT_RGBA;
     for (unsigned numerator = 1; numerator <= 8; ++numerator)
     {
@@ -381,13 +280,18 @@ static bool publish_metadata(lv_core *core, lv_request *r, jpeg_state *s, lv_err
     return true;
 }
 
-static void run_decode(lv_core *core, lv_request *r, jpeg_state *s, lv_error_info *error)
+static void run_decode(lv_core *core, lv_request *r, jpeg_state *s, lv_input *input, lv_error_info *error)
 {
-    lv_file_version version;
+    const lv_file_version version = input->version;
     lv_size_u32 canvas;
     uint64_t output_reserve = 0;
-    if (!open_source(core, r, s, error, &version))
+    s->file                 = input->file;
+    s->header_allowance     = 2ULL * 1024 * 1024 + version.bytes * 2;
+    if (!lv_reserve(core, r, s->header_allowance))
+    {
+        error->code = LV_ERROR_MEMORY_BUDGET;
         return;
+    }
     read_header(s, &version);
     if (!prepare_output(core, r, s, error, &canvas, &output_reserve))
         return;
@@ -420,11 +324,10 @@ static void run_decode(lv_core *core, lv_request *r, jpeg_state *s, lv_error_inf
     core->reserved -= r->reservation - output_reserve;
     r->reservation  = output_reserve;
     mtx_unlock(&core->mutex);
-    if (!publish_tiles(core, r, s, canvas))
-        error->code = s->failure ? s->failure : LV_ERROR_MEMORY_BUDGET;
+    lv_publish_rgba(core, r, s->image, canvas, error);
 }
 
-void lv_decode_jpeg(lv_core *core, lv_request *r, lv_error_info *error)
+void lv_decode_jpeg(lv_core *core, lv_request *r, lv_input *input, lv_error_info *error)
 {
     if (!lv_reserve(core, r, sizeof(jpeg_state)))
     {
@@ -441,10 +344,9 @@ void lv_decode_jpeg(lv_core *core, lv_request *r, lv_error_info *error)
     if (setjmp(s->escape))
         error->code = s->failure ? s->failure : LV_ERROR_CORRUPT_DATA;
     else
-        run_decode(core, r, s, error);
+        run_decode(core, r, s, input, error);
     if (s->created)
         jpeg_destroy_decompress(&s->decoder);
-    lv_file_close(s->file);
     lv_workspace_release(core, r, s->row, s->row_bytes);
     lv_workspace_release(core, r, s->image, s->image_bytes);
     lv_workspace_release(core, r, s, sizeof *s);

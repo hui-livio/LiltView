@@ -21,8 +21,8 @@ endforeach()
 
 if(LILTVIEW_BUILD_UNIT_TESTS)
     liltview_require_catch2()
-    add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp)
-    target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg Catch2::Catch2WithMain)
+    add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp)
+    target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg png_static webp Catch2::Catch2WithMain)
     liltview_configure_cxx_target(liltview_core_tests)
     include("${LILTVIEW_CATCH_SCRIPT}")
     catch_discover_tests(liltview_core_tests TEST_PREFIX "core.")
@@ -65,7 +65,7 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     liltview_configure_cxx_target(liltview_renderer_contract)
     add_test(NAME desktop.renderer COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen $<TARGET_FILE:liltview_renderer_contract>)
     set_tests_properties(desktop.renderer PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg settings logging)
+    foreach(case menu font save jpeg formats settings logging)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"

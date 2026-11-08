@@ -80,7 +80,7 @@ void lv_workspace_release(lv_core *, lv_request *, void *, size_t bytes);
 lv_pixels *lv_pixels_new(lv_core *, lv_request *, uint32_t width, uint32_t height);
 bool lv_publish_info(lv_core *, lv_request *, lv_image_info *, const lv_file_version *);
 bool lv_publish_tile(lv_core *, lv_request *, lv_pixels *, lv_rect_u32, uint64_t tile);
-void lv_decode_jpeg(lv_core *, lv_request *, lv_error_info *);
+void lv_decode_image(lv_core *, lv_request *, lv_error_info *);
 void lv_file_close(FILE *);
 FILE *lv_file_open(const char *, lv_file_version *, uint32_t *system_code);
 bool lv_file_unchanged(FILE *, const char *, const lv_file_version *);

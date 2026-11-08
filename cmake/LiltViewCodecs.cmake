@@ -1,0 +1,42 @@
+include_guard(GLOBAL)
+
+# Only static runtime libraries; upstream tools, examples and tests are excluded.
+liltview_dependency_source(zlib CMakeLists.txt zlib_source)
+set(ZLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory("${zlib_source}" "${PROJECT_BINARY_DIR}/third_party/zlib" EXCLUDE_FROM_ALL SYSTEM)
+add_library(ZLIB::ZLIB ALIAS zlibstatic)
+# FindZLIB still runs in libpng; give it our local headers/library and target.
+set(ZLIB_INCLUDE_DIR "${zlib_source}" CACHE PATH "" FORCE)
+set(ZLIB_LIBRARY zlibstatic CACHE STRING "" FORCE)
+
+liltview_dependency_source(libpng CMakeLists.txt png_source)
+set(PNG_SHARED OFF CACHE BOOL "" FORCE)
+set(PNG_STATIC ON CACHE BOOL "" FORCE)
+set(PNG_TESTS OFF CACHE BOOL "" FORCE)
+set(PNG_TOOLS OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON)
+add_subdirectory("${png_source}" "${PROJECT_BINARY_DIR}/third_party/libpng" EXCLUDE_FROM_ALL SYSTEM)
+unset(SKIP_INSTALL_ALL)
+
+liltview_dependency_source(libwebp CMakeLists.txt webp_source)
+foreach(feature ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO LIBWEBPMUX WEBPMUX EXTRAS WEBP_JS FUZZTEST)
+    set(WEBP_BUILD_${feature} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(WEBP_USE_THREAD OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF)
+add_subdirectory("${webp_source}" "${PROJECT_BINARY_DIR}/third_party/libwebp" EXCLUDE_FROM_ALL SYSTEM)
+
+liltview_dependency_source(plutosvg CMakeLists.txt svg_source)
+if(NOT EXISTS "${svg_source}/plutovg/CMakeLists.txt")
+    message(FATAL_ERROR "Missing PlutoSVG's pinned PlutoVG: git submodule update --init --recursive")
+endif()
+set(PLUTOVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD ON CACHE BOOL "" FORCE)
+set(PLUTOSVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(PLUTOSVG_ENABLE_FREETYPE OFF CACHE BOOL "" FORCE)
+# Add the recorded nested submodule first; never select a system PlutoVG.
+add_subdirectory("${svg_source}/plutovg" "${PROJECT_BINARY_DIR}/third_party/plutovg" EXCLUDE_FROM_ALL SYSTEM)
+add_subdirectory("${svg_source}" "${PROJECT_BINARY_DIR}/third_party/plutosvg" EXCLUDE_FROM_ALL SYSTEM)

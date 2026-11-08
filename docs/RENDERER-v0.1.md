@@ -1,7 +1,7 @@
 # LiltView 渲染模块设计 v0.1
 
 - 日期：2026-11-07。
-- 状态：统一 renderer 模块、OpenGL 3.3 后端和常规 JPEG 上传已实现；DX11 尚未实现或在 Windows 验证。
+- 状态：统一 renderer 模块、OpenGL 3.3 后端和JPEG / PNG / SVG / WebP / BMP 上传已实现；DX11 尚未实现或在 Windows 验证。
 - 目标：将图片纹理、GPU 能力、帧提交与 Dear ImGui 绘制后端从应用生命周期中分离。
 - 相关契约：[首版设计](DESIGN-v0.1.md)、[Core API](CORE_API-v0.1.md)、[Core Runtime](CORE_RUNTIME-v0.1.md)。
 
@@ -16,7 +16,7 @@ app/renderer/              统一 renderer API、工厂、纹理句柄与能力�
   backend/opengl/           当前 OpenGL 3.3 + ImGui OpenGL 后端
   backend/d3d11/             后续 D3D11 + ImGui DX11 后端
 app/viewer/                 图片请求、缩放平移、加载状态与 GPU image handle
-core/                       C23：文件、JPEG 解码、像素结果和任务生命周期
+core/                       C23：文件、图片解码 / SVG 栅格化、像素结果和任务生命周期
 third_party/imgui/          ImGui 公共绘制命令及各自平台 / 渲染适配器
 ```
 
@@ -125,7 +125,7 @@ ImGui platform backend 由 Application 初始化；Renderer 初始化并关闭 I
 
 ## 5. 图片范围和失败行为
 
-首版显示常规 JPEG 的一张 FIT 纹理；不实现 tiled GPU image、区域缓存、原尺寸超大画布、多级纹理或 page table。输出受设备纹理尺寸、renderer GPU image budget 和 framebuffer 可视范围共同约束。100% 仅在 FIT 未缩小源图时启用；细节、缩放到超出 FIT 输出质量和区域分块作为后续工作。
+首版显示一张 RGBA8 FIT 纹理，解码格式差异留在 C core；不实现 tiled GPU image、区域缓存、原尺寸超大画布、多级纹理或 page table。输出受设备纹理尺寸、renderer GPU image budget 和 framebuffer 可视范围共同约束。100% 仅在 FIT 未缩小源图时启用；细节、缩放到超出 FIT 输出质量和区域分块作为后续工作。
 
 纹理尺寸超限、预算不足、分配失败和非法像素视图必须返回明确 renderer 状态。UI 显示双语错误，同时保留窗口和重新打开操作；目录导航仍待实现。不能回退到把 GL / D3D 原始 ID 传进 Shell。
 
@@ -140,7 +140,7 @@ CPU 与 GPU 预算独立。renderer 不持有 core 像素引用；一次同步�
 - 窗口最小化可以跳过 present，但 event/core 队列仍按预算处理；恢复后查询新 framebuffer 像素尺寸。
 - UI 提示由应用翻译，renderer 返回稳定错误类别及可记录诊断，不接管语言或日志目标。
 
-已测试：非法矩形、短 buffer、行步长、大小溢出、mipmap 字节账本；真实 OpenGL offscreen 契约覆盖带行填充上传、像素颜色回读、旧 handle 拒绝、generation、尺寸超限、回收和 upload state 恢复。JPEG CLI 及既有 resize / About 做了截图验证。零 framebuffer、device lost、全部 OOM 路径和跨屏 DPI 尚待验证。
+已测试：非法矩形、短 buffer、行步长、大小溢出、mipmap 字节账本；真实 OpenGL offscreen 契约覆盖带行填充上传、像素颜色回读、旧 handle 拒绝、generation、尺寸超限、回收和 upload state 恢复。五类格式的实际 OpenGL 显示与既有 resize / About 做了截图验证。零 framebuffer、device lost、全部 OOM 路径和跨屏 DPI 尚待验证。
 
 后续 Windows 接入须测试：Win32 platform backend + DX11 renderer backend 分开初始化，Debug / Release、WARP 与硬件设备、resize / DPI / present、device removal、纹理生命周期以及 DXGI debug layer 无 live-object 报告。Linux OpenGL 和 Windows DX11 应运行相同 renderer 公共契约测试；当前尚未验证 Windows。
 

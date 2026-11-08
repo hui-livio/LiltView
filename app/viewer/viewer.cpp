@@ -46,7 +46,7 @@ Viewer::Viewer(render::Renderer &renderer) :
     config.wakeup            = wake_core;
     const auto result        = lv_core_create(&config, &core_);
     if (result != LV_OK)
-        throw std::runtime_error("Cannot initialize JPEG core: " + std::to_string(result));
+        throw std::runtime_error("Cannot initialize image core: " + std::to_string(result));
 }
 Viewer::~Viewer()
 {
@@ -144,7 +144,7 @@ void Viewer::accept_completed()
     info_    = pending_info_;
     loading_ = false;
     error_   = 0;
-    spdlog::info("JPEG displayed: {}, {}x{}, orientation={}", filename_, info_.source_size.width, info_.source_size.height,
+    spdlog::info("Image displayed: {}, {}x{}, orientation={}", filename_, info_.source_size.width, info_.source_size.height,
                  info_.orientation);
 }
 

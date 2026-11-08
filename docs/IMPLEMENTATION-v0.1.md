@@ -5,9 +5,9 @@
 - 状态：设计留存；CMake 骨架、核心初始化和可选依赖入口已建立
 - 总体设计：[DESIGN-v0.1.md](DESIGN-v0.1.md)
 
-本文记录 CMake 工程、依赖边界、日志、更新检测、测试和中英双语的讨论结果。当前构建入口及验证范围见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。主窗口、独立 renderer 和常规 JPEG 加载显示已实现；其他格式、超大图和更新检测后续实施。
+本文记录 CMake 工程、依赖边界、日志、更新检测、测试和中英双语的讨论结果。当前构建入口及验证范围见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。主窗口、独立 renderer 和JPEG / PNG / 基础 SVG / 静态 WebP / BMP 加载显示已实现；扩展格式、超大图和更新检测后续实施。
 
-核心接口已单独形成 [Core API 设计](CORE_API-v0.1.md)及公共头文件；全部公共入口已实现，当前支持 Linux 单 worker JPEG DISPLAY / FIT；其余能力返回 UNSUPPORTED。日志和唤醒回调、请求与像素所有权以该契约为准。
+核心接口已单独形成 [Core API 设计](CORE_API-v0.1.md)及公共头文件；全部公共入口已实现，当前支持 Linux 单 worker 五类格式 DISPLAY / FIT；其余能力返回 UNSUPPORTED。日志和唤醒回调、请求与像素所有权以该契约为准。
 
 ## 1. 当前结论
 
@@ -29,7 +29,7 @@
 | 系统菜单 | KDE 全局菜单，Wayland / X11 关联；不支持时保留 ImGui 菜单 | 已接入 |
 | 桌面身份 | `io.github.hui_livio.LiltView` 与 desktop / icon 名匹配 | 已接入 |
 | 主题 | 跟随系统 / 深色 / 浅色；使用 SDL 主题查询和变化事件，保存偏好 | 已实现 |
-| 解码与 SVG | 专用解码 / 栅格化库 | 待逐项选择 |
+| 解码与 SVG | libjpeg-turbo、libpng + zlib、libwebp、PlutoSVG + PlutoVG、C BMP | 静态依赖，详见[格式兼容表](IMAGE_FORMATS.md) |
 
 网络库已明确为优先采用 `yhirose/cpp-httplib`。当前只留存更新模块的设计边界，不创建更新模块实现、网络 target 或相关下载依赖。
 
@@ -224,13 +224,13 @@ ImGui::Button(label);
 
 ## 7. 下一步落地顺序
 
-1. 确认窗口 / 渲染后端和首版五类格式的解码 / 栅格化库。
+1. 已确定窗口 / 渲染后端和五类格式后端；继续扩充兼容样本与性能测量。
 2. 锁定依赖版本，建立 CMake 目标、标准检查及核心测试入口。
 3. 先打通 C 核心加载与 ImGui 显示，再接入日志和双语基础界面。
 4. 按总体设计实现渐进、预读、预算及超大图处理。
 5. 主线完成后再评估更新检测排期；后续采用 cpp-httplib，届时明确版本信息协议、TLS 配置和网络测试。当前不以实现更新模块作为首版验收条件。
 
-依赖来源、SDL3 / OpenGL 后端及默认鸿蒙字体已确定，五个 submodule 已完成集成，新增 libjpeg-turbo 3.1.2 用 ExternalProject 静态构建。后续重点是其他格式和超大图；字体 / IME / 跨屏 DPI 还需更完整验收。更新检测专用的 cpp-httplib 版本、TLS 后端和版本信息协议延后决定。
+依赖来源、SDL3 / OpenGL 后端及默认鸿蒙字体已确定，九个直接 submodule 已完成集成，PlutoVG 使用嵌套 gitlink；libjpeg-turbo 3.1.2 用 ExternalProject 静态构建。后续重点是扩展格式和超大图；字体 / IME / 跨屏 DPI 还需更完整验收。更新检测专用的 cpp-httplib 版本、TLS 后端和版本信息协议延后决定。
 
 ## 8. 参考资料
 

@@ -112,7 +112,7 @@ def test_jpeg_render(executable, folder):
     result = subprocess.run([str(executable), "--smoke-test", "--config-dir", str(folder), "--screenshot", str(screenshot), str(sample)],
                             text=True, capture_output=True, timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "JPEG displayed: testorig.jpg" in result.stdout, result.stdout
+    assert "Image displayed: testorig.jpg" in result.stdout, result.stdout
     header, dimensions, maximum, pixels = screenshot.read_bytes().split(b"\n", 3)
     assert header == b"P6" and maximum == b"255", "invalid screenshot"
     width, height = map(int, dimensions.split())
@@ -123,6 +123,27 @@ def test_jpeg_render(executable, folder):
             r, g, b = pixels[offset:offset+3]
             red += r > 120 and r > g * 1.4 and r > b * 1.4
     assert red > 500, "JPEG rose pixels were not rendered in the canvas"
+
+
+def test_formats_render(executable, folder):
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+    (folder / "settings.yaml").write_text("log_level: info\nlanguage: en-US\n")
+    for filename in ("red-alpha.png", "red-alpha.webp", "red.bmp", "red-alpha.svg"):
+        screenshot = folder / (filename + ".ppm")
+        result = subprocess.run([str(executable), "--smoke-test", "--config-dir", str(folder), "--screenshot",
+                                 str(screenshot), str(fixtures / filename)], text=True, capture_output=True, timeout=15)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"Image displayed: {filename}" in result.stdout, result.stdout
+        header, dimensions, maximum, pixels = screenshot.read_bytes().split(b"\n", 3)
+        assert header == b"P6" and maximum == b"255", "invalid screenshot"
+        width, height = map(int, dimensions.split())
+        red = 0
+        for y in range(height // 3, height * 2 // 3):
+            for x in range(width // 3, width * 2 // 3):
+                offset = (y * width + x) * 3
+                r, g, b = pixels[offset:offset + 3]
+                red += r > 120 and r > g * 1.4 and r > b * 1.4
+        assert red > 500, f"{filename} pixels were not rendered in the canvas"
 
 
 def test_settings_yaml(executable, folder):
@@ -188,7 +209,7 @@ def main():
     os.environ["SDL_VIDEODRIVER"] = "offscreen"
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
-         "settings": test_settings_yaml, "logging": test_logging}[case](executable, Path(temporary))
+         "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 

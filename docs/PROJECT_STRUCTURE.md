@@ -1,6 +1,6 @@
 # LiltView 目录与 CMake 构建
 
-已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 常规 JPEG 引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；超大图、其他格式、REGION、预读及目录导航未实现。
+已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 五类格式引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；超大图、扩展格式、REGION、预读及目录导航未实现。
 
 ## 1. 当前目录
 
@@ -16,7 +16,8 @@ LiltView/
 ├── scripts/init_submodules.py    # 首次注册、固定提交及只读检查
 ├── cmake/
 │   ├── LiltViewOptions.cmake      # 语言特性检查和目标级编译设置
-│   └── LiltViewDependencies.cmake # 按需构建 third_party 本地源码
+│   ├── LiltViewDependencies.cmake # 按需构建 third_party 本地源码
+│   └── LiltViewCodecs.cmake       # PNG / WebP / SVG 静态库配置
 ├── core/
 │   ├── CMakeLists.txt
 │   ├── include/liltview/core.h    # 公共 C API 草案
@@ -24,7 +25,7 @@ LiltView/
 │       ├── README.md             # 后续核心模块分区
 │       ├── api/                  # 初始化、校验、worker 与生命周期
 │       ├── engine/objects.c      # 预算、事件、像素引用与源版本
-│       ├── codecs/jpeg.c         # JPEG / EXIF / FIT
+│       ├── codecs/               # image 共用链路与 jpeg / png / webp / bmp / svg
 │       └── platform/file.c       # Linux 文件与单调时钟
 ├── app/
 │   ├── CMakeLists.txt
@@ -55,7 +56,7 @@ LiltView/
 └── build/                        # 本机生成内容，忽略提交
 ```
 
-后续增加其他 codecs、缓存与平台服务。独立渲染模块详见[渲染模块设计](RENDERER-v0.1.md)：Linux 首版 OpenGL 3.3，Windows 后续选 D3D11。更新检测延期，不创建 `update` 源码和网络依赖。
+后续增加扩展 codecs、缓存与平台服务。独立渲染模块详见[渲染模块设计](RENDERER-v0.1.md)：Linux 首版 OpenGL 3.3，Windows 后续选 D3D11。更新检测延期，不创建 `update` 源码和网络依赖。
 
 源码清单显式写入各自 CMakeLists，不使用递归 GLOB 自动收集文件，以便清楚审阅新增模块和依赖边界。
 
@@ -65,7 +66,7 @@ Core API 的请求时序、对象所有权、关闭过程、资源预算与边�
 
 | 目标 | 当前内容 | 启用条件 |
 | --- | --- | --- |
-| `LiltView::core` / `liltview_core` | C23 静态库：JPEG FIT、队列、取消、像素与生命周期 | 总是 |
+| `LiltView::core` / `liltview_core` | C23 静态库：五类格式 FIT、队列、取消、像素与生命周期 | 总是 |
 | `LiltView::renderer` | 统一 image / frame API 和 OpenGL 后端 | 应用组件开启 |
 | `liltview_viewer` | core 请求、像素上传和图片显示 | 应用组件开启 |
 | `liltview_jpeg` | ExternalProject 导入的静态 JPEG 库 | 总是 |
@@ -83,7 +84,7 @@ Core API 的请求时序、对象所有权、关闭过程、资源预算与边�
 | `liltview_viewer_tests` | 实际 core 下的切图、上传失败恢复与资源回收测试 | 应用组件及单元测试开启 |
 | `liltview` | 主窗口可执行文件 | 应用组件开启 |
 
-所有 core 函数已可链接；未支持的配置和请求返回 UNSUPPORTED。当前范围见 [Core API §1.2](CORE_API-v0.1.md#12-当前-jpeg-实现范围)。
+所有 core 函数已可链接；未支持的配置和请求返回 UNSUPPORTED。当前范围见 [Core API §1.2](CORE_API-v0.1.md#12-当前实现范围)。
 
 ## 3. 工具链与默认构建
 
@@ -95,14 +96,14 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-默认需要已初始化的 libjpeg-turbo submodule，不下载依赖；BUILD_TESTING=ON，运行 C / C++ 契约检查。libjpeg-turbo 不支持 add_subdirectory，使用本地 ExternalProject 静态构建，首次 build 完成其 configure 和编译。x86 SIMD 需要 NASM，没有时回退标量。
+默认需要已递归初始化各 codec submodule，不下载依赖；BUILD_TESTING=ON，运行 C / C++ 契约检查。libjpeg-turbo 不支持 add_subdirectory，使用本地 ExternalProject 静态构建，首次 build 完成其 configure 和编译。x86 SIMD 需要 NASM，没有时回退标量。
 
 ```bash
 cmake --preset release
 cmake --build --preset release
 ```
 
-`release` 是不含窗口、但带静态 JPEG 解码依赖的核心构建，默认不构建测试；产物为 `build/release/core/libliltview_core.a`。主程序使用下面的 `dev` 或 `app-release`。
+`release` 是不含窗口、但带各格式静态解码依赖的核心构建，默认不构建测试；产物为 `build/release/core/libliltview_core.a`。主程序使用下面的 `dev` 或 `app-release`。
 
 显式选择 C++20 兼容模式：
 
@@ -128,9 +129,9 @@ ctest --test-dir build/custom --output-on-failure
 
 ### 4.1 源码管理
 
-需要编译的库用 Git submodule，纯头文件库直接保存源码，全部放在 `third_party/`。当前 libjpeg-turbo、ImGui、spdlog、SDL3、Catch2 五个库均使用 submodule。
+需要编译的库用 Git submodule，纯头文件库直接保存源码，全部放在 `third_party/`。当前九个直接 submodule 为 libjpeg-turbo、libpng、zlib、libwebp、PlutoSVG、ImGui、spdlog、SDL3、Catch2，另有嵌套 PlutoVG。
 
-基线为 libjpeg-turbo 3.1.2、ImGui v1.92.0、spdlog v1.15.3、SDL3 release-3.4.0、Catch2 v3.8.1，具体提交和发布来源记录在 [依赖清单](../third_party/dependencies.json)。主仓库 gitlink 是实际 submodule 版本锁；manifest 与它应一致。
+基线为 libjpeg-turbo 3.1.2、libpng 1.6.58、zlib 1.3.2、libwebp 1.6.0、PlutoSVG 0.0.8 / PlutoVG 1.3.3、ImGui v1.92.0、spdlog v1.15.3、SDL3 release-3.4.0、Catch2 v3.8.1，具体提交和发布来源记录在 [依赖清单](../third_party/dependencies.json)。主仓库 gitlink 是实际 submodule 版本锁；manifest 与它应一致。
 
 五个 submodule 已注册，源码已就绪，gitlink 与清单校验通过。首次引入或维护时执行：
 
@@ -154,7 +155,7 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-`dev` 开启应用组件和 Catch2 测试。也可分别设置 `LILTVIEW_BUILD_APP_COMPONENTS` 和 `LILTVIEW_BUILD_UNIT_TESTS`，后者要求 `BUILD_TESTING=ON`。默认 debug / release / compat20 也需要 JPEG submodule，默认不构建窗口与 Catch2。
+`dev` 开启应用组件和 Catch2 测试。也可分别设置 `LILTVIEW_BUILD_APP_COMPONENTS` 和 `LILTVIEW_BUILD_UNIT_TESTS`，后者要求 `BUILD_TESTING=ON`。默认 debug / release / compat20 也需要递归初始化的 codec submodule，默认不构建窗口与 Catch2。
 
 移除原先的 SYSTEM / FETCH 模式和对应 presets。CMake 只读本地源码，不运行 Git、不联网；缺少依赖时提示如何初始化。源码准备好后，配置和构建可以离线运行。
 
@@ -184,9 +185,11 @@ CLI11 / iguana YAML 接入后：dev 49/49，C++20 应用 42/42；配置 / CLI �
 
 日志等级配置与审查修复后：dev 52/52、C++20 应用 44/44；配置 / CLI / 日志 ASan/UBSan 检查 14 个用例、179 项断言通过。实际 Debug 和 Release 程序验证了默认 debug / warn、YAML 覆盖与 off；已补测不一致缩进、字符串字段误用集合、文档标记和截图 flag override。
 
+本轮多格式验证：dev **64/64**（含 JPEG 及 PNG / SVG / WebP / BMP 的真实 OpenGL 截图），C++20 应用 **55/55**；核心 ASan/UBSan **24 个用例、4559 项断言**通过。Release 构建、迁移安装和四种新增格式截图通过。应用 ELF 直接依赖不包含 SDL / codec 动态库，codec 均静态链接；系统 Fontconfig / FreeType / GIO 等仍可能间接依赖系统 libpng / zlib，不能把 ldd 的递归依赖当作错误静态链接。未 strip Release 主程序约 7.16 MiB，另附约 7.88 MiB 字体；这不是完整分发包体积或性能结论。具体兼容和资源限制见[图片格式说明](IMAGE_FORMATS.md)。
+
 ## 6. 下一步
 
-常规 JPEG 与独立 renderer 已打通；后续扩展格式、导航与渐进能力。超大图和 Win32 + DX11 单独实施，不改变 core / viewer 的基本数据契约。
+五类格式与独立 renderer 已打通；UI 本轮只接通打开和显示，交互优化延期；后续扩展格式与渐进能力。超大图和 Win32 + DX11 单独实施，不改变 core / viewer 的基本数据契约。
 
 ## 7. 主程序运行与资源
 
@@ -198,7 +201,7 @@ cmake --build --preset dev
 
 菜单提供语言、主题、全屏和关于。主题有跟随系统 / 深色 / 浅色，默认跟随系统；启动读取 SDL_GetSystemTheme，并在 SDL_EVENT_SYSTEM_THEME_CHANGED 时更新。显式选择始终优先，未获得系统偏好时采用深色。配置分别保存 `theme=system|dark|light`，兼容旧深浅配置；菜单勾选的是偏好模式，不把“跟随系统下恰好为深色”当作手动深色。
 
-在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放 JPEG。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置为 SDL 用户目录中的 `settings.yaml`，可用 --config-dir 隔离；不读取或迁移 INI。[命令行及配置契约](CONFIGURATION.md)。
+在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放五类已支持图片。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置为 SDL 用户目录中的 `settings.yaml`，可用 --config-dir 隔离；不读取或迁移 INI。[命令行及配置契约](CONFIGURATION.md)。
 
 默认字体为原始 HarmonyOS Sans SC Regular，位于 `assets/fonts/`，构建时复制到可执行文件相邻资源目录。详情与独立许可见 [字体说明](../assets/fonts/README.md)。“关于”提供字体署名。缺失随包字体时尝试系统字体，无中文字体时使用英文。
 

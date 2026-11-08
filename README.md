@@ -2,9 +2,9 @@
 
 轻量、流畅的图片浏览器，首发目标平台为 Arch Linux。
 
-已支持常规 JPG / JPEG 的后台加载与显示，可通过命令行、打开菜单 / Ctrl+O 或拖放进入。支持适应窗口、EXIF 方向、中英双语错误提示，以及原有的系统顶栏菜单、主题和设置。渲染为独立模块：Linux 使用 OpenGL 3.3，接口为后续 Win32 + DX11 保持一致。
+已支持 JPEG、PNG、基础 SVG、静态 WebP 和 BMP 的后台加载与显示，可通过命令行、打开菜单 / Ctrl+O 或拖放进入。支持适应窗口、EXIF 方向、中英双语错误提示，以及原有的系统顶栏菜单、主题和设置。渲染为独立模块：Linux 使用 OpenGL 3.3，接口为后续 Win32 + DX11 保持一致。
 
-当前只支持 8 位 RGB / 灰度 JPEG（包括渐进编码的最终结果），文件上限 64 MiB、原始 RGBA 大小上限 256 MiB，还须满足 CPU / GPU 预算。超大图、渐进扫描预览、其他格式、目录上一张 / 下一张和 REGION 暂未实现；100% 仅在 FIT 输出已保留原始尺寸时可用。
+位图文件上限 64 MiB、原始 RGBA 上限 256 MiB，还须满足 CPU / GPU 预算；SVG 另限制为 1 MiB、8192 元素、128 层。透明图按 straight RGBA8 显示；SVG 为基础静态子集，文字、裁剪、滤镜和内嵌图片等暂不支持。超大图、动画、渐进预览、目录导航及 REGION 暂未实现。完整范围见[格式兼容表](docs/IMAGE_FORMATS.md)。
 
 ## 构建与检查
 
@@ -19,7 +19,7 @@ ctest --preset debug
 
 显式 C++20 兼容模式使用 `compat20` preset，优化构建使用 `release`。启用第三方组件与 Catch2 使用 `dev`；源码统一位于 `third_party/`，编译库使用 Git submodule，纯头文件库直接保存源码。
 
-libjpeg-turbo、ImGui、spdlog、SDL3、Catch2 通过 submodule 固定提交。libjpeg-turbo 经独立 ExternalProject 构建并静态链接，不覆盖系统 JPEG 库。构建运行主程序：
+libjpeg-turbo、libpng、zlib、libwebp、PlutoSVG（嵌套 PlutoVG）、ImGui、spdlog、SDL3、Catch2 通过 submodule 固定提交。libjpeg-turbo 经独立 ExternalProject 构建并静态链接，不覆盖系统 JPEG 库。构建运行主程序：
 
 ```bash
 git submodule update --init --recursive
@@ -54,7 +54,7 @@ python3 scripts/register_desktop.py
 - C++23 + Dear ImGui 负责界面与窗口行为；必要时显式提供 C++20 兼容构建。
 - 使用 CMake、spdlog、Catch2 / CTest，窗口采用 SDL3 + OpenGL 3.3。
 - 已有中英双语界面；更新检测优先使用 cpp-httplib，但暂不实现，当前不引入其网络依赖。
-- 计划支持 JPEG（JPG / JPEG）、PNG、SVG、WebP、BMP，并逐步扩展其他主流图片格式。
+- 已接入 JPEG（JPG / JPEG）、PNG、基础 SVG、静态 WebP、BMP；GIF、TIFF、AVIF、HEIF 等后续扩展。
 - 根据图片规模采用完整后显示、渐进更新或超大图分块处理。
 - 保持公共 C API 独立，为后续 Win32 界面适配保留空间。
 - 不计划支持 CAD、PSD 等专用设计源文件。
@@ -62,6 +62,7 @@ python3 scripts/register_desktop.py
 ## 文档
 
 - [首版设计文档](docs/DESIGN-v0.1.md)
+- [图片格式与解码实现](docs/IMAGE_FORMATS.md)
 - [跨平台渲染模块设计](docs/RENDERER-v0.1.md)
 - [CLI11 命令行与 iguana YAML 配置](docs/CONFIGURATION.md)
 - [工程落地与中英双语方案](docs/IMPLEMENTATION-v0.1.md)

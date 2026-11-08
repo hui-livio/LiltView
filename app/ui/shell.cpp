@@ -345,7 +345,8 @@ void Shell::draw_about_licenses(Language language)
     ImGui::Spacing();
     ImGui::TextWrapped("%s", translate(language, Text::license));
     ImGui::TextDisabled("Copyright 2026 LiltView contributors");
-    ImGui::TextWrapped("libjpeg-turbo\nThis software is based in part on the work of the Independent JPEG Group.");
+    ImGui::TextWrapped(
+        "libjpeg-turbo / libpng / zlib / libwebp / PlutoSVG / PlutoVG\nThis software is based in part on the work of the Independent JPEG Group.");
     ImGui::Spacing();
     ImGui::TextWrapped("HarmonyOS Sans SC Regular\nCopyright 2021 Huawei Device Co., Ltd.");
     ImGui::TextWrapped("HarmonyOS Sans Fonts License Agreement");

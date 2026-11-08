@@ -4,5 +4,10 @@ Copyright 2026 LiltView contributors.
 JPEG decoding uses libjpeg-turbo, distributed under its original licenses.
 This software is based in part on the work of the Independent JPEG Group.
 
+PNG decoding uses libpng and zlib. WebP decoding uses libwebp.
+SVG rasterization uses PlutoSVG and its pinned PlutoVG dependency.
+Portions of this software are copyright (C) 1996-2020 The FreeType Project
+(www.freetype.org). All rights reserved.
+
 Third-party code and the HarmonyOS Sans font retain their original licenses.
 See the accompanying license files for each component.

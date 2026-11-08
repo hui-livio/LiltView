@@ -13,3 +13,15 @@
 [submodule "libjpeg-turbo"]
 	path = third_party/libjpeg-turbo
 	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "libpng"]
+	path = third_party/libpng
+	url = https://github.com/pnggroup/libpng.git
+[submodule "zlib"]
+	path = third_party/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "libwebp"]
+	path = third_party/libwebp
+	url = https://github.com/webmproject/libwebp.git
+[submodule "plutosvg"]
+	path = third_party/plutosvg
+	url = https://github.com/sammycage/plutosvg.git

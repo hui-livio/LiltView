@@ -103,7 +103,7 @@ static int worker_main(void *data)
         mtx_unlock(&core->mutex);
         lv_error_info error = {0};
         if (!lv_stopped(core, r))
-            lv_decode_jpeg(core, r, &error);
+            lv_decode_image(core, r, &error);
         finish_request(core, r, error);
     }
 }
@@ -412,8 +412,9 @@ lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format, lv_forma
         return LV_CLOSING;
     if (format < LV_FORMAT_JPEG || format > LV_FORMAT_BMP)
         return LV_INVALID_ARGUMENT;
-    if (format == LV_FORMAT_JPEG)
-        *out = (lv_format_support){1, LV_CAP_SCALED_DECODE};
+    const lv_capabilities capabilities = format == LV_FORMAT_SVG ? LV_CAP_VECTOR_RASTERIZE :
+        (format == LV_FORMAT_JPEG || format == LV_FORMAT_WEBP) ? LV_CAP_SCALED_DECODE : 0;
+    *out = (lv_format_support){1, capabilities};
     return LV_OK;
 }
 lv_status LV_CALL lv_core_get_stats(lv_core *core, lv_core_stats *out)

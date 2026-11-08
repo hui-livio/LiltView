@@ -37,4 +37,4 @@ endif()
 
 message(STATUS "LiltView ${PROJECT_VERSION}: C23 core / C++${LILTVIEW_CXX_STANDARD} consumers")
 message(STATUS "Dependencies: local third_party sources; app components=${LILTVIEW_BUILD_APP_COMPONENTS}; Catch2=${LILTVIEW_BUILD_UNIT_TESTS}")
-message(STATUS "Linux JPEG DISPLAY/FIT engine enabled; renderer backend=${LILTVIEW_RENDERER_BACKEND}; large images and other codecs pending")
+message(STATUS "Linux JPEG/PNG/SVG/WebP/BMP DISPLAY/FIT enabled; renderer backend=${LILTVIEW_RENDERER_BACKEND}; large images pending")
