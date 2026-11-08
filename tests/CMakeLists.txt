@@ -21,8 +21,9 @@ endforeach()
 
 if(LILTVIEW_BUILD_UNIT_TESTS)
     liltview_require_catch2()
-    add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp)
-    target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg png_static webp Catch2::Catch2WithMain)
+    add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp)
+    target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg png_static webp
+        liltview_gif_encoder TIFF::tiff Catch2::Catch2WithMain)
     liltview_configure_cxx_target(liltview_core_tests)
     include("${LILTVIEW_CATCH_SCRIPT}")
     catch_discover_tests(liltview_core_tests TEST_PREFIX "core.")

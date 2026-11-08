@@ -410,7 +410,7 @@ lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format, lv_forma
         return LV_INVALID_ARGUMENT;
     if (core->closing)
         return LV_CLOSING;
-    if (format < LV_FORMAT_JPEG || format > LV_FORMAT_BMP)
+    if (format < LV_FORMAT_JPEG || format > LV_FORMAT_TIFF)
         return LV_INVALID_ARGUMENT;
     const lv_capabilities capabilities = format == LV_FORMAT_SVG ? LV_CAP_VECTOR_RASTERIZE :
         (format == LV_FORMAT_JPEG || format == LV_FORMAT_WEBP) ? LV_CAP_SCALED_DECODE : 0;

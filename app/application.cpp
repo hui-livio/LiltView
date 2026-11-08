@@ -307,8 +307,8 @@ private:
         if (dialog_)
             return;
         dialog_ = std::make_shared<DialogResult>();
-        static constexpr SDL_DialogFileFilter filters[]{{"Images", "jpg;jpeg;png;svg;webp;bmp;JPG;JPEG;PNG;SVG;WEBP;BMP"},
-                                                        {"All files", "*"}};
+        static constexpr SDL_DialogFileFilter filters[]{
+            {"Images", "jpg;jpeg;png;svg;webp;bmp;gif;tif;tiff;JPG;JPEG;PNG;SVG;WEBP;BMP;GIF;TIF;TIFF"}, {"All files", "*"}};
         auto *reference = new std::shared_ptr<DialogResult>(dialog_);
         SDL_ShowOpenFileDialog(dialog_callback, reference, window_, filters, 2, nullptr, false);
     }

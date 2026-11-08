@@ -25,3 +25,9 @@
 [submodule "plutosvg"]
 	path = third_party/plutosvg
 	url = https://github.com/sammycage/plutosvg.git
+[submodule "giflib"]
+	path = third_party/giflib
+	url = https://git.code.sf.net/p/giflib/code
+[submodule "libtiff"]
+	path = third_party/libtiff
+	url = https://gitlab.com/libtiff/libtiff.git

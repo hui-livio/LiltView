@@ -131,6 +131,10 @@ foreach(codec libpng zlib plutosvg)
 endforeach()
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libwebp/COPYING" "${PROJECT_SOURCE_DIR}/third_party/libwebp/PATENTS"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libwebp")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/giflib/COPYING"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/giflib")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/libtiff/LICENSE.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/LibTIFF")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/LICENSE"
     "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/source/FTL.TXT"
     "${PROJECT_SOURCE_DIR}/third_party/PlutoVG-NOTICES.txt"

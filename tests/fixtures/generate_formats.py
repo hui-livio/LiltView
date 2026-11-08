@@ -12,9 +12,49 @@ import struct
 import zlib
 
 
+def gif_tiff(folder, width, height):
+    # Original two-frame GIF fixture: first red, second blue. Reset LZW before
+    # each pixel to keep this tiny generator independent of an encoder library.
+    header = b"GIF89a" + struct.pack("<HHBBB", width, height, 0x80, 0, 0) + bytes((255, 0, 0, 0, 0, 255))
+    frames = bytearray()
+    for index in (0, 1):
+        frames += b"\x21\xf9\x04\x04\x0a\x00\x00\x00"
+        frames += b"\x2c" + struct.pack("<HHHHB", 0, 0, width, height, 0) + b"\x02"
+        codes = [code for _ in range(width * height) for code in (4, index)] + [5]
+        stream, bits, count = bytearray(), 0, 0
+        for code in codes:
+            bits |= code << count
+            count += 3
+            while count >= 8:
+                stream.append(bits & 255)
+                bits >>= 8
+                count -= 8
+        if count:
+            stream.append(bits & 255)
+        for offset in range(0, len(stream), 255):
+            block = stream[offset:offset + 255]
+            frames += bytes((len(block),)) + block
+        frames += b"\x00"
+    (folder / "red-first-frame.gif").write_bytes(header + frames + b";")
+
+    # Classic little-endian TIFF with one uncompressed RGB strip.
+    tags = [(256, 4, 1, width), (257, 4, 1, height), (258, 3, 3, 0),
+            (259, 3, 1, 1), (262, 3, 1, 2), (273, 4, 1, 0), (274, 3, 1, 1),
+            (277, 3, 1, 3), (278, 4, 1, height), (279, 4, 1, width * height * 3), (284, 3, 1, 1)]
+    bits_offset = 8 + 2 + len(tags) * 12 + 4
+    pixel_offset = bits_offset + 6
+    tags[2] = (258, 3, 3, bits_offset)
+    tags[5] = (273, 4, 1, pixel_offset)
+    entries = b"".join(struct.pack("<HHII", *tag) for tag in tags)
+    data = b"II\x2a\x00\x08\x00\x00\x00" + struct.pack("<H", len(tags)) + entries
+    data += bytes(4) + struct.pack("<HHH", 8, 8, 8) + bytes((255, 0, 0)) * width * height
+    (folder / "red.tiff").write_bytes(data)
+
+
 def main():
     folder = Path(__file__).resolve().parent
     width, height = 96, 64
+    gif_tiff(folder, width, height)
     rgba = bytes((255, 0, 0, 128)) * width * height
 
     def chunk(kind, payload):

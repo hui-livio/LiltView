@@ -13,6 +13,12 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_webp;
     if (size >= 2 && !memcmp(data, "BM", 2))
         return lv_decode_bmp;
+    if (size >= 6 && (!memcmp(data, "GIF87a", 6) || !memcmp(data, "GIF89a", 6)))
+        return lv_decode_gif;
+    if (size >= 4 &&
+        ((!memcmp(data, "II", 2) && (data[2] == 42 || data[2] == 43) && !data[3]) ||
+         (!memcmp(data, "MM", 2) && !data[2] && (data[3] == 42 || data[3] == 43))))
+        return lv_decode_tiff;
     size_t at = size >= 3 && !memcmp(data, "\xef\xbb\xbf", 3) ? 3 : 0;
     while (at < size && (data[at] == ' ' || data[at] == '\t' || data[at] == '\n' || data[at] == '\r'))
         ++at;
@@ -62,15 +68,19 @@ lv_size_u32 lv_fit_size(lv_size_u32 original, lv_size_u32 bounds, lv_orientation
         bounds.height = t;
     }
     lv_size_u32 size = original;
-    if (size.width > bounds.width)
+    if (original.width > bounds.width || original.height > bounds.height)
     {
-        size.height = (uint32_t)((uint64_t)original.height * bounds.width / original.width);
-        size.width  = bounds.width;
-    }
-    if (size.height > bounds.height)
-    {
-        size.width  = (uint32_t)((uint64_t)original.width * bounds.height / original.height);
-        size.height = bounds.height;
+        // Select the limiting axis before rounding either dimension.
+        if ((uint64_t)original.width * bounds.height >= (uint64_t)original.height * bounds.width)
+        {
+            size.width  = bounds.width;
+            size.height = (uint32_t)((uint64_t)original.height * bounds.width / original.width);
+        }
+        else
+        {
+            size.height = bounds.height;
+            size.width  = (uint32_t)((uint64_t)original.width * bounds.height / original.height);
+        }
     }
     if (!size.width)
         size.width = 1;

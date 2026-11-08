@@ -6,6 +6,7 @@ This software is based in part on the work of the Independent JPEG Group.
 
 PNG decoding uses libpng and zlib. WebP decoding uses libwebp.
 SVG rasterization uses PlutoSVG and its pinned PlutoVG dependency.
+GIF first-frame decoding uses giflib. TIFF first-page decoding uses LibTIFF.
 Portions of this software are copyright (C) 1996-2020 The FreeType Project
 (www.freetype.org). All rights reserved.
 

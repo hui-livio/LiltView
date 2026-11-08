@@ -12,4 +12,4 @@ Terminal=false
 Categories=Graphics;Viewer;
 StartupNotify=true
 StartupWMClass=io.github.hui_livio.LiltView
-MimeType=image/jpeg;image/png;image/svg+xml;image/webp;image/bmp;image/x-bmp;
+MimeType=image/jpeg;image/png;image/svg+xml;image/webp;image/bmp;image/x-bmp;image/gif;image/tiff;

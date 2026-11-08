@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -131,4 +132,57 @@ struct Event
         return *lv_event_get_view(event);
     }
 };
+struct Decoded
+{
+    lv_image_info info{};
+    lv_event_type terminal = 0;
+    lv_error_info error{};
+    std::vector<unsigned char> pixels;
+};
+inline Decoded collect(Engine &engine)
+{
+    Decoded result;
+    std::uint64_t area = 0, sequence = 0;
+    for (;;)
+    {
+        Event event(engine.next());
+        const auto &v = event.view();
+        CHECK(v.sequence > sequence);
+        sequence = v.sequence;
+        if (v.type == LV_EVENT_IMAGE_INFO)
+        {
+            result.info = v.as.image;
+            result.pixels.resize(static_cast<std::size_t>(result.info.canvas.width) * result.info.canvas.height * 4);
+        }
+        else if (v.type == LV_EVENT_REGION_READY)
+        {
+            REQUIRE_FALSE(result.pixels.empty());
+            const auto &region = v.as.region;
+            const auto &p      = *lv_pixels_get_view(region.pixels);
+            REQUIRE(region.rect.x + region.rect.width <= result.info.canvas.width);
+            REQUIRE(region.rect.y + region.rect.height <= result.info.canvas.height);
+            for (unsigned y = 0; y < region.rect.height; ++y)
+                std::copy_n(p.data + y * p.stride_bytes, region.rect.width * 4,
+                            result.pixels.data() +
+                                (static_cast<std::size_t>(region.rect.y + y) * result.info.canvas.width + region.rect.x) * 4);
+            area += static_cast<std::uint64_t>(region.rect.width) * region.rect.height;
+        }
+        else
+        {
+            result.terminal = v.type;
+            if (v.type == LV_EVENT_ERROR)
+                result.error = v.as.error;
+            if (v.type == LV_EVENT_COMPLETE)
+                CHECK(area == static_cast<std::uint64_t>(result.info.canvas.width) * result.info.canvas.height);
+            return result;
+        }
+    }
+}
+inline Decoded decode(const std::vector<unsigned char> &bytes, lv_size_u32 bounds = {100, 100})
+{
+    Files files;
+    Engine engine;
+    engine.submit(files.write("图片.wrong-extension", bytes), bounds);
+    return collect(engine);
+}
 } // namespace liltview::test

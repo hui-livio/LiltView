@@ -87,7 +87,8 @@ typedef struct lv_rect_u32 {
 typedef uint32_t lv_format;
 enum {
     LV_FORMAT_UNKNOWN = 0, LV_FORMAT_JPEG = 1, LV_FORMAT_PNG = 2,
-    LV_FORMAT_SVG = 3, LV_FORMAT_WEBP = 4, LV_FORMAT_BMP = 5
+    LV_FORMAT_SVG = 3, LV_FORMAT_WEBP = 4, LV_FORMAT_BMP = 5,
+    LV_FORMAT_GIF = 6, LV_FORMAT_TIFF = 7
 };
 
 typedef uint64_t lv_capabilities;
