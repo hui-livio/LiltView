@@ -19,6 +19,22 @@ foreach(standard IN LISTS contract_cxx_standards)
     add_test(NAME contract.cpp${standard} COMMAND liltview_contract_cpp${standard})
 endforeach()
 
+# Proposed animation ABI: validate types/layouts without implementing or linking
+# any new API entry point. These tests do not claim runtime animation support.
+add_library(liltview_animation_draft_layout OBJECT contract/animation_draft.c)
+target_include_directories(liltview_animation_draft_layout PRIVATE
+    "${PROJECT_SOURCE_DIR}/docs/api" "${PROJECT_SOURCE_DIR}/core/include")
+liltview_configure_c_target(liltview_animation_draft_layout)
+foreach(standard IN LISTS contract_cxx_standards)
+    add_executable(liltview_animation_draft_cpp${standard} contract/animation_draft.cpp
+        $<TARGET_OBJECTS:liltview_animation_draft_layout>)
+    target_include_directories(liltview_animation_draft_cpp${standard} PRIVATE
+        "${PROJECT_SOURCE_DIR}/docs/api" "${PROJECT_SOURCE_DIR}/core/include")
+    liltview_configure_cxx_target(liltview_animation_draft_cpp${standard})
+    set_target_properties(liltview_animation_draft_cpp${standard} PROPERTIES CXX_STANDARD ${standard})
+    add_test(NAME contract.animation_draft.cpp${standard} COMMAND liltview_animation_draft_cpp${standard})
+endforeach()
+
 if(LILTVIEW_BUILD_UNIT_TESTS)
     liltview_require_catch2()
     add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp)

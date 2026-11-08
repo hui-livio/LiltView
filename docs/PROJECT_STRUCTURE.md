@@ -1,6 +1,6 @@
 # LiltView 目录与 CMake 构建
 
-已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 五类格式引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；超大图、扩展格式、REGION、预读及目录导航未实现。
+已有 SDL3 / ImGui 主程序、独立 OpenGL renderer 与 C23 七类静态显示格式引擎。支持 CLI、菜单 / Ctrl+O、拖放、FIT、EXIF 和错误提示；超大图、扩展格式、REGION、预读及目录导航未实现。
 
 ## 1. 当前目录
 
@@ -62,11 +62,13 @@ LiltView/
 
 Core API 的请求时序、对象所有权、关闭过程、资源预算与边界行为另见 [Core Runtime 契约](CORE_RUNTIME-v0.1.md)。实现尚未完成时，测试覆盖状态以该文档的验收矩阵和 CMake 测试目标为准。
 
+动画会话和逐帧请求的设计见 [Core 动画 v0.2](CORE_ANIMATION-v0.2.md)。声明草案在 `docs/api/core_animation_v0_2.h`，仅由 `tests/contract/animation_draft.c/.cpp` 校验 C23 / C++20 / C++23 类型与布局；不安装、不导出未实现符号，当前运行时仍为 ABI 1。
+
 ## 2. 构建目标
 
 | 目标 | 当前内容 | 启用条件 |
 | --- | --- | --- |
-| `LiltView::core` / `liltview_core` | C23 静态库：五类格式 FIT、队列、取消、像素与生命周期 | 总是 |
+| `LiltView::core` / `liltview_core` | C23 静态库：七类静态格式 FIT、队列、取消、像素与生命周期 | 总是 |
 | `LiltView::renderer` | 统一 image / frame API 和 OpenGL 后端 | 应用组件开启 |
 | `liltview_viewer` | core 请求、像素上传和图片显示 | 应用组件开启 |
 | `liltview_jpeg` | ExternalProject 导入的静态 JPEG 库 | 总是 |
@@ -189,7 +191,7 @@ CLI11 / iguana YAML 接入后：dev 49/49，C++20 应用 42/42；配置 / CLI �
 
 ## 6. 下一步
 
-五类格式与独立 renderer 已打通；UI 本轮只接通打开和显示，交互优化延期；后续扩展格式与渐进能力。超大图和 Win32 + DX11 单独实施，不改变 core / viewer 的基本数据契约。
+七类静态格式与独立 renderer 已打通；UI 本轮只接通打开和显示，交互优化延期；后续扩展格式与渐进能力。超大图和 Win32 + DX11 单独实施，不改变 core / viewer 的基本数据契约。
 
 ## 7. 主程序运行与资源
 
@@ -201,7 +203,7 @@ cmake --build --preset dev
 
 菜单提供语言、主题、全屏和关于。主题有跟随系统 / 深色 / 浅色，默认跟随系统；启动读取 SDL_GetSystemTheme，并在 SDL_EVENT_SYSTEM_THEME_CHANGED 时更新。显式选择始终优先，未获得系统偏好时采用深色。配置分别保存 `theme=system|dark|light`，兼容旧深浅配置；菜单勾选的是偏好模式，不把“跟随系统下恰好为深色”当作手动深色。
 
-在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放五类已支持图片。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置为 SDL 用户目录中的 `settings.yaml`，可用 --config-dir 隔离；不读取或迁移 INI。[命令行及配置契约](CONFIGURATION.md)。
+在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放七类已支持图片。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置为 SDL 用户目录中的 `settings.yaml`，可用 --config-dir 隔离；不读取或迁移 INI。[命令行及配置契约](CONFIGURATION.md)。
 
 默认字体为原始 HarmonyOS Sans SC Regular，位于 `assets/fonts/`，构建时复制到可执行文件相邻资源目录。详情与独立许可见 [字体说明](../assets/fonts/README.md)。“关于”提供字体署名。缺失随包字体时尝试系统字体，无中文字体时使用英文。
 

@@ -2,7 +2,7 @@
 
 轻量、流畅的图片浏览器，首发目标平台为 Arch Linux。
 
-已支持 JPEG、PNG、基础 SVG、静态 WebP 和 BMP 的后台加载与显示，可通过命令行、打开菜单 / Ctrl+O 或拖放进入。支持适应窗口、EXIF 方向、中英双语错误提示，以及原有的系统顶栏菜单、主题和设置。渲染为独立模块：Linux 使用 OpenGL 3.3，接口为后续 Win32 + DX11 保持一致。
+已支持 JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 首帧和 TIFF 首页的后台加载与显示，可通过命令行、打开菜单 / Ctrl+O 或拖放进入。支持适应窗口、EXIF 方向、中英双语错误提示，以及原有的系统顶栏菜单、主题和设置。渲染为独立模块：Linux 使用 OpenGL 3.3，接口为后续 Win32 + DX11 保持一致。
 
 位图文件上限 64 MiB、原始 RGBA 上限 256 MiB，还须满足 CPU / GPU 预算；SVG 另限制为 1 MiB、8192 元素、128 层。透明图按 straight RGBA8 显示；SVG 为基础静态子集，文字、裁剪、滤镜和内嵌图片等暂不支持。超大图、动画、渐进预览、目录导航及 REGION 暂未实现。完整范围见[格式兼容表](docs/IMAGE_FORMATS.md)。
 
@@ -54,7 +54,7 @@ python3 scripts/register_desktop.py
 - C++23 + Dear ImGui 负责界面与窗口行为；必要时显式提供 C++20 兼容构建。
 - 使用 CMake、spdlog、Catch2 / CTest，窗口采用 SDL3 + OpenGL 3.3。
 - 已有中英双语界面；更新检测优先使用 cpp-httplib，但暂不实现，当前不引入其网络依赖。
-- 已接入 JPEG（JPG / JPEG）、PNG、基础 SVG、静态 WebP、BMP；GIF、TIFF、AVIF、HEIF 等后续扩展。
+- 已接入 JPEG（JPG / JPEG）、PNG、基础 SVG、静态 WebP、BMP、GIF 首帧和 TIFF 首页；AVIF、HEIF 等后续扩展。
 - 根据图片规模采用完整后显示、渐进更新或超大图分块处理。
 - 保持公共 C API 独立，为后续 Win32 界面适配保留空间。
 - 不计划支持 CAD、PSD 等专用设计源文件。
@@ -62,6 +62,7 @@ python3 scripts/register_desktop.py
 ## 文档
 
 - [首版设计文档](docs/DESIGN-v0.1.md)
+- [Core 动画会话与帧接口设计](docs/CORE_ANIMATION-v0.2.md)
 - [图片格式与解码实现](docs/IMAGE_FORMATS.md)
 - [跨平台渲染模块设计](docs/RENDERER-v0.1.md)
 - [CLI11 命令行与 iguana YAML 配置](docs/CONFIGURATION.md)

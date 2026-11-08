@@ -1,8 +1,9 @@
 #ifndef LILTVIEW_CORE_H
 #define LILTVIEW_CORE_H
 
-/* Draft API v0.1. Linux JPEG DISPLAY/FIT engine implemented; other features pending.
+/* Runtime ABI v1: static DISPLAY/FIT, including GIF first frame/TIFF first page.
  * Contracts: docs/CORE_API-v0.1.md and docs/CORE_RUNTIME-v0.1.md.
+ * Unimplemented animation proposal: docs/CORE_ANIMATION-v0.2.md.
  * C23 implementation, C++20/23 consumers.
  * ABI compatibility is for the same architecture and platform ABI only. */
 #include <stddef.h>

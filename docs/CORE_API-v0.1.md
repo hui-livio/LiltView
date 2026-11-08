@@ -1,6 +1,6 @@
 # LiltView Core API v0.1
 
-- 状态：接口仍为 v0.1 草案；Linux JPEG / PNG / SVG / WebP / BMP DISPLAY / FIT 引擎已实现，支持范围见 §1.2。
+- 状态：接口仍为 v0.1 草案；Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 引擎已实现，支持范围见 §1.2。
 - 实现语言：C23；调用侧：C、C++20 / C++23。
 - 公共头文件：[core/include/liltview/core.h](../core/include/liltview/core.h)
 - 相关设计：[总体设计](DESIGN-v0.1.md)、[工程落地](IMPLEMENTATION-v0.1.md)。
@@ -10,14 +10,14 @@
 
 核心负责读取、解码 / SVG 栅格化、后台任务、预读、CPU 缓存与像素交付。核心不包含 ImGui、GPU 对象、窗口系统、翻译、spdlog 或更新检测依赖。
 
-首版接口只接受本地文件，不提前引入网络数据源、解码插件 ABI、编辑接口或动画播放接口。格式枚举包含 JPEG、PNG、SVG、WebP、BMP；实际编译支持通过 `lv_core_query_format()` 查询，不能以枚举存在代替实现验收。
+首版接口只接受本地文件，不提前引入网络数据源、解码插件 ABI 或编辑接口；当前运行时不含动画播放接口，后续设计见 [动画接口 v0.2](CORE_ANIMATION-v0.2.md)。格式枚举包含 JPEG、PNG、SVG、WebP、BMP、GIF、TIFF；实际编译支持通过 `lv_core_query_format()` 查询，不能以枚举存在代替实现验收。
 
 ### 1.2 当前实现范围
 
-- 所有公共函数已有真实实现；query 对五类格式均报告可用；JPEG / WebP 为 SCALED_DECODE，SVG 为 VECTOR_RASTERIZE，PNG / BMP 无额外能力位。不报告增量预览或随机区域能力。
+- 所有公共函数已有真实实现；query 对七类格式均报告静态显示可用；JPEG / WebP 为 SCALED_DECODE，SVG 为 VECTOR_RASTERIZE，PNG / BMP / GIF / TIFF 无额外能力位。不报告增量预览或随机区域能力。
 - 仅 Linux 常规本地文件、DISPLAY / FIT、一个前台 worker。PREFETCH / REGION 请求同步返回 UNSUPPORTED；多前台 worker、非零 cache / disk cache 预算在 create 返回 UNSUPPORTED。配置初值保留，prefetch_workers 当前不创建线程，也不使预读可用。
 - libjpeg-turbo 3.1.2，8 位 RGB / 灰度、baseline / progressive JPEG 最终结果、EXIF 1..8。CMYK / YCCK、12 位 JPEG 和超大图未接入；12 位 / 尺寸超过当前范围为 DIMENSION_LIMIT，颜色空间不支持为 FORMAT_UNSUPPORTED。
-- PNG 的透明 / 索引色 / Adam7 / 高位深转换、静态 WebP、BMP 常见位深 / bitfields / RLE、SVG 基础静态 profile 已实现。APNG / 动画 WebP 拒绝；SVG 文字、裁剪、内嵌位图等未实现。详见[格式兼容表](IMAGE_FORMATS.md)。
+- PNG 的透明 / 索引色 / Adam7 / 高位深转换、静态 WebP、BMP 常见位深 / bitfields / RLE、SVG 基础静态 profile 已实现。GIF 支持合成首帧、TIFF / BigTIFF 支持普通尺寸首页，尚不支持动画 / 翻页；APNG / 动画 WebP 拒绝；SVG 文字、裁剪、内嵌位图等未实现。详见[格式兼容表](IMAGE_FORMATS.md)。
 - 位图文件最多 64 MiB；原始 `width × height × 4` 不超过 large_pixel_bytes 和 256 MiB 硬限制中的较小值，实际解码还须满足工作集预算。不因 FIT 输出很小而宣称支持超大源图。
 - JPEG 先做缩放解码并以两行缓冲双线性生成完整 FIT CPU 图，再复制为最终 tile 通过有界队列交付；当前不发布解码中的行或渐进扫描。tile 可分帧上传，小图超时显示由 UI 计时器控制。
 - 当前普通图计划预留 codec 保守 allowance、完整 FIT 图及其全部输出 tile 的潜在峰值。队列仍以单块 / 字节限流；这不是后续超大图的低内存扫描实现。第三方内部 / C runtime 分配不是 RSS 硬上限，accounted_cpu_bytes 不含未实际分配的预约。
@@ -251,7 +251,7 @@ submit → 保存 request_id
 
 调用时序、内存所有权、生命周期与边界行为的实现基线和验收矩阵见 [Core Runtime](CORE_RUNTIME-v0.1.md)。若本文摘要与 Runtime 契约冲突，以后者为详细规则，并在实现前同步修正头文件注释。
 
-已有 C23 / C++20 / C++23 ABI 契约检查，以及五类格式、事件 / 像素 / 源版本 / 预算 / 取消 / 关闭运行测试。仅头文件检查不能代替运行测试，当前具体范围以 §1.2 为准。
+已有 C23 / C++20 / C++23 ABI 契约检查，以及七类静态格式、事件 / 像素 / 源版本 / 预算 / 取消 / 关闭运行测试。仅头文件检查不能代替运行测试，当前具体范围以 §1.2 为准。
 
 接口设计阶段已检查：GCC/G++ 下三个标准模式均以 `-Wall -Wextra -Werror -pedantic-errors` 编译通过；14 个公开结构的大小与对齐一致，17 个 API 引用均为未经过 C++ 名字修饰的符号。临时验证程序已清理。
 

@@ -1,6 +1,6 @@
 # 核心实现分区
 
-已实现 Linux JPEG / PNG / SVG / WebP / BMP DISPLAY / FIT 链路和所有公共函数入口。未接入的 PREFETCH、REGION、缓存、多 worker 与扩展格式返回明确不支持，不提供伪成功实现。
+已实现 Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 链路和所有公共函数入口。未接入的 PREFETCH、REGION、缓存、多 worker 与扩展格式返回明确不支持，不提供伪成功实现。
 
 现有分工与后续扩展：
 

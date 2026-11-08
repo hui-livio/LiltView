@@ -1,6 +1,6 @@
 # 图片格式与解码实现
 
-当前支持 JPEG、PNG、基础静态 SVG、静态 WebP 和 BMP 的后台打开与 FIT 显示。
+当前支持 JPEG、PNG、基础静态 SVG、静态 WebP、BMP、GIF 首帧和 TIFF 首页的后台打开与 FIT 显示。
 UI 继续使用现有命令行、菜单 / Ctrl+O 和拖放入口；本轮不增加产品交互。
 本表是实际兼容范围；[总体设计](DESIGN-v0.1.md)中的扩展格式和完整 SVG 验收仍是后续规划。
 
@@ -11,12 +11,14 @@ UI 继续使用现有命令行、菜单 / Ctrl+O 和拖放入口；本轮不增�
 | WebP | libwebp 1.6.0 decoder | 静态有损 / 无损、alpha、解码器缩放 FIT | 动画明确拒绝；不应用 ICC / EXIF 方向 |
 | BMP | 项目 C23 解码器 | 1 / 4 / 8 位调色板，16 / 24 / 32 位真彩，行对齐、上下行序，16 / 32 位 bitfields，RLE4 / RLE8 | 不支持内嵌 JPEG / PNG、OS/2 扩展压缩和色彩配置转换；RLE 不允许 top-down |
 | SVG | PlutoSVG 0.0.8 + 固定 PlutoVG 1.3.3 | 路径、基本几何、组、变换、fill / stroke、透明度、线性 / 径向渐变、viewBox，按 FIT 栅格化并允许放大 | 下述受限静态 profile，不等同于浏览器 SVG |
+| GIF | giflib 6.1.3 | GIF87a / GIF89a 首帧，逻辑画布、帧偏移、透明、交错、局部 / 全局调色板 | 只显示首帧，不读取全部动画帧、不播放、不应用后续 disposal |
+| TIFF / TIF | LibTIFF 4.7.2 | Classic / BigTIFF 普通尺寸首页；大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 不支持页面切换、浮点 / CMYK；调色板 16 位等不受支持组合明确拒绝，仍受内存限制 |
 
 BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头，位域掩码必须连续、不重叠且在位深范围内。
 BI_RGB 32 位的第四字节视为保留位，统一不透明；只有显式 alpha mask 才使用 alpha。
 RLE 的跳过区域使用调色板第零项填充，检查 run、delta、绝对块、padding 和结束标记。
 
-GIF、TIFF / BigTIFF、AVIF、HEIF / HEIC 以及动画、多页、超大图、REGION、预读仍未实现。
+GIF 可显示合成首帧，TIFF / BigTIFF 可显示普通尺寸首页；自动动画播放、多页切换、AVIF、HEIF / HEIC、超大图、REGION 和预读仍未实现。动画接口设计见 [v0.2 草案](CORE_ANIMATION-v0.2.md)，当前接口仍为 ABI 1。
 不支持 CAD、PSD / PSB 等专用设计源文件。
 
 ## 共用加载链路
@@ -36,7 +38,7 @@ UI poll → 上传 renderer → release event / pixels
 损坏输入异步返回 ERROR，worker 可继续接收下一张；单次请求至多一个终结事件。
 代码分为 `image.c` 共用准入 / FIT / tile / alpha 缩放，以及每格式独立文件；公共 C API 无新增依赖类型或 ABI 布局变化。
 
-query 对五类格式均返回 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，PNG / BMP 无额外能力位。
+query 对七类格式均返回静态 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，PNG / BMP / GIF / TIFF 无额外能力位。
 不报告 INCREMENTAL / REFINEMENT / REGION_DECODE。`load_mode` 仍是大小阈值分类，不代表已实现解码中逐步显示。
 本轮所有格式都先完成解码与版本核验，再交付最终 tile；WebP 的增量输入仅用于在输入块之间检查取消。
 
