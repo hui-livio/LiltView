@@ -1,0 +1,620 @@
+{
+  "verified_at": "2026-11-08T14:43:25.867220+00:00",
+  "sample_count": 62,
+  "all_passed": true,
+  "validation_scope": "Independent decoder validation of file integrity and metadata; not application compatibility or performance.",
+  "files": [
+    {
+      "path": "static/normal/jpeg/normal_1920x1080_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.773919,
+      "verification_seconds": 0.076
+    },
+    {
+      "path": "static/normal/png/normal_1920x1080_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.795638,
+      "verification_seconds": 0.083
+    },
+    {
+      "path": "static/normal/webp/normal_1920x1080_webp_q85.webp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.852827,
+      "verification_seconds": 0.108
+    },
+    {
+      "path": "static/normal/bmp/normal_1920x1080_bmp_rgb8.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "bmp_bits_per_pixel": 24,
+      "bmp_compression": 0,
+      "decoded_average": 127.795638,
+      "verification_seconds": 0.187
+    },
+    {
+      "path": "static/normal/tiff/normal_1920x1080_tiff_deflate-strip.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.795638,
+      "verification_seconds": 0.092
+    },
+    {
+      "path": "static/normal/png/normal_1920x1080_png_adam7.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.795638,
+      "verification_seconds": 0.093
+    },
+    {
+      "path": "static/normal/png/normal_1920x1080_png_indexed8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.861399,
+      "verification_seconds": 0.084
+    },
+    {
+      "path": "static/normal/bmp/normal_1920x1080_bmp_rle8.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "bmp_bits_per_pixel": 8,
+      "bmp_compression": 1,
+      "decoded_average": 127.971122,
+      "verification_seconds": 0.186
+    },
+    {
+      "path": "static/normal/jpeg/normal_4000x3000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.576665,
+      "verification_seconds": 0.096
+    },
+    {
+      "path": "static/normal/png/normal_4000x3000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.591623,
+      "verification_seconds": 0.106
+    },
+    {
+      "path": "static/normal/webp/normal_4000x3000_webp_q85.webp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.669583,
+      "verification_seconds": 0.131
+    },
+    {
+      "path": "static/normal/bmp/normal_4000x3000_bmp_rgb8.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "bmp_bits_per_pixel": 24,
+      "bmp_compression": 0,
+      "decoded_average": 127.591623,
+      "verification_seconds": 0.33
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_deflate-strip.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.591623,
+      "verification_seconds": 0.101
+    },
+    {
+      "path": "static/normal/jpeg/normal_4000x3000_jpeg_progressive-q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.576665,
+      "verification_seconds": 0.117
+    },
+    {
+      "path": "static/normal/jpeg/normal_4000x3000_jpeg_exif-orientation6.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.576665,
+      "verification_seconds": 0.11
+    },
+    {
+      "path": "static/normal/webp/normal_4000x3000_webp_lossless.webp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.591623,
+      "verification_seconds": 0.122
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_deflate-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.591623,
+      "verification_seconds": 0.098
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_bigtiff-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.591623,
+      "verification_seconds": 0.098
+    },
+    {
+      "path": "static/normal/jpeg/normal_6000x4000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.50056,
+      "verification_seconds": 0.103
+    },
+    {
+      "path": "static/normal/png/normal_6000x4000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.50875,
+      "verification_seconds": 0.133
+    },
+    {
+      "path": "static/normal/webp/normal_6000x4000_webp_q85.webp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.582509,
+      "verification_seconds": 0.168
+    },
+    {
+      "path": "static/normal/bmp/normal_6000x4000_bmp_rgb8.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "bmp_bits_per_pixel": 24,
+      "bmp_compression": 0,
+      "decoded_average": 127.50875,
+      "verification_seconds": 0.482
+    },
+    {
+      "path": "static/normal/tiff/normal_6000x4000_tiff_deflate-strip.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.50875,
+      "verification_seconds": 0.116
+    },
+    {
+      "path": "static/normal/jpeg/normal_8000x6000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.288677,
+      "verification_seconds": 0.133
+    },
+    {
+      "path": "static/normal/png/normal_8000x6000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.293554,
+      "verification_seconds": 0.197
+    },
+    {
+      "path": "static/normal/webp/normal_8000x6000_webp_q85.webp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.364632,
+      "verification_seconds": 0.282
+    },
+    {
+      "path": "static/normal/bmp/normal_8000x6000_bmp_rgb8.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "bmp_bits_per_pixel": 24,
+      "bmp_compression": 0,
+      "decoded_average": 127.293554,
+      "verification_seconds": 0.991
+    },
+    {
+      "path": "static/normal/tiff/normal_8000x6000_tiff_deflate-strip.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.293554,
+      "verification_seconds": 0.157
+    },
+    {
+      "path": "static/normal/png/normal_4000x3000_png_rgba8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "png_crc_verified": true,
+      "decoded_average": 125.833979,
+      "verification_seconds": 0.114
+    },
+    {
+      "path": "static/normal/webp/normal_4000x3000_webp_rgba8-lossless.webp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "decoded_average": 125.833979,
+      "verification_seconds": 0.128
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_rgba8.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "decoded_average": 125.833979,
+      "verification_seconds": 0.111
+    },
+    {
+      "path": "static/normal/bmp/normal_1920x1080_bmp_bgra32-bitfields.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "bmp_bits_per_pixel": 32,
+      "bmp_compression": 3,
+      "decoded_average": 125.161173,
+      "verification_seconds": 0.207
+    },
+    {
+      "path": "static/normal/png/normal_4000x3000_png_rgb16.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 32790.501084,
+      "verification_seconds": 0.142
+    },
+    {
+      "path": "static/normal/jpeg/normal_4000x3000_jpeg_checker128.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.902431,
+      "verification_seconds": 0.091
+    },
+    {
+      "path": "static/normal/png/normal_4000x3000_png_checker128.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.909177,
+      "verification_seconds": 0.108
+    },
+    {
+      "path": "static/normal/jpeg/normal_4000x3000_jpeg_checker8.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.488563,
+      "verification_seconds": 0.101
+    },
+    {
+      "path": "static/normal/png/normal_4000x3000_png_checker8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.491223,
+      "verification_seconds": 0.107
+    },
+    {
+      "path": "static/normal/svg/normal_1920x1080_svg_checker96_240-blocks.svg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "decoded_average": 160.273333,
+      "verification_seconds": 0.089
+    },
+    {
+      "path": "static/normal/svg/normal_1920x1080_svg_checker32_2040-blocks.svg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "decoded_average": 159.435957,
+      "verification_seconds": 0.105
+    },
+    {
+      "path": "static/normal/svg/normal_1920x1080_svg_checker20_5184-blocks.svg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 4,
+      "decoded_average": 159.437982,
+      "verification_seconds": 0.143
+    },
+    {
+      "path": "static/large/jpeg/large_10000x10000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.334869,
+      "verification_seconds": 0.185
+    },
+    {
+      "path": "static/large/png/large_10000x10000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.339831,
+      "verification_seconds": 0.344
+    },
+    {
+      "path": "static/large/tiff/large_10000x10000_tiff_deflate-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.339831,
+      "verification_seconds": 0.256
+    },
+    {
+      "path": "static/large/bmp/large_10000x10000_bmp_rgb24.bmp",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "bmp_bits_per_pixel": 24,
+      "bmp_compression": 0,
+      "decoded_average": 127.339831,
+      "verification_seconds": 2.327
+    },
+    {
+      "path": "static/large/jpeg/large_20000x20000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.52424,
+      "verification_seconds": 0.52
+    },
+    {
+      "path": "static/large/png/large_20000x20000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.526393,
+      "verification_seconds": 1.282
+    },
+    {
+      "path": "static/large/tiff/large_20000x20000_tiff_deflate-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.526393,
+      "verification_seconds": 0.757
+    },
+    {
+      "path": "static/large/tiff/large_20000x20000_tiff_bigtiff-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.526393,
+      "verification_seconds": 0.747
+    },
+    {
+      "path": "static/large/jpeg/large_40000x25000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.465504,
+      "verification_seconds": 1.23
+    },
+    {
+      "path": "static/large/png/large_40000x25000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.467297,
+      "verification_seconds": 3.024
+    },
+    {
+      "path": "static/large/tiff/large_40000x25000_tiff_deflate-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.467297,
+      "verification_seconds": 1.793
+    },
+    {
+      "path": "static/large/jpeg/large_2000x50000_jpeg_q90.jpg",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.609288,
+      "verification_seconds": 0.192
+    },
+    {
+      "path": "static/large/png/large_2000x50000_png_rgb8.png",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "png_crc_verified": true,
+      "decoded_average": 127.611581,
+      "verification_seconds": 0.335
+    },
+    {
+      "path": "static/large/tiff/large_2000x50000_tiff_deflate-tile512.tif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "decoded_bands": 3,
+      "decoded_average": 127.611581,
+      "verification_seconds": 0.242
+    },
+    {
+      "path": "animation/gif/animation_640x480_30frames_full-10fps-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 30,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.061
+    },
+    {
+      "path": "animation/gif/animation_1280x720_60frames_full-25fps-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 60,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.166
+    },
+    {
+      "path": "animation/gif/animation_1920x1080_60frames_full-25fps-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 60,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.334
+    },
+    {
+      "path": "animation/gif/animation_640x480_100frames_full-50fps-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 100,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.096
+    },
+    {
+      "path": "animation/gif/animation_1280x720_120frames_delta-alpha-disposal2-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 120,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.086
+    },
+    {
+      "path": "animation/gif/animation_1280x720_120frames_delta-alpha-disposal3-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 120,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.089
+    },
+    {
+      "path": "animation/gif/animation_640x480_30frames_full-10fps-once.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 30,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.05
+    },
+    {
+      "path": "animation/gif/animation_1280x720_40frames_delta-alpha-variable-delay-loop.gif",
+      "sha256_verified": true,
+      "metadata_verified": true,
+      "full_decode_verified": true,
+      "frame_count_verified": 40,
+      "timing_and_disposal_verified": true,
+      "verification_seconds": 0.048
+    }
+  ],
+  "matching_lossless_rgb": [
+    {
+      "path": "static/normal/png/normal_4000x3000_png_rgb8.png",
+      "decoded_rgb_sha256": "fdbc4edeae1d05381a245f3ea162a5f85afff51e5c08012cf9132fb95719e9b7"
+    },
+    {
+      "path": "static/normal/bmp/normal_4000x3000_bmp_rgb8.bmp",
+      "decoded_rgb_sha256": "fdbc4edeae1d05381a245f3ea162a5f85afff51e5c08012cf9132fb95719e9b7"
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_deflate-strip.tif",
+      "decoded_rgb_sha256": "fdbc4edeae1d05381a245f3ea162a5f85afff51e5c08012cf9132fb95719e9b7"
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_deflate-tile512.tif",
+      "decoded_rgb_sha256": "fdbc4edeae1d05381a245f3ea162a5f85afff51e5c08012cf9132fb95719e9b7"
+    },
+    {
+      "path": "static/normal/tiff/normal_4000x3000_tiff_bigtiff-tile512.tif",
+      "decoded_rgb_sha256": "fdbc4edeae1d05381a245f3ea162a5f85afff51e5c08012cf9132fb95719e9b7"
+    },
+    {
+      "path": "static/normal/webp/normal_4000x3000_webp_lossless.webp",
+      "decoded_rgb_sha256": "fdbc4edeae1d05381a245f3ea162a5f85afff51e5c08012cf9132fb95719e9b7"
+    }
+  ]
+}

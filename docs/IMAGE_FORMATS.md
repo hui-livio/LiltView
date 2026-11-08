@@ -22,6 +22,14 @@ GIF 已通过 ABI 2 会话及 UI 自动播放；TIFF / BigTIFF 显示普通尺�
 不支持 CAD、PSD / PSB 等专用设计源文件。
 后续开发范围分别为普通尺寸动图播放与静态超大图显示；超大动图明确不纳入范围。动画 FIT 缩小不能绕过源逻辑画布及实际工作集的限制，详见[动画范围约定](CORE_ANIMATION-v0.2.md#11-已确定的开发范围)。
 
+## 已确认的后续支持项（全部待开发）
+
+2026-11-08 已将 AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG 列入后续兼容支持计划。另列无文件头的原始 RGB / 灰度、YUV 和 Bayer 输入与渲染，要求能够设置宽高、具体格式、位深、字节序、文件 / 平面偏移和行跨度等必要信息。
+
+YUV 覆盖 4:4:4、4:2:2、4:2:0 的具体存储布局，包括 YUYV / YUY2、UYVY、YVYU、VYUY、I420 / IYUV、YV12、NV12 / NV21、NV16 / NV61、NV24 / NV42 及待明确规范的高位深 / packed 444 变体。用户提到的 `UYUV` 暂按 `UYVY` 记录，不能作为未定义布局直接解析。Bayer 覆盖 RGGB、BGGR、GRBG、GBRG，位深、打包、去马赛克和颜色处理分项验收。
+
+这些条目均为 **待开发**，没有变更上方已实现能力声明。待办、边界和验收条件以 [FORMAT_ROADMAP.md](FORMAT_ROADMAP.md) 为准；原始像素参数和布局见 [RAW_PIXEL_INPUT.md](RAW_PIXEL_INPUT.md)，对应性能测试见 [TEST_PLAN.md](../benchmarks/TEST_PLAN.md)。新增格式的输入样本待补充，尚无性能实测结论。
+
 ## 共用加载链路
 
 ```text

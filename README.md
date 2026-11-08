@@ -54,7 +54,7 @@ python3 scripts/register_desktop.py
 - C++23 + Dear ImGui 负责界面与窗口行为；必要时显式提供 C++20 兼容构建。
 - 使用 CMake、spdlog、Catch2 / CTest，窗口采用 SDL3 + OpenGL 3.3。
 - 已有中英双语界面；更新检测优先使用 cpp-httplib，但暂不实现，当前不引入其网络依赖。
-- 已接入 JPEG（JPG / JPEG）、PNG、基础 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页；AVIF、HEIF 等后续扩展。
+- 已接入 JPEG（JPG / JPEG）、PNG、基础 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页。AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG，以及可配置宽高和布局的原始 RGB / 灰度、YUV、Bayer 输入均列为待开发，详见[格式支持计划](docs/FORMAT_ROADMAP.md)。
 - 根据图片规模采用完整后显示、渐进更新或超大图分块处理。
 - 动画规划覆盖普通尺寸动图；超大图规划只针对静态图，不考虑超大动图。
 - 保持公共 C API 独立，为后续 Win32 界面适配保留空间。
@@ -65,6 +65,8 @@ python3 scripts/register_desktop.py
 - [首版设计文档](docs/DESIGN-v0.1.md)
 - [Core 动画会话与 GIF 播放](docs/CORE_ANIMATION-v0.2.md)
 - [图片格式与解码实现](docs/IMAGE_FORMATS.md)
+- [格式兼容支持待开发清单](docs/FORMAT_ROADMAP.md) · [原始 RGB / YUV / Bayer 输入方案](docs/RAW_PIXEL_INPUT.md)
+- [性能测试方法与格式矩阵](benchmarks/TEST_PLAN.md) · [棋盘格随机色块输入](benchmarks/inputs/README.md)
 - [跨平台渲染模块设计](docs/RENDERER-v0.1.md)
 - [CLI11 命令行与 iguana YAML 配置](docs/CONFIGURATION.md)
 - [工程落地与中英双语方案](docs/IMPLEMENTATION-v0.1.md)

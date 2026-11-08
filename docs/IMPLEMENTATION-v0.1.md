@@ -228,7 +228,8 @@ ImGui::Button(label);
 2. 锁定依赖版本，建立 CMake 目标、标准检查及核心测试入口。
 3. 先打通 C 核心加载与 ImGui 显示，再接入日志和双语基础界面。
 4. 按总体设计实现渐进、预读、预算及超大图处理。
-5. 主线完成后再评估更新检测排期；后续采用 cpp-httplib，届时明确版本信息协议、TLS 配置和网络测试。当前不以实现更新模块作为首版验收条件。
+5. 后续格式按 [待开发清单](FORMAT_ROADMAP.md) 接入，含 AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG，以及 [原始 RGB / 灰度、YUV、Bayer 输入](RAW_PIXEL_INPUT.md)。均为待开发，解码 / 转换 / 去马赛克 / 渲染及资源测量统一纳入 [性能测试计划](../benchmarks/TEST_PLAN.md)。
+6. 主线完成后再评估更新检测排期；后续采用 cpp-httplib，届时明确版本信息协议、TLS 配置和网络测试。当前不以实现更新模块作为首版验收条件。
 
 依赖来源、SDL3 / OpenGL 后端及默认鸿蒙字体已确定，九个直接 submodule 已完成集成，PlutoVG 使用嵌套 gitlink；libjpeg-turbo 3.1.2 用 ExternalProject 静态构建。后续重点是扩展格式和超大图；字体 / IME / 跨屏 DPI 还需更完整验收。更新检测专用的 cpp-httplib 版本、TLS 后端和版本信息协议延后决定。
 
