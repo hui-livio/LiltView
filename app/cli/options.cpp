@@ -11,7 +11,7 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     auto &options = result.options;
     CLI::App app{"LiltView " LILTVIEW_VERSION " - a lightweight image viewer", "liltview"};
     app.set_version_flag("--version", "LiltView " LILTVIEW_VERSION);
-    app.footer("Open JPEG, PNG, SVG, static WebP, BMP, GIF (first frame), TIFF (first page). Large images are pending.");
+    app.footer("Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF (first page). Large images are pending.");
 
     std::string language;
     auto *language_option =

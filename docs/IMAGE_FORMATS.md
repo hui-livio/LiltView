@@ -1,6 +1,6 @@
 # 图片格式与解码实现
 
-当前支持 JPEG、PNG、基础静态 SVG、静态 WebP、BMP、GIF 首帧和 TIFF 首页的后台打开与 FIT 显示。
+当前支持 JPEG、PNG、基础静态 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页的后台打开与 FIT 显示。
 UI 继续使用现有命令行、菜单 / Ctrl+O 和拖放入口；本轮不增加产品交互。
 本表是实际兼容范围；[总体设计](DESIGN-v0.1.md)中的扩展格式和完整 SVG 验收仍是后续规划。
 
@@ -11,15 +11,16 @@ UI 继续使用现有命令行、菜单 / Ctrl+O 和拖放入口；本轮不增�
 | WebP | libwebp 1.6.0 decoder | 静态有损 / 无损、alpha、解码器缩放 FIT | 动画明确拒绝；不应用 ICC / EXIF 方向 |
 | BMP | 项目 C23 解码器 | 1 / 4 / 8 位调色板，16 / 24 / 32 位真彩，行对齐、上下行序，16 / 32 位 bitfields，RLE4 / RLE8 | 不支持内嵌 JPEG / PNG、OS/2 扩展压缩和色彩配置转换；RLE 不允许 top-down |
 | SVG | PlutoSVG 0.0.8 + 固定 PlutoVG 1.3.3 | 路径、基本几何、组、变换、fill / stroke、透明度、线性 / 径向渐变、viewBox，按 FIT 栅格化并允许放大 | 下述受限静态 profile，不等同于浏览器 SVG |
-| GIF | giflib 6.1.3 | GIF87a / GIF89a 首帧，逻辑画布、帧偏移、透明、交错、局部 / 全局调色板 | 只显示首帧，不读取全部动画帧、不播放、不应用后续 disposal |
+| GIF | giflib 6.1.3 | GIF87a / GIF89a 动画会话，透明、交错、局部调色板、disposal 0..3、循环次数与源帧时长 | 普通尺寸顺序播放；静态 submit 仍可仅读首帧；无 seek / 超大动图 |
 | TIFF / TIF | LibTIFF 4.7.2 | Classic / BigTIFF 普通尺寸首页；大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 不支持页面切换、浮点 / CMYK；调色板 16 位等不受支持组合明确拒绝，仍受内存限制 |
 
 BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头，位域掩码必须连续、不重叠且在位深范围内。
 BI_RGB 32 位的第四字节视为保留位，统一不透明；只有显式 alpha mask 才使用 alpha。
 RLE 的跳过区域使用调色板第零项填充，检查 run、delta、绝对块、padding 和结束标记。
 
-GIF 可显示合成首帧，TIFF / BigTIFF 可显示普通尺寸首页；自动动画播放、多页切换、AVIF、HEIF / HEIC、超大图、REGION 和预读仍未实现。动画接口设计见 [v0.2 草案](CORE_ANIMATION-v0.2.md)，当前接口仍为 ABI 1。
+GIF 已通过 ABI 2 会话及 UI 自动播放；TIFF / BigTIFF 显示普通尺寸首页。动画 WebP / APNG、多页切换、AVIF、HEIF / HEIC、静态超大图、REGION 和预读仍未实现。[GIF 动画接口与实现](CORE_ANIMATION-v0.2.md)。
 不支持 CAD、PSD / PSB 等专用设计源文件。
+后续开发范围分别为普通尺寸动图播放与静态超大图显示；超大动图明确不纳入范围。动画 FIT 缩小不能绕过源逻辑画布及实际工作集的限制，详见[动画范围约定](CORE_ANIMATION-v0.2.md#11-已确定的开发范围)。
 
 ## 共用加载链路
 
@@ -36,11 +37,11 @@ UI poll → 上传 renderer → release event / pixels
 文件扩展名和大小写不决定 decoder；同一个已打开文件用于探测、解码及最终版本核验。
 修改文件后不发布旧版本像素；INFO 可以早于解码完成。已经借出的事件 / 像素寿命、取消竞争及关闭规则沿用 [Core Runtime](CORE_RUNTIME-v0.1.md)。
 损坏输入异步返回 ERROR，worker 可继续接收下一张；单次请求至多一个终结事件。
-代码分为 `image.c` 共用准入 / FIT / tile / alpha 缩放，以及每格式独立文件；公共 C API 无新增依赖类型或 ABI 布局变化。
+代码分为 `image.c` 共用准入 / FIT / tile / alpha 缩放，以及每格式独立文件；公共 C API 不暴露第三方依赖类型；动画会话接入后布局已升级为 ABI 2。
 
-query 对七类格式均返回静态 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，PNG / BMP / GIF / TIFF 无额外能力位。
+query 对七类格式均返回静态 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 另报 ANIMATION，PNG / BMP / TIFF 无额外能力位。
 不报告 INCREMENTAL / REFINEMENT / REGION_DECODE。`load_mode` 仍是大小阈值分类，不代表已实现解码中逐步显示。
-本轮所有格式都先完成解码与版本核验，再交付最终 tile；WebP 的增量输入仅用于在输入块之间检查取消。
+静态请求及每个动画帧请求都先完成解码与版本核验，再交付最终 tile；WebP 的增量输入仅用于在输入块之间检查取消。
 
 ## 像素、内存与取消
 
@@ -58,7 +59,7 @@ JPEG 保留缩放解码加两行 FIT 缓冲的路径。
 
 PNG 为 Adam7 保留完整原始 RGBA，再生成 FIT；BMP 保留完整文件与原始 RGBA，再生成 FIT。
 WebP 保留完整压缩输入，使用外部 FIT 输出缓冲，并保守预约内部解码工作集。
-SVG 保留源文本与文档树，直接绘制到 FIT 缓冲。
+SVG 保留源文本与文档树，直接绘制到 FIT 缓冲。GIF 动画保留 decoder、完整逻辑画布和 disposal 备份，最多另外生成一帧 FIT 候选；驻留总子预算默认 min(CPU/2, 128 MiB)，UI 两张纹理均受现有 GPU 预算约束。
 因此低于硬尺寸限制的图片仍可能因实际 CPU / GPU 预算返回 MEMORY_BUDGET。
 这轮不是超大图的低内存解码实现。
 
@@ -83,5 +84,5 @@ profile 是保守兼容子集，不是通用 XML 验证器；属性和路径语�
 安装包包含 libpng、zlib、libwebp 的 COPYING / PATENTS、PlutoSVG / PlutoVG 许可证、bundled stb 署名及 FreeType FTL。
 
 格式测试覆盖内容探测、PNG 位深 / Adam7 / tRNS、WebP 有损 / 无损 / alpha、BMP 位深 / 掩码 / RLE / 行序、SVG 渐变 / FIT / alpha，以及损坏输入、动画拒绝、预算、修改源文件和取消。
-`tests/fixtures/` 保存原创小样本，desktop.formats 用真实 OpenGL 回读截图检查四类格式的红色内容。
+`tests/fixtures/` 保存原创小样本，desktop.formats 用真实 OpenGL 回读截图检查六类格式的红色内容；desktop.animation 验证真实 OpenGL 红 / 蓝帧切换，desktop.animation_app 验证应用进入下一轮。
 最新构建验证记录见 [目录与构建](PROJECT_STRUCTURE.md)。

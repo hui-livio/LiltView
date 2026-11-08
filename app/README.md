@@ -24,4 +24,4 @@
 
 `update/` 延期，当前不创建网络模块或获取 cpp-httplib。
 
-当前可打开 JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 首帧和 TIFF 首页，viewer 每帧最多消费约 4 ms 的 core 事件，上传返回即 release 像素。CLI、菜单 / Ctrl+O 和拖放接入；目录导航仍禁用。FIT 输出受 framebuffer 和设备上限约束，100% 仅在 FIT 未缩小源图时可用。
+当前可打开 JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页，viewer 每帧最多消费约 4 ms 的 core 事件，上传返回即 release 像素。CLI、菜单 / Ctrl+O 和拖放接入；目录导航仍禁用。FIT 输出受 framebuffer 和设备上限约束，100% 仅在 FIT 未缩小源图时可用。

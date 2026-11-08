@@ -243,7 +243,9 @@ private:
     void process_events(bool smoke_test)
     {
         const bool active = viewer_->loading() || SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
-        const int wait_ms = smoke_test ? 0 : (active ? 16 : 200);
+        const auto flags  = SDL_GetWindowFlags(window_);
+        viewer_->suspend_animation(!smoke_test && (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)));
+        const int wait_ms = smoke_test ? 0 : viewer_->wait_timeout_ms(active ? 16 : 200);
         SDL_Event event;
         if (!SDL_WaitEventTimeout(&event, wait_ms))
             return;

@@ -31,6 +31,7 @@ void LV_CALL lv_core_config_init(lv_core_config *out_config)
     out_config->foreground_workers   = 1;
     out_config->prefetch_workers     = 1;
     out_config->log_level            = LV_LOG_WARN;
+    lv_animation_limits_init(&out_config->animation);
 }
 
 void LV_CALL lv_request_desc_init(lv_request_desc *out_request)
@@ -45,4 +46,23 @@ void LV_CALL lv_request_desc_init(lv_request_desc *out_request)
     out_request->kind        = LV_REQUEST_DISPLAY;
     out_request->priority    = LV_PRIORITY_CURRENT;
     out_request->target.kind = LV_TARGET_FIT;
+}
+
+
+void LV_CALL lv_animation_limits_init(lv_animation_limits *out)
+{
+    if (out)
+        *out = (lv_animation_limits){.max_sessions = 2};
+}
+void LV_CALL lv_animation_open_desc_init(lv_animation_open_desc *out)
+{
+    if (out)
+        *out = (lv_animation_open_desc){
+            .struct_size = sizeof *out, .priority = LV_PRIORITY_CURRENT, .target = {.kind = LV_TARGET_FIT}};
+}
+void LV_CALL lv_animation_request_desc_init(lv_animation_request_desc *out)
+{
+    if (out)
+        *out = (lv_animation_request_desc){
+            .struct_size = sizeof *out, .action = LV_ANIMATION_NEXT, .priority = LV_PRIORITY_VISIBLE_DETAIL};
 }

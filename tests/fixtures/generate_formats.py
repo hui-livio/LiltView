@@ -36,6 +36,8 @@ def gif_tiff(folder, width, height):
             frames += bytes((len(block),)) + block
         frames += b"\x00"
     (folder / "red-first-frame.gif").write_bytes(header + frames + b";")
+    loop = b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00"
+    (folder / "red-blue-loop.gif").write_bytes(header + loop + frames + b";")
 
     # Classic little-endian TIFF with one uncompressed RGB strip.
     tags = [(256, 4, 1, width), (257, 4, 1, height), (258, 3, 3, 0),

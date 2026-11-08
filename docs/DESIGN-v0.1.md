@@ -11,7 +11,7 @@
 
 CMake 目标、依赖边界、日志、更新检测、Catch2 测试及中英双语的详细方案见 [工程落地与中英双语方案](IMPLEMENTATION-v0.1.md)。
 
-公共接口已形成 [Core API v0.1 草案](CORE_API-v0.1.md)及 [C 头文件](../core/include/liltview/core.h)。五类格式已接入，当前兼容子集以[格式兼容表](IMAGE_FORMATS.md)及 API §1.2 为准；当前目录与构建入口见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。
+公共接口已形成 [Core API v0.1 草案](CORE_API-v0.1.md)及 [C 头文件](../core/include/liltview/core.h)。七类格式与普通 GIF 播放已接入，当前兼容子集以[格式兼容表](IMAGE_FORMATS.md)及 API §1.2 为准；当前目录与构建入口见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。
 
 ## 1. 目标与当前决策
 
@@ -371,7 +371,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 8. 公共 C API 契约草案
 
-本节是接口摘要。完整声明见 [Core API v0.1](CORE_API-v0.1.md)，调用时序、内存管理、生命周期和边界验收见 [Core Runtime](CORE_RUNTIME-v0.1.md)；五类格式 DISPLAY / FIT 已实现，缓存和超大图仍是后续约束。
+本节是接口摘要。完整声明见 [Core API v0.1](CORE_API-v0.1.md)，调用时序、内存管理、生命周期和边界验收见 [Core Runtime](CORE_RUNTIME-v0.1.md)；七类格式 DISPLAY / FIT 及 GIF 会话已实现，缓存和静态超大图仍是后续约束。
 
 ### 8.1 操作
 
@@ -429,7 +429,7 @@ QUEUED / PROBING / DECODING → CANCELLED
 
 ## 10. 建议代码结构
 
-以下展示完整规划结构；实际目录和目标以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前已有五类格式解码、renderer、主窗口、双语、日志和设置；规划目录不等于超大图、缓存和扩展格式已实现。
+以下展示完整规划结构；实际目录和目标以 [项目目录与构建](PROJECT_STRUCTURE.md)为准。当前已有七类格式解码、GIF 播放、renderer、主窗口、双语、日志和设置；规划目录不等于超大图、缓存和扩展格式已实现。
 
 ```text
 LiltView/

@@ -7,7 +7,7 @@
 
 本文记录 CMake 工程、依赖边界、日志、更新检测、测试和中英双语的讨论结果。当前构建入口及验证范围见 [项目目录与 CMake 构建](PROJECT_STRUCTURE.md)。主窗口、独立 renderer 和JPEG / PNG / 基础 SVG / 静态 WebP / BMP 加载显示已实现；扩展格式、超大图和更新检测后续实施。
 
-核心接口已单独形成 [Core API 设计](CORE_API-v0.1.md)及公共头文件；全部公共入口已实现，当前支持 Linux 单 worker 五类格式 DISPLAY / FIT；其余能力返回 UNSUPPORTED。日志和唤醒回调、请求与像素所有权以该契约为准。
+核心接口已单独形成 [Core API 设计](CORE_API-v0.1.md)及公共头文件；全部公共入口已实现，当前支持 Linux 单 worker 七类格式 DISPLAY / FIT 及 ABI 2 GIF 动画会话；其余能力返回 UNSUPPORTED。日志和唤醒回调、请求与像素所有权以该契约为准。
 
 ## 1. 当前结论
 

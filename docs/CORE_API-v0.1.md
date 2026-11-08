@@ -1,6 +1,6 @@
-# LiltView Core API v0.1
+# LiltView Core API（当前 ABI 2）
 
-- 状态：接口仍为 v0.1 草案；Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 引擎已实现，支持范围见 §1.2。
+- 状态：静态契约沿用 v0.1，运行时已迁移 ABI 2；Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 引擎已实现，支持范围见 §1.2。
 - 实现语言：C23；调用侧：C、C++20 / C++23。
 - 公共头文件：[core/include/liltview/core.h](../core/include/liltview/core.h)
 - 相关设计：[总体设计](DESIGN-v0.1.md)、[工程落地](IMPLEMENTATION-v0.1.md)。
@@ -10,14 +10,14 @@
 
 核心负责读取、解码 / SVG 栅格化、后台任务、预读、CPU 缓存与像素交付。核心不包含 ImGui、GPU 对象、窗口系统、翻译、spdlog 或更新检测依赖。
 
-首版接口只接受本地文件，不提前引入网络数据源、解码插件 ABI 或编辑接口；当前运行时不含动画播放接口，后续设计见 [动画接口 v0.2](CORE_ANIMATION-v0.2.md)。格式枚举包含 JPEG、PNG、SVG、WebP、BMP、GIF、TIFF；实际编译支持通过 `lv_core_query_format()` 查询，不能以枚举存在代替实现验收。
+首版接口只接受本地文件，不提前引入网络数据源、解码插件 ABI 或编辑接口；已实现 GIF 动画会话和异步帧请求，详细契约见 [动画接口 v0.2](CORE_ANIMATION-v0.2.md)。格式枚举包含 JPEG、PNG、SVG、WebP、BMP、GIF、TIFF；实际编译支持通过 `lv_core_query_format()` 查询，不能以枚举存在代替实现验收。
 
 ### 1.2 当前实现范围
 
-- 所有公共函数已有真实实现；query 对七类格式均报告静态显示可用；JPEG / WebP 为 SCALED_DECODE，SVG 为 VECTOR_RASTERIZE，PNG / BMP / GIF / TIFF 无额外能力位。不报告增量预览或随机区域能力。
+- 所有公共函数已有真实实现；query 对七类格式均报告静态显示可用，GIF 另报 ANIMATION；JPEG / WebP 为 SCALED_DECODE，SVG 为 VECTOR_RASTERIZE，PNG / BMP / TIFF 无额外能力位。不报告增量预览或随机区域能力。
 - 仅 Linux 常规本地文件、DISPLAY / FIT、一个前台 worker。PREFETCH / REGION 请求同步返回 UNSUPPORTED；多前台 worker、非零 cache / disk cache 预算在 create 返回 UNSUPPORTED。配置初值保留，prefetch_workers 当前不创建线程，也不使预读可用。
 - libjpeg-turbo 3.1.2，8 位 RGB / 灰度、baseline / progressive JPEG 最终结果、EXIF 1..8。CMYK / YCCK、12 位 JPEG 和超大图未接入；12 位 / 尺寸超过当前范围为 DIMENSION_LIMIT，颜色空间不支持为 FORMAT_UNSUPPORTED。
-- PNG 的透明 / 索引色 / Adam7 / 高位深转换、静态 WebP、BMP 常见位深 / bitfields / RLE、SVG 基础静态 profile 已实现。GIF 支持合成首帧、TIFF / BigTIFF 支持普通尺寸首页，尚不支持动画 / 翻页；APNG / 动画 WebP 拒绝；SVG 文字、裁剪、内嵌位图等未实现。详见[格式兼容表](IMAGE_FORMATS.md)。
+- PNG 的透明 / 索引色 / Adam7 / 高位深转换、静态 WebP、BMP 常见位深 / bitfields / RLE、SVG 基础静态 profile 已实现。GIF 支持合成首帧、TIFF / BigTIFF 支持普通尺寸首页，静态 submit 仍为首帧，UI 另使用 GIF 动画会话自动播放；TIFF 翻页未实现；APNG / 动画 WebP 拒绝；SVG 文字、裁剪、内嵌位图等未实现。详见[格式兼容表](IMAGE_FORMATS.md)。
 - 位图文件最多 64 MiB；原始 `width × height × 4` 不超过 large_pixel_bytes 和 256 MiB 硬限制中的较小值，实际解码还须满足工作集预算。不因 FIT 输出很小而宣称支持超大源图。
 - JPEG 先做缩放解码并以两行缓冲双线性生成完整 FIT CPU 图，再复制为最终 tile 通过有界队列交付；当前不发布解码中的行或渐进扫描。tile 可分帧上传，小图超时显示由 UI 计时器控制。
 - 当前普通图计划预留 codec 保守 allowance、完整 FIT 图及其全部输出 tile 的潜在峰值。队列仍以单块 / 字节限流；这不是后续超大图的低内存扫描实现。第三方内部 / C runtime 分配不是 RSS 硬上限，accounted_cpu_bytes 不含未实际分配的预约。
@@ -54,7 +54,7 @@
 - 公共头文件只依赖 `stddef.h`、`stdint.h`，使用 `extern "C"` 供 C++ 调用。
 - ABI 字段使用固定宽度整数类型，匿名 enum 只定义常量；不把编译器 enum 大小、C++ 类或原子类型作为接口布局。
 - `size_t` 只用于地址空间内存长度；不承诺跨 32 / 64 位进程共享结构，更不是磁盘序列化格式。
-- 配置包含 `abi_version`、`struct_size`，请求包含 `struct_size`。v0.1 要求版本和结构大小精确匹配，不提供大小不匹配的“尽力兼容”。布局或语义不兼容变化需要提升 ABI 版本。
+- 配置包含 `abi_version`、`struct_size`，请求包含 `struct_size`。当前 ABI 2 要求版本和结构大小精确匹配，不提供大小不匹配的“尽力兼容”。布局或语义不兼容变化需要提升 ABI 版本。
 - 初始化函数将结构字段重置后填默认值；空输出指针为无操作。调用者使用与库匹配的头文件；动态加载不同版本时，应先查询 `lv_core_abi_version()`，匹配后再调用结构初始化函数。
 - `create` 失败将 `*out_core` 置空；`submit` 失败将 ID 置零；`poll` 无结果或失败将事件置空。输出指针参数本身必须非空。
 - 无效配置和请求返回 `LV_INVALID_ARGUMENT`；不满足 ABI 返回 `LV_ABI_MISMATCH`；同步失败不产生请求事件。
@@ -203,7 +203,7 @@ core 创建所在的线程是该实例唯一控制线程，所有 core 控制函
 
 ### 8.3 唤醒协议
 
-队列从空变为非空时发出合并唤醒；worker 全部退出时也唤醒控制线程。回调只投递平台事件，不读取核心队列。允许多余唤醒。
+队列从空变为非空时发出合并唤醒；会话槽、请求槽、控制记录和像素资源归还时也安排合并唤醒，允许此时 poll 返回 EMPTY；worker 全部退出时也唤醒控制线程。回调只投递平台事件，不读取核心队列。允许多余唤醒。
 
 UI 每次唤醒后持续 poll 到 EMPTY，或在达到每帧预算后自行安排下一帧继续排空。队列仍非空时不能完全依赖新的边沿通知，否则可能丢失后续消费机会。发布与唤醒需保证消费者检查 EMPTY 和进入平台等待之间不会丢失通知。
 

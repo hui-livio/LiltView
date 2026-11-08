@@ -20,7 +20,7 @@ LiltView/
 │   └── LiltViewCodecs.cmake       # PNG / WebP / SVG 静态库配置
 ├── core/
 │   ├── CMakeLists.txt
-│   ├── include/liltview/core.h    # 公共 C API 草案
+│   ├── include/liltview/core.h    # 公共 ABI 2 C API
 │   └── src/
 │       ├── README.md             # 后续核心模块分区
 │       ├── api/                  # 初始化、校验、worker 与生命周期
@@ -62,7 +62,7 @@ LiltView/
 
 Core API 的请求时序、对象所有权、关闭过程、资源预算与边界行为另见 [Core Runtime 契约](CORE_RUNTIME-v0.1.md)。实现尚未完成时，测试覆盖状态以该文档的验收矩阵和 CMake 测试目标为准。
 
-动画会话和逐帧请求的设计见 [Core 动画 v0.2](CORE_ANIMATION-v0.2.md)。声明草案在 `docs/api/core_animation_v0_2.h`，仅由 `tests/contract/animation_draft.c/.cpp` 校验 C23 / C++20 / C++23 类型与布局；不安装、不导出未实现符号，当前运行时仍为 ABI 1。
+GIF 动画会话和逐帧请求已实现为 ABI 2，正式声明在 `core/include/liltview/core.h`；docs/api 旧入口仅转发。契约测试 `tests/contract/animation.c/.cpp` 校验 C23 / C++20 / C++23 布局及真实初始化器，运行测试覆盖 core 会话、播放时间、UI 纹理轮换与 OpenGL 帧回读。详见 [Core 动画 v0.2](CORE_ANIMATION-v0.2.md)。
 
 ## 2. 构建目标
 
@@ -188,6 +188,8 @@ CLI11 / iguana YAML 接入后：dev 49/49，C++20 应用 42/42；配置 / CLI �
 日志等级配置与审查修复后：dev 52/52、C++20 应用 44/44；配置 / CLI / 日志 ASan/UBSan 检查 14 个用例、179 项断言通过。实际 Debug 和 Release 程序验证了默认 debug / warn、YAML 覆盖与 off；已补测不一致缩进、字符串字段误用集合、文档标记和截图 flag override。
 
 本轮多格式验证：dev **64/64**（含 JPEG 及 PNG / SVG / WebP / BMP 的真实 OpenGL 截图），C++20 应用 **55/55**；核心 ASan/UBSan **24 个用例、4559 项断言**通过。Release 构建、迁移安装和四种新增格式截图通过。应用 ELF 直接依赖不包含 SDL / codec 动态库，codec 均静态链接；系统 Fontconfig / FreeType / GIO 等仍可能间接依赖系统 libpng / zlib，不能把 ldd 的递归依赖当作错误静态链接。未 strip Release 主程序约 7.16 MiB，另附约 7.88 MiB 字体；这不是完整分发包体积或性能结论。具体兼容和资源限制见[图片格式说明](IMAGE_FORMATS.md)。
+
+GIF 动画落地（ABI 2）：dev **94/94**、C++20 应用 **82/82** 通过；核心 ASan/UBSan **44 个用例**通过。测试覆盖单帧任务、循环 / RESET epoch、disposal 背景 / 前态、透明 / 交错、保留旧帧像素、取消 / 关闭、源变更、驻留预算与资源可用唤醒。另有纯时钟测试、GPU 双纹理预算不足保留原帧、循环仅创建两张纹理、OpenGL 红 / 蓝帧回读，以及完整应用进入第二轮的私有会话验证。Release 已构建并迁移安装，安装后的 GIF 循环和既有格式显示通过。本轮没有新增 renderer 公共方法或 Windows 实现。
 
 ## 6. 下一步
 

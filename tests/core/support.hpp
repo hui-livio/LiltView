@@ -61,16 +61,19 @@ struct Engine
             self.changed.wait(lock, [&] { return self.proceed; });
         }
     }
-    explicit Engine(std::uint32_t max = 1, std::uint64_t memory = 64ULL * 1024 * 1024)
+    explicit Engine(std::uint32_t max = 1, std::uint64_t memory = 64ULL * 1024 * 1024, std::uint32_t sessions = 2,
+                    std::uint64_t resident = 0)
     {
         lv_core_config config;
         lv_core_config_init(&config);
-        config.cpu_budget_bytes  = memory;
-        config.tile_edge         = 16;
-        config.queue_pixel_bytes = 16 * 16 * 4;
-        config.max_requests      = max;
-        config.wakeup            = wake;
-        config.wakeup_userdata   = this;
+        config.cpu_budget_bytes                = memory;
+        config.tile_edge                       = 16;
+        config.queue_pixel_bytes               = 16 * 16 * 4;
+        config.max_requests                    = max;
+        config.wakeup                          = wake;
+        config.wakeup_userdata                 = this;
+        config.animation.max_sessions          = sessions;
+        config.animation.resident_budget_bytes = resident;
         if (lv_core_create(&config, &core) != LV_OK)
             throw std::runtime_error("core creation");
     }

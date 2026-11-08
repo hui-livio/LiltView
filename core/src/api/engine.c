@@ -3,118 +3,14 @@
 #include <string.h>
 #include "../internal.h"
 
-static void discard_tiles(lv_core *core, lv_request_id id)
-{
-    lv_event **link = &core->head;
-    core->tail      = nullptr;
-    while (*link)
-    {
-        lv_event *event = *link;
-        if (event->view.type == LV_EVENT_REGION_READY && (!id || event->view.request_id == id))
-        {
-            *link               = event->next;
-            core->queued_bytes -= event->view.as.region.pixels->view.byte_count;
-            lv_event_drop_locked(event);
-        }
-        else
-        {
-            core->tail = event;
-            link       = &event->next;
-        }
-    }
-}
-
-static void finish_request(lv_core *core, lv_request *r, lv_error_info error)
-{
-    mtx_lock(&core->mutex);
-    core->reserved -= r->reservation;
-    r->reservation  = 0;
-    core->used     -= r->path_bytes;
-    free(r->path);
-    r->path = nullptr;
-    if (r->source)
-    {
-        --r->source->refs;
-        r->source = nullptr;
-    }
-    if (r->info)
-    {
-        lv_event_drop_locked(r->info);
-        r->info = nullptr;
-    }
-    lv_event *terminal = r->terminal;
-    if (core->closing)
-    {
-        terminal->terminal_request = r;
-        lv_event_drop_locked(terminal);
-    }
-    else
-    {
-        lv_event_type type = atomic_load(&r->cancelled) ? LV_EVENT_CANCELLED : error.code ? LV_EVENT_ERROR : LV_EVENT_COMPLETE;
-        if (type == LV_EVENT_ERROR)
-        {
-            error.has_partial_output = r->partial;
-            terminal->view.as.error  = error;
-        }
-        if (type == LV_EVENT_COMPLETE)
-            terminal->view.as.completion = (lv_completion_info){r->final_tiles, lv_clock_ns() - r->started_ns, r->bytes_read};
-        r->state                   = LV_TERMINAL;
-        terminal->terminal_request = r;
-        lv_enqueue_locked(core, terminal, r, type);
-    }
-    cnd_broadcast(&core->condition);
-    mtx_unlock(&core->mutex);
-    lv_notify(core);
-}
-
-static lv_request *next_request(lv_core *core)
-{
-    lv_request *best = nullptr;
-    for (uint32_t i = 0; i < core->config.max_requests; ++i)
-    {
-        lv_request *r = &core->requests[i];
-        if (r->state == LV_PENDING &&
-            (!best || r->desc.priority < best->desc.priority || (r->desc.priority == best->desc.priority && r->id < best->id)))
-            best = r;
-    }
-    return best;
-}
-
-static int worker_main(void *data)
-{
-    lv_core *core = data;
-    for (;;)
-    {
-        mtx_lock(&core->mutex);
-        lv_request *r;
-        while (!(r = next_request(core)) && !core->closing)
-            cnd_wait(&core->condition, &core->mutex);
-        if (!r)
-        {
-            mtx_unlock(&core->mutex);
-            lv_notify(core);
-            mtx_lock(&core->mutex);
-            core->exited = true;
-            cnd_broadcast(&core->condition);
-            mtx_unlock(&core->mutex);
-            return 0;
-        }
-        r->state = LV_RUNNING;
-        mtx_unlock(&core->mutex);
-        lv_error_info error = {0};
-        if (!lv_stopped(core, r))
-            lv_decode_image(core, r, &error);
-        finish_request(core, r, error);
-    }
-}
-
 static bool config_valid(const lv_core_config *c)
 {
     const uint64_t tile = (uint64_t)c->tile_edge * c->tile_edge * 4;
     return c->cpu_budget_bytes && c->queue_pixel_bytes >= tile && c->queue_pixel_bytes <= c->cpu_budget_bytes &&
         c->cache_budget_bytes <= c->cpu_budget_bytes && c->max_requests && c->max_requests <= 1024 && c->tile_edge >= 16 &&
         c->tile_edge <= 1024 && !(c->tile_edge & (c->tile_edge - 1)) && c->foreground_workers &&
-        c->small_pixel_bytes <= c->large_pixel_bytes && c->log_level <= LV_LOG_OFF;
+        c->small_pixel_bytes <= c->large_pixel_bytes && c->log_level <= LV_LOG_OFF && c->animation.max_sessions <= 64 &&
+        !c->animation.reserved && c->animation.resident_budget_bytes <= c->cpu_budget_bytes;
 }
 
 lv_status LV_CALL lv_core_create(const lv_core_config *config, lv_core **out)
@@ -130,24 +26,32 @@ lv_status LV_CALL lv_core_create(const lv_core_config *config, lv_core **out)
         return LV_INVALID_ARGUMENT;
     if (config->foreground_workers != 1 || config->cache_budget_bytes || config->disk_cache_budget_bytes)
         return LV_UNSUPPORTED;
-    const uint32_t events = config->max_requests * 2 + 1;
+    const uint32_t events = config->max_requests * 2 + config->animation.max_sessions * 2 + 1;
     const uint64_t base   = sizeof(lv_core) + (uint64_t)config->max_requests * sizeof(lv_request) +
-        (uint64_t)events * (sizeof(lv_event) + sizeof(lv_source));
+        (uint64_t)events * (sizeof(lv_event) + sizeof(lv_source)) +
+        (uint64_t)config->animation.max_sessions * sizeof(lv_animation);
     if (base + (uint64_t)config->tile_edge * config->tile_edge * 4 + sizeof(lv_pixels) + sizeof(lv_event) >
         config->cpu_budget_bytes)
         return LV_INVALID_ARGUMENT;
     lv_core *core = calloc(1, sizeof *core);
     if (!core)
         return LV_OUT_OF_MEMORY;
-    core->config        = *config;
-    core->control_count = events;
-    core->used          = base;
+    core->config         = *config;
+    core->control_count  = events;
+    core->used           = base;
+    core->base           = base;
+    core->next_animation = 1;
+    if (!core->config.animation.resident_budget_bytes)
+        core->config.animation.resident_budget_bytes = config->cpu_budget_bytes / 2 < UINT64_C(128) * 1024 * 1024 ?
+            config->cpu_budget_bytes / 2 :
+            UINT64_C(128) * 1024 * 1024;
     core->next_id       = 1;
     core->next_revision = 1;
     core->requests      = calloc(config->max_requests, sizeof(lv_request));
     core->controls      = calloc(events, sizeof(lv_event));
     core->sources       = calloc(events, sizeof(lv_source));
-    if (!core->requests || !core->controls || !core->sources)
+    core->animations    = config->animation.max_sessions ? calloc(config->animation.max_sessions, sizeof(lv_animation)) : nullptr;
+    if (!core->requests || !core->controls || !core->sources || (config->animation.max_sessions && !core->animations))
         goto allocation_failed;
     if (mtx_init(&core->mutex, mtx_plain) != thrd_success)
         goto allocation_failed;
@@ -158,7 +62,7 @@ lv_status LV_CALL lv_core_create(const lv_core_config *config, lv_core **out)
     }
     for (uint32_t i = 0; i < events; ++i)
         core->controls[i] = (lv_event){.core = core, .pooled = true};
-    if (thrd_create(&core->worker, worker_main, core) != thrd_success)
+    if (thrd_create(&core->worker, lv_worker_main, core) != thrd_success)
     {
         cnd_destroy(&core->condition);
         mtx_destroy(&core->mutex);
@@ -170,6 +74,7 @@ allocation_failed:
     free(core->requests);
     free(core->controls);
     free(core->sources);
+    free(core->animations);
     free(core);
     return LV_OUT_OF_MEMORY;
 }
@@ -217,7 +122,7 @@ static bool valid_utf8(const unsigned char *p, size_t length)
     }
     return true;
 }
-static lv_status validate_request(const lv_request_desc *r)
+lv_status lv_validate_request(const lv_request_desc *r)
 {
     if (r->struct_size != sizeof *r)
         return LV_ABI_MISMATCH;
@@ -263,7 +168,7 @@ lv_status LV_CALL lv_core_submit(lv_core *core, const lv_request_desc *desc, lv_
     *out = 0;
     if (!core || !desc)
         return LV_INVALID_ARGUMENT;
-    lv_status status = validate_request(desc);
+    lv_status status = lv_validate_request(desc);
     if (status != LV_OK)
         return status;
     mtx_lock(&core->mutex);
@@ -272,6 +177,14 @@ lv_status LV_CALL lv_core_submit(lv_core *core, const lv_request_desc *desc, lv_
         mtx_unlock(&core->mutex);
         return LV_CLOSING;
     }
+    status = lv_accept_locked(core, desc, nullptr, 0, out);
+    mtx_unlock(&core->mutex);
+    return status;
+}
+
+lv_status lv_accept_locked(lv_core *core, const lv_request_desc *desc, lv_animation *animation, uint32_t action,
+                           lv_request_id *out)
+{
     lv_request *r       = nullptr;
     lv_event *events[2] = {0};
     unsigned found      = 0;
@@ -286,43 +199,50 @@ lv_status LV_CALL lv_core_submit(lv_core *core, const lv_request_desc *desc, lv_
             events[found++] = &core->controls[i];
     if (!r || found < 2)
     {
-        mtx_unlock(&core->mutex);
         return LV_BUSY;
     }
     if (!core->next_id)
     {
-        mtx_unlock(&core->mutex);
         return LV_LIMIT_REACHED;
     }
-    const size_t length = desc->path.byte_count + 1;
-    const uint64_t base = sizeof(lv_core) + (uint64_t)core->config.max_requests * sizeof(lv_request) +
-        (uint64_t)core->control_count * (sizeof(lv_event) + sizeof(lv_source));
+    const bool copy     = !animation || action == 0;
+    const size_t length = copy ? desc->path.byte_count + 1 : 0;
+    const uint64_t base = core->base;
     if ((uint64_t)length > core->config.cpu_budget_bytes - base)
     {
-        mtx_unlock(&core->mutex);
         return LV_LIMIT_REACHED;
     }
     if ((uint64_t)length > core->config.cpu_budget_bytes - core->used - core->reserved)
     {
-        mtx_unlock(&core->mutex);
         return LV_BUSY;
     }
-    char *path = malloc(length);
+    char *path = copy ? malloc(length) : animation->path;
     if (!path)
-    {
-        mtx_unlock(&core->mutex);
         return LV_OUT_OF_MEMORY;
+    if (copy)
+    {
+        memcpy(path, desc->path.data, length - 1);
+        path[length - 1] = 0;
     }
-    memcpy(path, desc->path.data, length - 1);
-    path[length - 1]  = 0;
-    *r                = (lv_request){.id         = core->next_id++,
-                                     .desc       = *desc,
-                                     .path       = path,
-                                     .path_bytes = length,
-                                     .state      = LV_PENDING,
-                                     .info       = events[0],
-                                     .terminal   = events[1],
-                                     .started_ns = lv_clock_ns()};
+    *r = (lv_request){.id               = core->next_id++,
+                      .desc             = *desc,
+                      .path             = path,
+                      .path_bytes       = animation ? 0 : length,
+                      .animation        = animation,
+                      .animation_action = action,
+                      .state            = LV_PENDING,
+                      .info             = events[0],
+                      .terminal         = events[1],
+                      .started_ns       = lv_clock_ns()};
+    if (animation)
+    {
+        animation->busy = r;
+        if (!action)
+        {
+            animation->path       = path;
+            animation->path_bytes = length;
+        }
+    }
     r->desc.path.data = path;
     atomic_init(&r->cancelled, false);
     events[0]->occupied  = true;
@@ -331,7 +251,6 @@ lv_status LV_CALL lv_core_submit(lv_core *core, const lv_request_desc *desc, lv_
     ++core->accepted;
     *out = r->id;
     cnd_broadcast(&core->condition);
-    mtx_unlock(&core->mutex);
     return LV_OK;
 }
 
@@ -355,7 +274,7 @@ lv_status LV_CALL lv_core_cancel(lv_core *core, lv_request_id id)
             if (r->state != LV_TERMINAL)
             {
                 atomic_store(&r->cancelled, true);
-                discard_tiles(core, id);
+                lv_discard_tiles_locked(core, id);
             }
             break;
         }
@@ -389,9 +308,9 @@ lv_status LV_CALL lv_core_poll_event(lv_core *core, lv_event **out)
     event->next     = nullptr;
     event->borrowed = true;
     ++core->borrowed;
-    if (event->view.type == LV_EVENT_REGION_READY)
+    if (lv_event_pixels(event))
     {
-        lv_pixels *p        = event->view.as.region.pixels;
+        lv_pixels *p        = lv_event_pixels(event);
         core->queued_bytes -= p->view.byte_count;
         if (p->outside_refs++ == 0)
             core->pinned_bytes += p->view.byte_count;
@@ -413,8 +332,9 @@ lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format, lv_forma
     if (format < LV_FORMAT_JPEG || format > LV_FORMAT_TIFF)
         return LV_INVALID_ARGUMENT;
     const lv_capabilities capabilities = format == LV_FORMAT_SVG ? LV_CAP_VECTOR_RASTERIZE :
-        (format == LV_FORMAT_JPEG || format == LV_FORMAT_WEBP) ? LV_CAP_SCALED_DECODE : 0;
-    *out = (lv_format_support){1, capabilities};
+        (format == LV_FORMAT_JPEG || format == LV_FORMAT_WEBP)   ? LV_CAP_SCALED_DECODE :
+                                                                   0;
+    *out                               = (lv_format_support){1, capabilities | (format == LV_FORMAT_GIF ? LV_CAP_ANIMATION : 0)};
     return LV_OK;
 }
 lv_status LV_CALL lv_core_get_stats(lv_core *core, lv_core_stats *out)
@@ -447,6 +367,9 @@ lv_status LV_CALL lv_core_begin_shutdown(lv_core *core)
         return LV_INVALID_ARGUMENT;
     mtx_lock(&core->mutex);
     core->closing = true;
+    for (uint32_t i = 0; i < core->config.animation.max_sessions; ++i)
+        if (core->animations[i].id)
+            core->animations[i].closing = true;
     for (uint32_t i = 0; i < core->config.max_requests; ++i)
         if (core->requests[i].state != LV_FREE)
             atomic_store(&core->requests[i].cancelled, true);
@@ -454,8 +377,8 @@ lv_status LV_CALL lv_core_begin_shutdown(lv_core *core)
     {
         lv_event *event = core->head;
         core->head      = event->next;
-        if (event->view.type == LV_EVENT_REGION_READY)
-            core->queued_bytes -= event->view.as.region.pixels->view.byte_count;
+        if (lv_event_pixels(event))
+            core->queued_bytes -= lv_event_pixels(event)->view.byte_count;
         lv_event_drop_locked(event);
     }
     core->tail = nullptr;
@@ -517,6 +440,7 @@ lv_status LV_CALL lv_core_destroy(lv_core **inout)
     free(core->requests);
     free(core->controls);
     free(core->sources);
+    free(core->animations);
     free(core);
     *inout = nullptr;
     return LV_OK;

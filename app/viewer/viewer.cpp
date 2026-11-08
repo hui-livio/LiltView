@@ -91,14 +91,20 @@ void Viewer::open(const std::filesystem::path &path)
         return;
     }
     ++generation_;
+    close_animation();
     if (request_)
         lv_core_cancel(core_, request_);
     discard_pending();
-    pending_path_ = absolute;
-    filename_     = absolute.filename().string();
-    error_        = 0;
-    loading_      = true;
-    actual_size_  = false;
+    playback_.reset();
+    playback_.suspend(suspended_, Playback::Clock::now());
+    try_animation_   = true;
+    reset_animation_ = false;
+    completed_plays_ = 0;
+    pending_path_    = absolute;
+    filename_        = absolute.filename().string();
+    error_           = 0;
+    loading_         = true;
+    actual_size_     = false;
 }
 
 void Viewer::discard_pending()
@@ -122,15 +128,31 @@ void Viewer::submit_pending()
     const auto bounds            = renderer_.framebuffer_size();
     const auto edge              = renderer_.capabilities().max_texture_edge;
     request.target.as.fit_bounds = {std::clamp(bounds.width, 1u, edge), std::clamp(bounds.height, 1u, edge)};
-    const auto status            = lv_core_submit(core_, &request, &request_);
+    lv_status status;
+    if (try_animation_)
+    {
+        lv_animation_open_desc open;
+        lv_animation_open_desc_init(&open);
+        open.path     = request.path;
+        open.target   = request.target;
+        open.user_tag = request.user_tag;
+        work_         = Work::animation_open;
+        status        = lv_core_open_animation(core_, &open, &animation_id_, &request_);
+    }
+    else
+    {
+        work_  = Work::static_image;
+        status = lv_core_submit(core_, &request, &request_);
+    }
     if (status == LV_BUSY)
         return;
-    pending_path_.clear();
+    if (!try_animation_)
+        pending_path_.clear();
     submitted_generation_ = generation_;
     if (status != LV_OK)
     {
-        error_   = LV_ERROR_INTERNAL;
-        loading_ = false;
+        pending_path_.clear();
+        fail(LV_ERROR_INTERNAL);
     }
     else
         submitted_at_ = std::chrono::steady_clock::now();
@@ -153,26 +175,18 @@ void Viewer::consume(const lv_event_view &view)
     if (view.request_id != request_)
         return;
     const bool current = view.user_tag == generation_ && submitted_generation_ == generation_;
+    if (current && work_ != Work::static_image)
+    {
+        consume_animation(view);
+        return;
+    }
     if (current && view.type == LV_EVENT_IMAGE_INFO)
     {
         pending_info_ = view.as.image;
-        const render::ImageDesc desc{{pending_info_.canvas.width, pending_info_.canvas.height}, false};
-        const auto caps = renderer_.capabilities();
-        if (render::image_storage_bytes(desc) > caps.image_budget_bytes - caps.image_bytes)
-        {
-            renderer_.destroy_image(display_);
-            display_ = {};
-        }
-        pending_ = renderer_.create_image(desc);
+        prepare_image(false);
     }
     if (current && view.type == LV_EVENT_REGION_READY && pending_)
-    {
-        const auto &region = view.as.region;
-        const auto &pixels = *lv_pixels_get_view(region.pixels);
-        renderer_.update_image(pending_, {region.rect.x, region.rect.y, region.rect.width, region.rect.height},
-                               {pixels.data, pixels.byte_count, pixels.stride_bytes, {pixels.size.width, pixels.size.height}});
-        pending_content_ = true;
-    }
+        upload(view.as.region);
     if (view.type == LV_EVENT_COMPLETE || view.type == LV_EVENT_ERROR || view.type == LV_EVENT_CANCELLED)
     {
         if (current)
@@ -208,11 +222,9 @@ void Viewer::pump()
         } catch (const std::exception &error)
         {
             spdlog::error("Image upload: {}", error.what());
-            ++generation_;
-            lv_core_cancel(core_, request_);
-            discard_pending();
-            loading_ = false;
-            error_   = LV_ERROR_MEMORY_BUDGET;
+            if (request_)
+                lv_core_cancel(core_, request_);
+            fail(LV_ERROR_MEMORY_BUDGET);
         }
         // Even an exception while processing a terminal must allow the next request.
         if (terminal)
@@ -221,11 +233,12 @@ void Viewer::pump()
     if (consumed && std::chrono::steady_clock::now() >= deadline)
         wake_core(nullptr); // Continue draining next frame even without another queue edge.
     submit_pending();
+    advance_animation();
 }
 
 void Viewer::draw(render::Point min, render::Point max, float density)
 {
-    const bool reveal_pending = pending_ && pending_content_ && loading_ &&
+    const bool reveal_pending = work_ == Work::static_image && pending_ && pending_content_ && loading_ &&
         std::chrono::steady_clock::now() - submitted_at_ >= std::chrono::milliseconds(100);
     const auto image       = reveal_pending ? pending_ : display_;
     const auto &image_info = reveal_pending ? pending_info_ : info_;
@@ -247,7 +260,7 @@ void Viewer::draw(render::Point min, render::Point max, float density)
 bool Viewer::has_visible_image() const
 {
     return display_ ||
-        (pending_ && pending_content_ && loading_ &&
+        (work_ == Work::static_image && pending_ && pending_content_ && loading_ &&
          std::chrono::steady_clock::now() - submitted_at_ >= std::chrono::milliseconds(100));
 }
 } // namespace liltview

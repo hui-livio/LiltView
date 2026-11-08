@@ -1,8 +1,8 @@
-# Core 动画接口设计 v0.2
+# Core 动画接口与 GIF 播放 v0.2
 
 - 日期：2026-11-08。
-- 状态：设计草案，尚未实现。当前运行时仍是 ABI 1，GIF 只显示首帧，TIFF 只显示首页；本次不接入自动播放。
-- 可编译声明：[core_animation_v0_2.h](api/core_animation_v0_2.h)。该文件位于 docs，不属于已发布头文件，不安装，没有可链接实现。
+- 状态：ABI 2 已实现普通 GIF 会话、逐帧合成和 UI 自动播放；动画 WebP / APNG 与超大图显示尚未实现。
+- 正式声明：[core.h](../core/include/liltview/core.h)。原 docs/api 草案入口仅转发到正式头文件，不再包含独立替换布局。
 - 相关契约：[静态 API](CORE_API-v0.1.md)、[生命周期与预算](CORE_RUNTIME-v0.1.md)、[实际格式范围](IMAGE_FORMATS.md)。
 
 ## 1. 边界与分工
@@ -19,7 +19,23 @@
 
 动画帧不是渐进扫描的 tile revision。`frame_index` 表达时间顺序，`revision` 表达同一画面同一区域的更新。
 TIFF 多页也不是动画：不把页面伪造成具有任意帧时长的动画；多页接口另行设计。
-第一阶段实现 GIF；动画 WebP、APNG 后续复用本契约。暂停按钮、进度条和拖动定位不在本次范围。
+本阶段已实现 GIF；动画 WebP、APNG 后续复用本契约。暂停按钮、进度条和拖动定位不在本次范围。
+
+### 1.1 已确定的开发范围
+
+2026-11-08 确认：**不考虑超大动图**。普通尺寸动图与静态超大图分别开发：
+
+| 场景 | 设计范围 |
+| --- | --- |
+| 普通尺寸动图 | 本文的会话、NEXT / RESET、完整帧合成和 FIT 显示；保持当前帧与一帧预解码 |
+| 静态超大图 | 沿用静态 API 的 FIT 预览 / REGION 局部显示方向，后续实现低内存解码和区域纹理管理 |
+| 超大动图 | 明确不纳入开发范围；不增加动画 REGION、外存合成、跨帧区域随机访问或虚拟纹理接口 |
+
+普通尺寸按逻辑源画布和实际工作集判定，不按 FIT 缩小后的像素判定。
+动画源尺寸、文件大小和预算继续遵守 §7 的现有上限；缩小输出不能绕过原始合成画布及 disposal 备份的准入检查。
+尺寸超限返回 DIMENSION_LIMIT，无法在预算内完成则返回 MEMORY_BUDGET；不为绕过限制而自动转入静态超大图路径或退化为首帧成功。
+帧数多或播放时间长本身不等于超大动图；内存按同时存活的合成 / 备份 / 输出缓冲计算，不累加全部帧的 RGBA 大小。
+这些范围约束适用于 ABI 2 动画会话；静态 submit 仍允许只读取 GIF 首帧，UI 打开 GIF 时使用动画会话。
 
 ## 2. 对象与接口
 
@@ -35,7 +51,7 @@ TIFF 多页也不是动画：不把页面伪造成具有任意帧时长的动画
 
 `open` 返回 OK 只代表受理。首次版本不保证立即得到帧数或总时长，不为了统计在 open 扫描整个动画。
 即使最终只有一帧，GIF 动画会话也可返回一帧再 END。普通 JPEG / BMP / SVG / TIFF 等不适用此会话，异步 FORMAT_UNSUPPORTED。
-初期 PNG / WebP 动画会话也返回不支持，直到相应后端实现；不得仅新增能力枚举就报告可播放。
+当前 PNG / WebP 动画会话返回不支持，直到相应后端实现；不得仅新增能力枚举就报告可播放。
 
 所有控制函数仍在创建 core 的线程串行调用，不允许从 wakeup / log 回调重入。
 同一会话同时只允许一个 OPEN / NEXT / RESET 请求，**包括已经终结但终结事件尚未 release 的请求**。
@@ -55,7 +71,7 @@ max_sessions=0 时 open 返回 UNSUPPORTED；初期 max_sessions 的有效配置
 同步失败时所有有效输出都清零、不产生事件；open 的两个输出必须分别指向有效且不重叠的存储，输出参数本身为 NULL 属于 INVALID_ARGUMENT。
 FAILED / INVALID_SOURCE 会话提交操作返回 INVALID_STATE；核心 CLOSING 的检查优先于会话状态。
 
-以下示例是 ABI 2 实施后的调用形态，不能与当前运行时链接：
+以下是当前 ABI 2 的调用形态：
 
 ```c
 lv_animation_open_desc open;
@@ -177,6 +193,7 @@ RESET 允许回读同一版本，但不能悄悄跟随新文件；符号链接�
 旧已借出像素和旧 GPU 帧仍可读取 / 显示，但不能与新版本的帧混合作为成功动画。
 
 初期仅 FIT、顺序 NEXT 和 RESET，不承诺随机访问、缩放瞬时重解、全部格式支持、HDR / ICC 或硬实时取消。
+超大动图属于明确排除项，不作为本接口的后续验收要求；静态超大图的 REGION 开发独立进行。
 帧数 / 时长未知不等于无限，解码结束只能由有效流结尾确认。
 
 ## 6. 会话状态、取消与关闭
@@ -222,6 +239,7 @@ close 立即使会话不可再提交，后台才销毁 FILE / decoder / 合成�
 关闭中的重复 close 返回 OK；彻底回收后同一 ID 返回 NOT_FOUND。没有已接受请求时不另发“关闭完成”事件。
 
 会话槽直到内部资源安全清理、请求终结 release 后才归还；因此 close 立即返回并不保证紧接着 open 有空槽，可能暂时 BUSY。
+资源可用性改变会请求一次合并 wakeup，包括会话槽、请求槽、控制记录和像素预算释放；此时允许 poll 得到 EMPTY。worker 在锁外执行通知，调用方先尝试提交再进入事件等待，避免 BUSY 后永远没有新事件可重试。关闭期间不再要求资源通知，join 后不再发生回调。
 单 worker 必须在尝试新解码准入前优先执行关闭清理，不能让新任务等着自己尚未释放的旧会话。
 close 后已借出的 INFO / FRAME_INFO / 像素事件保有独立有效存储；不能依靠会话对象存活来维持 view。
 INFO 的 source_revision 锚点延续已有契约，保留 INFO 会占有界控制池，但不必因此保留 decoder 或会话槽。
@@ -265,29 +283,37 @@ OPEN、RESET、帧 NEXT 和 EOF NEXT 都最多需要一个元数据控制事件�
 达到绝对配置 / ID 上限返回 LIMIT_REACHED；会话槽被占用或控制池 / 路径空间暂时不足为 BUSY；分配器实际失败为 OUT_OF_MEMORY。
 失败 OPEN 的会话 ID 保留到 close / shutdown，调用方收到异步失败后仍须关闭；不能自动回收成一个可能被复用的 ID。
 
-## 8. ABI 与实施边界
+## 8. ABI 与实现边界
 
-本次在 docs/api 放可编译草案，复用现有 lv_pixels、lv_error_info 和静态 value types；**没有把未实现函数加入当前 core.h**。
-`lv_event_view_v2` 和 `lv_core_config_v2` 是替换布局模型，当前 lv_core_create / poll 不接受，不可 cast 兼容。
-动画事件使 union 增大，配置又增加会话上限，实际实施时需统一迁移 core.h / 全部消费者并将 LV_CORE_ABI_VERSION 从 1 提升到 2。
-迁移后的正式公共类型仍叫 lv_core_config / lv_event_view，草案 model 名称不作为永久并行 API。
-模型的 common 仅用于复用旧字段，迁移时按原字段顺序展开到正式配置中，不保留嵌套 common；实际初始化器同步设置 ABI 2 和新结构大小。
-新增动作 request / open desc 都有 struct_size；值类型固定宽度，路径沿用原生平台编码，接口不含 SDL / ImGui / OpenGL / DX11 类型。
-这不是动画插件 ABI，也不承诺不同架构 / 进程共享结构；实际可用性仍以构建和 query capability 为准。
+正式 lv_core_config 已增加 animation 预算配置，lv_event_view 已包含动画元数据 / 帧 / 区域 / END；LV_CORE_ABI_VERSION 已提升到 2。
+全部应用消费者、初始化器、C / C++ 布局检查一起迁移。ABI 1 配置返回 ABI_MISMATCH，不兼容 cast 或只替换动态库。
+docs/api/core_animation_v0_2.h 仅转发正式头文件；不再发布 lv_core_config_v2 / lv_event_view_v2 并行模型。
+动作 / open descriptor 仍有 struct_size；公共接口没有 SDL / ImGui / OpenGL / DX11 类型。
 
-现有静态 submit 的生命周期和 GIF 首帧路径保持成立。动画应通过显式会话打开，不让所有静态请求自动变成无限播放。
-不会复用 COMPLETE 表示整段动画结束，也不会复用 tile revision 或 source_revision 当时间轴。
+实现位置：
 
-建议落地顺序：
+| 文件 | 内容 |
+| --- | --- |
+| core/src/api/animation.c | OPEN / NEXT / RESET / CLOSE 受理、状态检查、请求槽 |
+| core/src/engine/animation.c | 会话驻留预算、事件提交和异步清理 |
+| core/src/engine/worker.c | 静态与动画单 worker 调度、终结竞争、资源唤醒 |
+| core/src/codecs/gif_animation.c | 持久 GIF decoder、循环信息、disposal 0..3、源版本检查、FIT 输出 |
+| app/viewer/playback.cpp | 可注入时间的纯播放时序，零 / 短时长、迟到、暂停 / 恢复 |
+| app/viewer/animation.cpp | 候选帧上传、两张纹理轮换、循环 / RESET、失败处理 |
+| app/application.cpp | 平台等待合并下一帧 deadline，隐藏 / 最小化暂停 |
 
-1. ABI 2、会话表和动作校验、独立元数据事件、控制池与异步关闭；状态机测试先行。
-2. GIF 持久 decoder、NEXT / RESET、全部 disposal、逐帧版本检查与预算，继续用静态 renderer。
-3. 应用播放控制器的单调时钟、当前 / 候选纹理、后台一帧、事件等待 deadline，实现自动播放而不增加 UI 控件。
-4. 动画 WebP，再实现 APNG；分阶段报告实际 capability，最后再考虑时间轴 seek / 缓存关键帧。
+UI 先以动画 OPEN 做有界内容探测；非 GIF 返回 FORMAT_UNSUPPORTED 后关闭该会话，再使用静态 submit。GIF 的 NEXT 失败不退化为首帧成功。
+静态 submit 的 GIF 首帧路径保留供静态调用方使用。文件扩展名不决定动画识别。
+每帧完整后才展示；下一帧尚未准备时继续显示当前帧。一次最多保留一帧候选，循环 RESET 后仍复用原两张 GPU 纹理。
+窗口隐藏 / 最小化时暂停；恢复保持剩余时长。没有新增播放按钮或进度条。
+Renderer 公共方法不变；纹理轮换、deadline 与循环控制属于 Viewer，详见[渲染模块](RENDERER-v0.1.md#33-动画帧上传与呈现)。
+
+当前仍不支持动画 WebP、APNG、任意帧 seek、TIFF 翻页、超大动图、静态超大图 REGION 和 Windows / DX11 的实际后端。
+GIF 每次帧任务内的第三方解码无法保证硬实时抢占；预算是受限工作集与保守 allowance，不承诺 RSS 硬上限。
 
 ## 9. 实现验收矩阵
 
-以下是后续实现验收要求；目前只验证草案类型能以 C23 / C++20 / C++23 编译且 C / C++ 布局一致，没有动画运行测试通过的声明。
+下表是完整验收目标。当前已运行 GIF 会话 / 合成 / 取消 / 借用寿命 / 预算 / 源版本测试、纯播放时序测试、真实 Viewer 恢复测试，以及 OpenGL 回读从红色首帧切到蓝色第二帧；WebP / APNG 项仍待实现。最新构建记录见 [项目目录](PROJECT_STRUCTURE.md)。
 
 | 组别 | 必须验证 |
 | --- | --- |
@@ -304,7 +330,7 @@ OPEN、RESET、帧 NEXT 和 EOF NEXT 都最多需要一个元数据控制事件�
 
 ## 10. 格式语义核对来源
 
-这些资料用于归一源格式语义，不代表当前后端已经实现动画：
+这些资料用于归一源格式语义；当前只有 GIF 动画后端已实现：
 
 - 仓库 `third_party/giflib/gif_lib.h` 的 GraphicsControlBlock；`third_party/libwebp/src/webp/demux.h` 的帧时长、位置、blend / dispose 及 loop 元数据。
 - [libwebp gif2webp 的 GIF→WebP 循环次数转换](https://chromium.googlesource.com/webm/libwebp/+/refs/heads/main/examples/gif2webp.c)。

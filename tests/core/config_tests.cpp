@@ -2,6 +2,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+TEST_CASE("ABI 2 rejects version 1 before reading new animation configuration", "[config][animation]")
+{
+    lv_core_config config;
+    lv_core_config_init(&config);
+    config.abi_version = 1;
+    lv_core *core      = reinterpret_cast<lv_core *>(1);
+    CHECK(lv_core_create(&config, &core) == LV_ABI_MISMATCH);
+    CHECK(core == nullptr);
+}
+
 TEST_CASE("configuration initialization resets prior callbacks and budgets", "[config]")
 {
     lv_core_config config{};

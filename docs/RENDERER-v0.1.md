@@ -102,6 +102,16 @@ context / immediate context 及 ImGui renderer backend 仅在 render thread 使�
 
 ImGui platform backend 由 Application 初始化；Renderer 初始化并关闭 ImGui renderer backend。逆序关闭为：停止 core 上传和 UI 帧 → viewer 销毁全部图片 → renderer 关闭 ImGui renderer backend 和设备/context → platform backend shutdown → ImGui context → 窗口 / SDL。
 
+### 3.3 动画帧上传与呈现
+
+普通 GIF 播放复用现有 create_image / update_image / add_image_quad / present 方法，不新增 renderer 动画会话或计时接口。
+Viewer 持有当前显示和候选两张纹理；core tile 只更新候选，收到该帧 COMPLETE、完成上传且单调时钟达到 deadline 后交换句柄。
+上一张显示纹理成为下一次候选，完整覆盖后再切换。动画不触发静态图片的 100 ms 部分揭示，避免半帧混合。
+两张纹理均计入现有 GPU image budget；放不下时停止播放并报告错误，保留当前完整帧，不先销毁显示帧以强行继续。
+CPU 像素仍在 update_image 返回后 release，无需将 core 引用保留到 present。隐藏 / 最小化暂停与循环策略由应用控制器处理。
+下一次复用前，上一帧的绘制已经 render_frame / present；OpenGL 命令顺序负责资源更新依赖。未来 DX11 实现须满足相同公共契约。
+当前真实 OpenGL 测试回读确认红色首帧和蓝色后续帧均实际显示；统一后端接口没有增加异步上传或 fence 承诺。
+
 ## 4. 后端责任
 
 ### 4.1 OpenGL 3.3 首版

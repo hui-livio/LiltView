@@ -194,6 +194,7 @@ public:
     {
         ImGui_ImplOpenGL3_NewFrame();
     }
+
     void add_image_quad(ImDrawList *list, Image image, const std::array<Point, 4> &p, const std::array<Point, 4> &uv) override
     {
         if (!list)

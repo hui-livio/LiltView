@@ -13,6 +13,6 @@
 - `cache/` 为后续规划，尚未实现。
 - `platform/file.c`：Linux 常规文件、版本检查和单调时钟；Windows 文件适配待实施。线程使用 C 线程 API。
 
-核心不链接 ImGui、spdlog、Catch2 或网络库。新增 `.c` 文件由 C23 编译器编译。
+核心不链接 ImGui、spdlog、Catch2 或网络库。新增 `.c` 文件由 C23 编译器编译。动画会话 / 单 worker 生命周期见 api/animation.c 与 engine/animation.c / worker.c，GIF 持久解码见 codecs/gif_animation.c。
 
 所有 codec 依赖由固定 submodule 静态构建；JPEG 采用独立 ExternalProject，PNG / WebP / SVG 采用本地 CMake。格式兼容范围见[图片格式与解码实现](../../docs/IMAGE_FORMATS.md)。当前解码器内部内存使用保守预约，未拦截其分配，不把账本当进程 RSS 硬上限。运行约束详见 [Core API 当前实现范围](../../docs/CORE_API-v0.1.md#12-当前实现范围)。

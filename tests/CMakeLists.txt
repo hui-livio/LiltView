@@ -19,25 +19,22 @@ foreach(standard IN LISTS contract_cxx_standards)
     add_test(NAME contract.cpp${standard} COMMAND liltview_contract_cpp${standard})
 endforeach()
 
-# Proposed animation ABI: validate types/layouts without implementing or linking
-# any new API entry point. These tests do not claim runtime animation support.
-add_library(liltview_animation_draft_layout OBJECT contract/animation_draft.c)
-target_include_directories(liltview_animation_draft_layout PRIVATE
-    "${PROJECT_SOURCE_DIR}/docs/api" "${PROJECT_SOURCE_DIR}/core/include")
-liltview_configure_c_target(liltview_animation_draft_layout)
+# Public ABI 2 animation type and layout checks (C23 / C++20 / C++23).
+add_library(liltview_animation_layout OBJECT contract/animation.c)
+target_link_libraries(liltview_animation_layout PRIVATE LiltView::core)
+liltview_configure_c_target(liltview_animation_layout)
 foreach(standard IN LISTS contract_cxx_standards)
-    add_executable(liltview_animation_draft_cpp${standard} contract/animation_draft.cpp
-        $<TARGET_OBJECTS:liltview_animation_draft_layout>)
-    target_include_directories(liltview_animation_draft_cpp${standard} PRIVATE
-        "${PROJECT_SOURCE_DIR}/docs/api" "${PROJECT_SOURCE_DIR}/core/include")
-    liltview_configure_cxx_target(liltview_animation_draft_cpp${standard})
-    set_target_properties(liltview_animation_draft_cpp${standard} PROPERTIES CXX_STANDARD ${standard})
-    add_test(NAME contract.animation_draft.cpp${standard} COMMAND liltview_animation_draft_cpp${standard})
+    add_executable(liltview_animation_cpp${standard} contract/animation.cpp
+        $<TARGET_OBJECTS:liltview_animation_layout>)
+    target_link_libraries(liltview_animation_cpp${standard} PRIVATE LiltView::core)
+    liltview_configure_cxx_target(liltview_animation_cpp${standard})
+    set_target_properties(liltview_animation_cpp${standard} PROPERTIES CXX_STANDARD ${standard})
+    add_test(NAME contract.animation.cpp${standard} COMMAND liltview_animation_cpp${standard})
 endforeach()
 
 if(LILTVIEW_BUILD_UNIT_TESTS)
     liltview_require_catch2()
-    add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp)
+    add_executable(liltview_core_tests core/config_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp core/animation_tests.cpp)
     target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg png_static webp
         liltview_gif_encoder TIFF::tiff Catch2::Catch2WithMain)
     liltview_configure_cxx_target(liltview_core_tests)
@@ -50,9 +47,10 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
         catch_discover_tests(liltview_app_tests TEST_PREFIX "app.")
-        add_executable(liltview_viewer_tests app/viewer_tests.cpp)
+        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/playback_tests.cpp)
         target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static Catch2::Catch2WithMain)
         target_compile_definitions(liltview_viewer_tests PRIVATE
+            LILTVIEW_IMAGE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures"
             LILTVIEW_JPEG_FIXTURES="${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/testimages")
         liltview_configure_cxx_target(liltview_viewer_tests)
         catch_discover_tests(liltview_viewer_tests TEST_PREFIX "viewer.")
@@ -80,9 +78,15 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_executable(liltview_renderer_contract integration/renderer_contract.cpp)
     target_link_libraries(liltview_renderer_contract PRIVATE LiltView::renderer liltview_sdl_platform OpenGL::GL)
     liltview_configure_cxx_target(liltview_renderer_contract)
+    add_executable(liltview_animation_render integration/animation_render.cpp)
+    target_link_libraries(liltview_animation_render PRIVATE liltview_viewer liltview_sdl_platform)
+    liltview_configure_cxx_target(liltview_animation_render)
+    add_test(NAME desktop.animation COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_animation_render> "${PROJECT_SOURCE_DIR}/tests/fixtures/red-first-frame.gif")
+    set_tests_properties(desktop.animation PROPERTIES TIMEOUT 15)
     add_test(NAME desktop.renderer COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen $<TARGET_FILE:liltview_renderer_contract>)
     set_tests_properties(desktop.renderer PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg formats settings logging)
+    foreach(case menu font save jpeg formats animation_app settings logging)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"

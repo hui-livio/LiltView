@@ -146,6 +146,30 @@ def test_formats_render(executable, folder):
         assert red > 500, f"{filename} pixels were not rendered in the canvas"
 
 
+def test_animation_app(executable, folder):
+    sample = Path(__file__).resolve().parents[1] / "fixtures/red-blue-loop.gif"
+    (folder / "settings.yaml").write_text("log_level: debug\nlanguage: en-US\n")
+    log = folder / "animation.log"
+    with log.open("w") as output:
+        app = subprocess.Popen([str(executable), "--config-dir", str(folder), str(sample)],
+                               stdout=output, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 10
+            while "epoch=2, frame=1" not in log.read_text():
+                assert app.poll() is None, log.read_text()
+                assert time.monotonic() < deadline, log.read_text()
+                time.sleep(0.025)
+            app.send_signal(signal.SIGINT)
+            assert app.wait(timeout=10) == 0, log.read_text()
+            text = log.read_text()
+            assert "epoch=1, frame=0" in text and "epoch=1, frame=1" in text, text
+            assert "[error]" not in text and "[critical]" not in text, text
+        finally:
+            if app.poll() is None:
+                app.terminate()
+                app.wait(timeout=5)
+
+
 def test_settings_yaml(executable, folder):
     settings = folder / "settings.yaml"
     settings.write_text("# User configuration\nwidth: 1280\nheight: 720\n"
@@ -209,7 +233,8 @@ def main():
     os.environ["SDL_VIDEODRIVER"] = "offscreen"
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
-         "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render}[case](executable, Path(temporary))
+         "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
+         "animation_app": test_animation_app}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 

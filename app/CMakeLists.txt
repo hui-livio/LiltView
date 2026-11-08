@@ -29,7 +29,7 @@ target_include_directories(liltview_cli PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" PRI
 target_link_libraries(liltview_cli PRIVATE LiltView::cli11 PUBLIC LiltView::app_model)
 liltview_configure_cxx_target(liltview_cli)
 
-add_library(liltview_viewer STATIC viewer/viewer.cpp)
+add_library(liltview_viewer STATIC viewer/viewer.cpp viewer/animation.cpp viewer/playback.cpp)
 target_include_directories(liltview_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog)
 liltview_configure_cxx_target(liltview_viewer)

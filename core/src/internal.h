@@ -17,6 +17,31 @@ typedef struct lv_source
     uint32_t refs;
 } lv_source;
 typedef struct lv_request lv_request;
+typedef struct lv_animation lv_animation;
+typedef struct lv_gif_animation lv_gif_animation;
+
+struct lv_animation
+{
+    lv_animation_id id;
+    char *path;
+    size_t path_bytes;
+    lv_target target;
+    lv_animation_info info;
+    lv_request *busy;
+    lv_source *source;
+    lv_gif_animation *decoder;
+    uint64_t resident, reservation;
+    enum
+    {
+        LV_ANIM_OPENING,
+        LV_ANIM_READY,
+        LV_ANIM_END,
+        LV_ANIM_NEEDS_RESET,
+        LV_ANIM_FAILED,
+        LV_ANIM_INVALID
+    } state;
+    bool closing, cleaned, cleaning;
+};
 
 struct lv_pixels
 {
@@ -54,6 +79,10 @@ struct lv_request
     uint64_t sequence, started_ns, final_tiles, bytes_read, reservation;
     uint64_t workspace;
     bool partial;
+    lv_animation *animation;
+    uint32_t animation_action; /* 0 = OPEN; otherwise NEXT / RESET. */
+    bool animation_end, deferred_info;
+    lv_animation_frame_info frame;
 };
 struct lv_core
 {
@@ -65,9 +94,12 @@ struct lv_core
     lv_request *requests;
     lv_event *controls, *head, *tail;
     lv_source *sources;
+    lv_animation *animations;
     uint32_t control_count;
     uint64_t next_id, next_revision, used, reserved, queued_bytes, pinned_bytes;
     uint32_t accepted, borrowed, pixel_refs, live_pixels;
+    uint64_t base, resident, next_animation;
+    bool resource_notify;
 };
 
 uint64_t lv_clock_ns(void);
@@ -88,4 +120,20 @@ void lv_pixels_drop_locked(lv_pixels *, bool outside);
 void lv_event_drop_locked(lv_event *);
 void lv_enqueue_locked(lv_core *, lv_event *, lv_request *, lv_event_type);
 void lv_notify(lv_core *);
+lv_pixels *lv_event_pixels(const lv_event *);
+lv_source *lv_source_for_locked(lv_core *, const lv_file_version *);
+lv_status lv_validate_request(const lv_request_desc *);
+lv_status lv_accept_locked(lv_core *, const lv_request_desc *, lv_animation *, uint32_t action, lv_request_id *);
+void lv_discard_tiles_locked(lv_core *, lv_request_id);
+int lv_worker_main(void *);
+void lv_animation_decode(lv_core *, lv_request *, lv_error_info *);
+void lv_animation_commit_locked(lv_core *, lv_request *, lv_event_type);
+bool lv_animation_cleanup(lv_core *);
+void lv_animation_metadata(lv_core *, lv_request *, lv_event_type, const lv_animation_info *);
+bool lv_animation_frame(lv_core *, lv_request *, const lv_animation_frame_info *);
+bool lv_animation_reserve(lv_core *, lv_request *, uint64_t, lv_error_info *);
+void *lv_animation_allocate(lv_core *, lv_animation *, size_t);
+void lv_animation_deallocate(lv_core *, lv_animation *, void *, size_t);
+void lv_gif_animation_run(lv_core *, lv_request *, lv_error_info *);
+void lv_gif_animation_destroy(lv_core *, lv_animation *);
 #endif

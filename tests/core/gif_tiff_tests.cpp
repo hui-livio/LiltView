@@ -418,6 +418,6 @@ TEST_CASE("GIF TIFF capabilities memory budgets and cancelled metadata gates", "
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);
         CHECK(support.available == 1);
-        CHECK(support.capabilities == 0);
+        CHECK(support.capabilities == (format == LV_FORMAT_GIF ? LV_CAP_ANIMATION : 0));
     }
 }

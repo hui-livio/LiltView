@@ -11,8 +11,9 @@ bool lv_stopped(lv_core *core, lv_request *request)
 
 static bool plan_fits(lv_core *core, lv_request *request, uint64_t bytes)
 {
-    const uint64_t fixed = sizeof(lv_core) + (uint64_t)core->config.max_requests * sizeof(lv_request) +
-        (uint64_t)core->control_count * (sizeof(lv_event) + sizeof(lv_source));
+    uint64_t fixed = core->base + core->resident;
+    for (uint32_t i = 0; i < core->config.animation.max_sessions; ++i)
+        fixed += core->animations[i].path_bytes;
     bool impossible    = fixed > core->config.cpu_budget_bytes;
     uint64_t available = impossible ? 0 : core->config.cpu_budget_bytes - fixed;
     // A single worker cannot free another queued request's copied path while
@@ -141,6 +142,7 @@ void lv_pixels_drop_locked(lv_pixels *pixels, bool outside)
         free(pixels);
     }
     cnd_broadcast(&core->condition);
+    core->resource_notify = true;
 }
 const lv_pixel_view *LV_CALL lv_pixels_get_view(const lv_pixels *pixels)
 {
@@ -181,12 +183,19 @@ void lv_event_drop_locked(lv_event *event)
         --event->source->refs;
         event->source = nullptr;
     }
-    if (event->view.type == LV_EVENT_REGION_READY)
-        lv_pixels_drop_locked(event->view.as.region.pixels, event->borrowed);
+    if (lv_event_pixels(event))
+        lv_pixels_drop_locked(lv_event_pixels(event), event->borrowed);
     if (event->borrowed)
         --core->borrowed;
     if (event->terminal_request)
     {
+        lv_animation *s = event->terminal_request->animation;
+        if (s)
+        {
+            s->busy = nullptr;
+            if (s->closing && s->cleaned)
+                *s = (lv_animation){0};
+        }
         event->terminal_request->state = LV_FREE;
         --core->accepted;
     }
@@ -198,6 +207,7 @@ void lv_event_drop_locked(lv_event *event)
         free(event);
     }
     cnd_broadcast(&core->condition);
+    core->resource_notify = true;
 }
 void LV_CALL lv_event_release(lv_event *event)
 {
@@ -227,7 +237,7 @@ void lv_notify(lv_core *core)
         core->config.wakeup(core->config.wakeup_userdata);
 }
 
-static lv_source *source_for(lv_core *core, const lv_file_version *version)
+lv_source *lv_source_for_locked(lv_core *core, const lv_file_version *version)
 {
     lv_source *empty = nullptr;
     for (uint32_t i = 0; i < core->control_count; ++i)
@@ -254,7 +264,7 @@ bool lv_publish_info(lv_core *core, lv_request *request, lv_image_info *info, co
         mtx_unlock(&core->mutex);
         return false;
     }
-    lv_source *source = source_for(core, version);
+    lv_source *source = lv_source_for_locked(core, version);
     if (!source)
     {
         mtx_unlock(&core->mutex);
@@ -287,12 +297,26 @@ bool lv_publish_tile(lv_core *core, lv_request *request, lv_pixels *pixels, lv_r
         mtx_unlock(&core->mutex);
         return false;
     }
-    event->view.as.region  = (lv_region_info){tile, 1, rect, LV_REGION_FINAL, LV_PRESENT_AT_COMPLETE, pixels};
-    core->queued_bytes    += pixels->view.byte_count;
-    request->partial       = true;
+    const lv_region_info region = {tile, 1, rect, LV_REGION_FINAL, LV_PRESENT_AT_COMPLETE, pixels};
+    const bool animated         = request->animation != nullptr;
+    if (animated)
+        event->view.as.frame_region = (lv_animation_region_info){request->frame.key, region};
+    else
+        event->view.as.region = region;
+    core->queued_bytes += pixels->view.byte_count;
+    request->partial    = true;
     ++request->final_tiles;
-    lv_enqueue_locked(core, event, request, LV_EVENT_REGION_READY);
+    lv_enqueue_locked(core, event, request, animated ? LV_EVENT_ANIMATION_REGION_READY : LV_EVENT_REGION_READY);
     mtx_unlock(&core->mutex);
     lv_notify(core);
     return true;
+}
+
+lv_pixels *lv_event_pixels(const lv_event *event)
+{
+    if (event->view.type == LV_EVENT_REGION_READY)
+        return event->view.as.region.pixels;
+    if (event->view.type == LV_EVENT_ANIMATION_REGION_READY)
+        return event->view.as.frame_region.region.pixels;
+    return nullptr;
 }

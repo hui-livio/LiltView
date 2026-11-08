@@ -27,9 +27,11 @@ public:
         std::uint64_t bytes;
     };
     std::unordered_map<std::uint32_t, Texture> textures;
-    std::uint32_t next = 1;
-    bool fail_upload   = false;
-    unsigned uploads   = 0;
+    std::uint32_t next         = 1;
+    bool fail_upload           = false;
+    unsigned uploads           = 0;
+    unsigned creates           = 0;
+    std::uint64_t image_budget = 16 * 1024 * 1024;
 
     liltview::render::Capabilities capabilities() const override
     {
@@ -39,7 +41,7 @@ public:
             (void)id;
             bytes += texture.bytes;
         }
-        return {liltview::render::Backend::opengl3, 4096, 16 * 1024 * 1024, bytes};
+        return {liltview::render::Backend::opengl3, 4096, image_budget, bytes};
     }
     Size framebuffer_size() const override
     {
@@ -47,6 +49,7 @@ public:
     }
     Image create_image(liltview::render::ImageDesc desc) override
     {
+        ++creates;
         const auto slot = next++;
         textures.emplace(slot, Texture{desc.size, liltview::render::image_storage_bytes(desc)});
         return {1, slot, 1};
@@ -159,4 +162,89 @@ TEST_CASE("viewer recovers from upload failure and from an invalid file", "[view
     CHECK_FALSE(viewer.failed());
     viewer.shutdown();
     CHECK(renderer.textures.empty());
+}
+
+TEST_CASE("viewer automatically displays later GIF frames and reuses two textures", "[viewer][animation]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    viewer.open(std::filesystem::path(LILTVIEW_IMAGE_FIXTURES) / "red-blue-loop.gif");
+    loop.settle(viewer);
+    REQUIRE(viewer.has_image());
+    CHECK_FALSE(viewer.failed());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (viewer.displayed_frame_index() != 1)
+    {
+        viewer.pump();
+        REQUIRE_FALSE(viewer.failed());
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Event event;
+        SDL_WaitEventTimeout(&event, viewer.wait_timeout_ms(10));
+    }
+    for (std::uint64_t index : {0u, 1u})
+    {
+        while (viewer.displayed_frame_index() != index)
+        {
+            viewer.pump();
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            SDL_Event event;
+            SDL_WaitEventTimeout(&event, viewer.wait_timeout_ms(10));
+        }
+    }
+    CHECK(renderer.creates == 2);
+    viewer.open(sample);
+    loop.settle(viewer);
+    CHECK_FALSE(viewer.failed());
+    CHECK(renderer.textures.size() == 1);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+}
+
+TEST_CASE("viewer freezes valid GIF display on upload failure and can open another file", "[viewer][animation]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    viewer.open(std::filesystem::path(LILTVIEW_IMAGE_FIXTURES) / "red-first-frame.gif");
+    loop.settle(viewer);
+    REQUIRE(viewer.has_image());
+    renderer.fail_upload = true;
+    const auto deadline  = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!viewer.failed())
+    {
+        viewer.pump();
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Event event;
+        SDL_WaitEventTimeout(&event, 10);
+    }
+    CHECK(viewer.has_image());
+    viewer.open(sample);
+    loop.settle(viewer);
+    CHECK_FALSE(viewer.failed());
+    CHECK(renderer.textures.size() == 1);
+}
+
+TEST_CASE("animation GPU budget failure keeps the last complete texture", "[viewer][animation][budget]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    renderer.image_budget = 96 * 64 * 4 + 1;
+    liltview::Viewer viewer(renderer);
+    viewer.open(std::filesystem::path(LILTVIEW_IMAGE_FIXTURES) / "red-blue-loop.gif");
+    loop.settle(viewer);
+    REQUIRE(viewer.has_image());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!viewer.failed())
+    {
+        viewer.pump();
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Event event;
+        SDL_WaitEventTimeout(&event, 10);
+    }
+    CHECK(viewer.error() == LV_ERROR_MEMORY_BUDGET);
+    CHECK(viewer.has_image());
+    CHECK(renderer.creates == 1);
+    CHECK(renderer.textures.size() == 1);
 }
