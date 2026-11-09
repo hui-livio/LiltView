@@ -32,7 +32,12 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
     config.cpu_budget_bytes  = 384ULL * 1024 * 1024;
     config.queue_pixel_bytes = 4ULL * 1024 * 1024;
     config.prefetch_workers  = 0;
-    const auto max_edge      = renderer_.capabilities().max_texture_edge;
+    // 256px native tiles caused hundreds/thousands of GL images and draws at
+    // intermediate zoom on real 12K–18K scenes. 512px keeps restore/draw work
+    // bounded more usefully while preserving progressive row bands. Respect
+    // smaller device limits below; the core API default remains unchanged.
+    config.tile_edge    = 512;
+    const auto max_edge = renderer_.capabilities().max_texture_edge;
     while (config.tile_edge > max_edge && config.tile_edge > 16)
         config.tile_edge /= 2;
     config.wakeup     = wake_core;

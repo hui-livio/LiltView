@@ -445,6 +445,11 @@ bool Tiles::restore(std::size_t index, unsigned level, const Viewport *preserve)
     const auto data = reader_ ? reader_->find({index, level}) : TileReader::Data{};
     if (!data)
         return false; // The disk/decompression worker will wake the UI on completion.
+    if (!renderer_.upload_ready())
+    {
+        upload_pending_ = true;
+        return false; // Staging ring is busy: never wait for a GPU transfer on the UI thread.
+    }
     const auto &stored   = tile.levels.at(level);
     bool retain_previous = false;
     if (preserve && tile.detail && !tile.preserved)

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <stdexcept>
@@ -142,6 +143,73 @@ void verify_populated_creation(liltview::render::Renderer &renderer)
     check(rejected && renderer.capabilities().image_bytes == base, "Invalid initial pixels allocated or leaked a texture");
 }
 
+void verify_staging(liltview::render::Renderer &renderer, bool staged)
+{
+    using namespace liltview::render;
+    const auto gen       = reinterpret_cast<PFNGLGENBUFFERSPROC>(SDL_GL_GetProcAddress("glGenBuffers"));
+    const auto bind      = reinterpret_cast<PFNGLBINDBUFFERPROC>(SDL_GL_GetProcAddress("glBindBuffer"));
+    const auto allocate  = reinterpret_cast<PFNGLBUFFERDATAPROC>(SDL_GL_GetProcAddress("glBufferData"));
+    const auto remove    = reinterpret_cast<PFNGLDELETEBUFFERSPROC>(SDL_GL_GetProcAddress("glDeleteBuffers"));
+    GLuint caller_buffer = 0;
+    gen(1, &caller_buffer);
+    bind(GL_PIXEL_UNPACK_BUFFER, caller_buffer);
+    allocate(GL_PIXEL_UNPACK_BUFFER, 1024, nullptr, GL_STREAM_DRAW);
+    const auto base   = renderer.capabilities().image_bytes;
+    const auto before = renderer.upload_stats();
+    std::vector<Image> images;
+    for (unsigned n = 0; n < 64; ++n)
+    {
+        constexpr unsigned stride = 129;
+        std::vector<std::uint8_t> data(stride * 31 + 128, 0);
+        for (unsigned y = 0; y < 32; ++y)
+            for (unsigned x = 0; x < 32; ++x)
+            {
+                const auto at = y * stride + x * 4;
+                data[at]      = static_cast<std::uint8_t>(n * 3);
+                data[at + 1]  = 120;
+                data[at + 2]  = 210;
+                data[at + 3]  = 255;
+            }
+        images.push_back(renderer.create_uploaded_image({{32, 32}, true}, {data.data(), data.size(), stride, {32, 32}}));
+        GLint current = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &current);
+        check(static_cast<GLuint>(current) == caller_buffer, "Caller PBO binding was not restored");
+        std::fill(data.begin(), data.end(), 0); // No client pointer may survive a queued transfer.
+        const auto stats = renderer.upload_stats();
+        check(stats.staging_bytes <= stats.staging_limit, "Upload staging exceeded its fixed budget");
+    }
+    bind(GL_PIXEL_UNPACK_BUFFER, 0);
+    remove(1, &caller_buffer);
+    renderer.begin_frame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    for (unsigned n = 0; n < images.size(); ++n)
+    {
+        const auto x = static_cast<float>((n % 8) * 16), y = static_cast<float>((n / 8) * 16);
+        renderer.add_image(ImGui::GetForegroundDrawList(), images[n], {x, y}, {x + 16, y + 16});
+    }
+    ImGui::Render();
+    renderer.render_frame(ImGui::GetDrawData());
+    const auto pixels = renderer.readback();
+    for (unsigned n = 0; n < images.size(); ++n)
+    {
+        const auto at = (static_cast<std::size_t>((n / 8) * 16 + 8) * pixels.size.width + (n % 8) * 16 + 8) * 3;
+        check(std::abs(static_cast<int>(pixels.rgb[at]) - static_cast<int>(n * 3)) <= 1 && pixels.rgb[at + 1] == 120 &&
+                  pixels.rgb[at + 2] == 210,
+              "Queued uploads corrupted/reused in-flight buffer data");
+    }
+    renderer.present();
+    const auto stats = renderer.upload_stats();
+    check(stats.staged_uploads + stats.direct_uploads >= before.staged_uploads + before.direct_uploads + images.size(),
+          "Upload transfer accounting lost requests");
+    check(!staged || stats.staged_uploads > before.staged_uploads, "PBO path was not exercised");
+    check(staged || (stats.staged_uploads == 0 && stats.staging_bytes == 0 && stats.staging_limit == 0),
+          "Direct diagnostic mode allocated staging buffers");
+    for (const auto image : images)
+        renderer.destroy_image(image);
+    check(renderer.capabilities().image_bytes == base, "Staged images leaked texture accounting");
+}
+
 void verify_magnification(liltview::render::Renderer &renderer)
 {
     using namespace liltview::render;
@@ -169,7 +237,7 @@ void verify_magnification(liltview::render::Renderer &renderer)
 }
 
 } // namespace
-int main()
+int main(int argc, char **)
 {
     SDL_Window *window = nullptr;
     bool platform      = false;
@@ -182,12 +250,13 @@ int main()
         ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
         auto renderer =
-            liltview::render::create_renderer({liltview::render::SurfaceKind::sdl_window, window, 1024 * 1024, false});
+            liltview::render::create_renderer({liltview::render::SurfaceKind::sdl_window, window, 1024 * 1024, false, argc == 1});
         platform = liltview::initialize_imgui_platform(window);
         check(platform, "SDL platform backend");
         exercise(*renderer);
         verify_populated_creation(*renderer);
         verify_magnification(*renderer);
+        verify_staging(*renderer, argc == 1);
         renderer.reset();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();

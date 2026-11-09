@@ -92,6 +92,12 @@ struct Config
     void *surface                    = nullptr; // Borrowed native window, must outlive Renderer.
     std::uint64_t image_budget_bytes = 128ULL * 1024 * 1024;
     bool vsync                       = true;
+    bool staged_uploads              = true; // Bounded PBO transfers; false is a diagnostic direct-upload baseline.
+};
+struct UploadStats
+{
+    std::uint64_t staging_bytes = 0, staging_limit = 0;
+    std::uint64_t staged_uploads = 0, direct_uploads = 0;
 };
 struct Readback
 {
@@ -107,7 +113,17 @@ public:
     virtual ~Renderer()                       = default;
     virtual Capabilities capabilities() const = 0;
     virtual Size framebuffer_size() const     = 0;
-    virtual Image create_image(ImageDesc)     = 0;
+    // Nonblocking render-thread admission for optional cache restoration. A
+    // false result means defer to another frame, not wait for a GPU fence.
+    virtual bool upload_ready()
+    {
+        return true;
+    }
+    virtual UploadStats upload_stats() const
+    {
+        return {};
+    }
+    virtual Image create_image(ImageDesc) = 0;
     // On return (also on failure) no source pointer is retained.
     virtual void update_image(Image, Rect destination, Pixels source) = 0;
     // Atomically create a fully populated immutable image. Backends may skip

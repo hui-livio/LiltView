@@ -123,8 +123,13 @@ public:
         inner_(inner)
     {
     }
-    unsigned delay_ms = 0;
-    bool fail_upload  = false;
+    unsigned delay_ms  = 0;
+    bool fail_upload   = false;
+    bool block_uploads = false;
+    bool upload_ready() override
+    {
+        return !block_uploads && inner_.upload_ready();
+    }
     render::Capabilities capabilities() const override
     {
         return inner_.capabilities();
@@ -217,7 +222,17 @@ void exercise_restore(render::Renderer &real, const std::filesystem::path &folde
         viewer.actual_size();
         if (transparent)
             viewer.zoom(-4, {255.5f, 254.5f}); // Cache LOD1, then upgrade it to native below.
-        const auto partial = frame(viewer, renderer, 1);
+        renderer.block_uploads    = true;
+        const auto before_uploads = viewer.cache_stats().gpu_restores;
+        for (unsigned n = 0; n < 3; ++n)
+        {
+            check(frame(viewer, renderer, 1).rgb == fit.rgb, "Busy GPU staging exposed incomplete camera");
+            check(viewer.detail_loading(), "Busy GPU staging was incorrectly reported ready");
+            check(viewer.cache_stats().gpu_restores == before_uploads, "Busy GPU staging did not defer restoration");
+            SDL_Delay(2);
+        }
+        renderer.block_uploads = false;
+        const auto partial     = frame(viewer, renderer, 1);
         check(viewer.detail_loading(), "Test did not force a multi-frame cache restore");
         check(partial.rgb == fit.rgb, "Zoom immediately exposed partially restored native tiles");
         // Cancelling a pending target must not publish its partial textures.
@@ -375,7 +390,7 @@ void exercise_motion(render::Renderer &real, const std::filesystem::path &folder
         preheat(viewer, renderer);
         const auto before = viewer.presented_view();
         renderer.delay_ms = 5;
-        viewer.pan(-600, 0); // Beyond the GPU halo: the final camera is not ready yet.
+        viewer.pan(-900, 0); // Beyond the 512px GPU halo: two cold edge tiles need separate uploads.
         auto first = frame(viewer, renderer, 1);
         check(viewer.detail_loading(), "Motion test did not force an unfinished restore");
         check(!viewer.presented_view().same_view(before),

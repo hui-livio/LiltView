@@ -172,3 +172,13 @@ CPU 与 GPU 预算独立。renderer 不持有 core 像素引用；一次同步�
 `Renderer::create_uploaded_image(ImageDesc, Pixels)` 是同步消费完整像素的事务接口：成功返回完整 image，失败不泄漏新纹理，不保留 CPU 指针。默认实现调用已有 create / update / destroy，保持适配器及故障注入行为；OpenGL 后端直接 `glTexImage2D` 上传完整合法 stride 的数据，不能表达的非四字节 pitch 逐行填入后再发布，只生成一次 mipmap。GL unpack / PBO / texture-binding 状态恢复不变。
 
 这个优化不替换原 `create_image` 的透明初始化；部分填充的 atlas 仍通过原接口创建，不能采样未初始化内容。未引入自定义 GLSL、PBO 或异步 CPU 指针所有权。后台 tile reader 只负责文件读取 / 解压，所有图形 API 仍在渲染线程。
+
+### OpenGL3 有界像素暂存（2026-11-09）
+
+为解决 WSLg D3D12 的 client-pointer 像素上传长阻塞，默认通过 PBO 上传 RGBA8，沿用现有 ImGui OpenGL3 shader。最多 8 个槽 × 4 MiB 的独立暂存预算（透明初始化另有至多4 MiB的临时CPU零缓冲），不包含在仅计算 images 的 `Capabilities::image_bytes` 中；`upload_stats()` 单独报告暂存量 / 上限和直接 / 暂存上传计数。它不是系统实际显存用量承诺。
+
+槽使用零超时 `glClientWaitSync` 检查；已完成的槽才可重新分配存储 / 复制新数据，不对尚在飞行的槽 orphan，不主动等待 GPU。恢复路径在 `upload_ready()` 为 false 时延后；非恢复接口保留有界直接上传 fallback，大于 4 MiB 的源跨度也走直接上传。同步接口只要求返回时不保留调用方指针，不要求 GPU 已完成：`glBufferData` 在返回前复制源字节，随后纹理指令只引用 renderer 自有缓冲，上传 fence 管理其复用生命周期。
+
+保持 row stride（含非 4 字节整除）、直通 alpha、像素对齐和调用方 unpack PBO / pixel-store / texture binding 的恢复。部分填充的 image 仍透明初始化；有内容的 image 创建保持事务语义，失败时删除中途分配的 texture，失败的 staging 槽清理，不破坏其他在途资源。销毁 renderer 时先清理 fence / buffer，再销毁 GL context。新 hook 在其他 renderer / 测试适配器中有默认实现，不修改 C core ABI。
+
+`Config::staged_uploads=false` 只供直接上传基线 / 兼容性验证，不是运行时自动更换 renderer。真实文件的手动基准用法见 `app/README.md`；PBO 与 direct 两条路径都有 stride、源缓冲立即清空、重复上传、资源计数与 GL 状态恢复回归。

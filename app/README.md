@@ -61,3 +61,21 @@ GPU 就绪按实际物理像素的覆盖检查，不把屏幕外 decode/filter h
 GIF 播放继续复用两张有界 FIT 帧纹理，属于独立动画路径。WebP / RLE BMP / SVG 等暂不具备原始行带输出，仍按各自解码器的完整工作集和尺寸预算加载，但静态输出使用原始尺寸，不随相机操作重解码。
 
 启用 `LILTVIEW_BUILD_DESKTOP_TESTS` 后，`desktop.viewer_sharpness` 校验原始逐像素棋盘格、透明镂空、非整数拖动和 1 / 1.25 / 1.5 / 2 倍 framebuffer 密度；删除原图后继续往返缩放、拖动并触发 GPU 缓存淘汰 / 恢复，验证不再依赖源图。core / viewer 测试另验证完成前行带可见、低于整图大小的内存预算、源版本、取消和资源释放。
+
+## WSLg 缓存恢复上传与真实图片测量
+
+恢复线程已经负责磁盘读取 / 解压，但它不能消除 UI 线程上的驱动上传阻塞。真实 12K–18K 图片复现后，OpenGL3 后端默认使用有界 PBO 暂存：最多 8 个槽、每槽最多 4 MiB；只在 fence 已完成时复用，不等待 fence。`Renderer::upload_ready()` 让可选的缓存恢复在槽满时留到下一帧，继续保留完整旧画面。通用上传仍可直接上传（例如大于暂存上限或槽满的非恢复调用），不改变同步借用像素接口；返回前已经复制调用方数据，GPU 只引用 renderer 自己的缓冲。
+
+应用原始 tile 默认改为 512px（core 公共默认仍是 256px），同时服从设备上限，以减少中间缩放比例下的纹理数量和 draw calls。源图依旧只解码一次，首次按原始行带发布；不启用自定义 shader 或 RGB/YUV 新路径。
+
+手动真实文件基准不加入 CTest，不把个人图片复制到仓库。启用 `LILTVIEW_BUILD_DESKTOP_TESTS` 后：
+
+```sh
+cmake --preset app-release -DBUILD_TESTING=ON -DLILTVIEW_BUILD_DESKTOP_TESTS=ON
+cmake --build --preset app-release --target liltview liltview_viewer_benchmark -j 6
+build/app-release/tests/liltview_viewer_benchmark /path/to/large.png 1600 1000
+# 同一构建、同一 tile 尺寸，关闭 PBO，仅作为直接上传对照：
+LILTVIEW_BENCH_DIRECT=1 build/app-release/tests/liltview_viewer_benchmark /path/to/large.png 1600 1000
+```
+
+基准输出实际 SDL video driver、GL vendor / renderer / version、实际 swap interval，以及初始全图、100%、平移 / 往返缩放的 pump / prepare / upload / submit / present、P50 / P95 / 最大帧、等待 / 停住的帧、读取 / 恢复次数和暂存资源计数。窗口隐藏、VSync 关闭，不含截图读回和应用菜单；平移帧之间 8ms、恢复帧之间 1ms 的测试节流只计入阶段总耗时，不计入单帧耗时。它用于隔离驱动和 viewer，不是完整用户窗口 FPS 或与其他应用的对比。冷区域仍需恢复，不能把帧耗时降低说成所有冷跳转零延迟。

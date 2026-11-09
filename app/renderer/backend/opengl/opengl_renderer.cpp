@@ -53,6 +53,21 @@ struct UploadState
     }
 };
 
+// Roll back texture allocation if transfer admission/fence setup throws.
+struct TextureAllocation
+{
+    GLuint name = 0;
+    TextureAllocation()
+    {
+        glGenTextures(1, &name);
+    }
+    ~TextureAllocation()
+    {
+        if (name)
+            glDeleteTextures(1, &name);
+    }
+};
+
 struct Texture
 {
     GLuint name              = 0;
@@ -65,6 +80,7 @@ class OpenGLRenderer final : public Renderer
 {
 public:
     explicit OpenGLRenderer(const Config &config) :
+        staged_uploads_(config.staged_uploads),
         budget_(config.image_budget_bytes),
         owner_(next_owner.fetch_add(1))
     {
@@ -90,6 +106,13 @@ public:
         for (auto &texture : textures_)
             if (texture.name)
                 glDeleteTextures(1, &texture.name);
+        for (auto &slot : uploads_)
+        {
+            if (slot.fence)
+                delete_sync_(slot.fence);
+            if (slot.buffer)
+                delete_buffers_(1, &slot.buffer);
+        }
         if (gui_ready_)
             ImGui_ImplOpenGL3_Shutdown();
         SDL_GL_DestroyContext(context_);
@@ -98,6 +121,18 @@ public:
     Capabilities capabilities() const override
     {
         return {Backend::opengl3, max_edge_, budget_, used_};
+    }
+
+    bool upload_ready() override
+    {
+        return !staged_uploads_ || available_upload() != nullptr;
+    }
+
+    UploadStats upload_stats() const override
+    {
+        auto stats          = upload_stats_;
+        stats.staging_limit = staged_uploads_ ? max_upload_bytes * uploads_.size() : 0;
+        return stats;
     }
 
     Size framebuffer_size() const override
@@ -117,11 +152,13 @@ public:
             throw Error(ErrorCode::memory_budget, "Renderer image budget exceeded");
         auto slot = vacant_slot();
         // Transparent initialization makes progressive visibility safe before all tiles arrive.
-        const auto rows = std::min(desc.size.height, 64u);
+        const auto rows = std::min(
+            desc.size.height,
+            std::max(1u, static_cast<std::uint32_t>(max_upload_bytes / (static_cast<std::uint64_t>(desc.size.width) * 4))));
         std::vector<std::uint8_t> zeros(static_cast<std::size_t>(desc.size.width) * rows * 4, 0);
         UploadState state(bind_buffer_);
-        GLuint name = 0;
-        glGenTextures(1, &name);
+        TextureAllocation allocation;
+        const auto name = allocation.name;
         glBindTexture(GL_TEXTURE_2D, name);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, desc.mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
@@ -131,20 +168,23 @@ public:
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(desc.size.width), static_cast<GLsizei>(desc.size.height), 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         for (std::uint32_t y = 0; y < desc.size.height; y += rows)
-            upload_rows({0, y, desc.size.width, std::min(rows, desc.size.height - y)}, zeros.data());
+        {
+            const Size size{desc.size.width, std::min(rows, desc.size.height - y)};
+            write_pixels({0, y, size.width, size.height},
+                         {zeros.data(), zeros.size(), static_cast<std::uint64_t>(size.width) * 4, size});
+        }
         if (desc.mipmaps)
             generate_mipmap_(GL_TEXTURE_2D);
         if (!name || glGetError() != GL_NO_ERROR)
         {
-            if (name)
-                glDeleteTextures(1, &name);
             throw Error(ErrorCode::backend_failure, "Cannot allocate image texture");
         }
-        auto &texture  = textures_[slot];
-        texture.name   = name;
-        texture.desc   = desc;
-        texture.bytes  = bytes;
-        used_         += bytes;
+        auto &texture    = textures_[slot];
+        texture.name     = name;
+        texture.desc     = desc;
+        texture.bytes    = bytes;
+        used_           += bytes;
+        allocation.name  = 0;
         return {owner_, slot, texture.generation};
     }
 
@@ -158,36 +198,45 @@ public:
             throw Error(ErrorCode::memory_budget, "Renderer image budget exceeded");
         const auto slot = vacant_slot();
         UploadState state(bind_buffer_);
-        GLuint name = 0;
-        glGenTextures(1, &name);
+        TextureAllocation allocation;
+        const auto name = allocation.name;
         glBindTexture(GL_TEXTURE_2D, name);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, desc.mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
                         desc.magnification == ImageDesc::Magnification::nearest ? GL_NEAREST : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        // Keep the direct path atomic when staging is disabled/busy. The
+        // restoration caller normally checks upload_ready() before reaching here.
         const bool pitched = source.stride_bytes % 4 == 0 &&
             source.stride_bytes / 4 <= static_cast<std::uint64_t>(std::numeric_limits<GLint>::max());
-        if (pitched)
+        const auto bytes_to_upload =
+            source.stride_bytes * (source.size.height - 1) + static_cast<std::uint64_t>(source.size.width) * 4;
+        if (pitched && (!staged_uploads_ || bytes_to_upload > max_upload_bytes || !available_upload()))
+        {
             glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(source.stride_bytes / 4));
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(desc.size.width), static_cast<GLsizei>(desc.size.height), 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, pitched ? source.data : nullptr);
-        if (!pitched)
-            for (std::uint32_t y = 0; y < desc.size.height; ++y)
-                upload_rows({0, y, desc.size.width, 1}, source.data + static_cast<std::size_t>(y * source.stride_bytes));
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(desc.size.width),
+                         static_cast<GLsizei>(desc.size.height), 0, GL_RGBA, GL_UNSIGNED_BYTE, source.data);
+            ++upload_stats_.direct_uploads;
+        }
+        else
+        {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(desc.size.width),
+                         static_cast<GLsizei>(desc.size.height), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            write_pixels({0, 0, desc.size.width, desc.size.height}, source);
+        }
         if (desc.mipmaps)
             generate_mipmap_(GL_TEXTURE_2D);
         if (!name || glGetError() != GL_NO_ERROR)
         {
-            if (name)
-                glDeleteTextures(1, &name);
             throw Error(ErrorCode::backend_failure, "Cannot create populated image texture");
         }
-        auto &texture  = textures_[slot];
-        texture.name   = name;
-        texture.desc   = desc;
-        texture.bytes  = bytes;
-        used_         += bytes;
+        auto &texture    = textures_[slot];
+        texture.name     = name;
+        texture.desc     = desc;
+        texture.bytes    = bytes;
+        used_           += bytes;
+        allocation.name  = 0;
         return {owner_, slot, texture.generation};
     }
 
@@ -197,17 +246,7 @@ public:
         validate_upload(texture.desc.size, destination, source);
         UploadState state(bind_buffer_);
         glBindTexture(GL_TEXTURE_2D, texture.name);
-        // Non-multiple-of-four pitches are legal. Upload rows without staging a full image.
-        if (source.stride_bytes % 4 == 0 &&
-            source.stride_bytes / 4 <= static_cast<std::uint64_t>(std::numeric_limits<GLint>::max()))
-        {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(source.stride_bytes / 4));
-            upload_rows(destination, source.data);
-        }
-        else
-            for (std::uint32_t y = 0; y < destination.height; ++y)
-                upload_rows({destination.x, destination.y + y, destination.width, 1},
-                            source.data + static_cast<std::size_t>(y * source.stride_bytes));
+        write_pixels(destination, source);
         if (texture.desc.mipmaps)
             generate_mipmap_(GL_TEXTURE_2D);
         check_gl("Image upload failed");
@@ -292,15 +331,104 @@ public:
     }
 
 private:
+    // Fixed slot count and transfer size cap. Buffer storage is reused only
+    // after its fence signals: no waits, no unbounded in-flight orphaning.
+    static constexpr std::uint64_t max_upload_bytes = 4ULL * 1024 * 1024;
+    struct UploadSlot
+    {
+        GLuint buffer       = 0;
+        GLsync fence        = nullptr;
+        std::uint64_t bytes = 0;
+    };
+    UploadSlot *available_upload()
+    {
+        for (auto &slot : uploads_)
+        {
+            if (slot.fence)
+            {
+                const auto status = client_wait_sync_(slot.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+                if (status == GL_TIMEOUT_EXPIRED)
+                    continue;
+                if (status == GL_WAIT_FAILED)
+                    throw Error(ErrorCode::backend_failure, "Cannot poll image upload fence");
+                delete_sync_(slot.fence);
+                slot.fence = nullptr;
+            }
+            return &slot;
+        }
+        return nullptr;
+    }
+    void write_pixels(Rect destination, Pixels source)
+    {
+        const auto bytes = source.stride_bytes * (source.size.height - 1) + static_cast<std::uint64_t>(source.size.width) * 4;
+        auto *slot       = staged_uploads_ && bytes <= max_upload_bytes ? available_upload() : nullptr;
+        if (slot)
+        {
+            if (!slot->buffer)
+                gen_buffers_(1, &slot->buffer);
+            bind_buffer_(GL_PIXEL_UNPACK_BUFFER, slot->buffer);
+            // Copies caller data before returning; only renderer-owned GL storage
+            // survives into the command stream. Old storage has no in-flight use.
+            buffer_data_(GL_PIXEL_UNPACK_BUFFER, static_cast<GLsizeiptr>(bytes), source.data, GL_STREAM_DRAW);
+            if (!slot->buffer || glGetError() != GL_NO_ERROR)
+            {
+                if (slot->buffer)
+                    delete_buffers_(1, &slot->buffer);
+                upload_stats_.staging_bytes -= slot->bytes;
+                *slot                        = {};
+                throw Error(ErrorCode::backend_failure, "Cannot allocate image upload staging buffer");
+            }
+            upload_stats_.staging_bytes -= slot->bytes;
+            upload_stats_.staging_bytes += bytes;
+            slot->bytes                  = bytes;
+            ++upload_stats_.staged_uploads;
+        }
+        else
+        {
+            bind_buffer_(GL_PIXEL_UNPACK_BUFFER, 0);
+            ++upload_stats_.direct_uploads;
+        }
+        const bool pitched = source.stride_bytes % 4 == 0 &&
+            source.stride_bytes / 4 <= static_cast<std::uint64_t>(std::numeric_limits<GLint>::max());
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, pitched ? static_cast<GLint>(source.stride_bytes / 4) : 0);
+        if (pitched)
+            upload_rows(destination, slot ? nullptr : source.data);
+        else
+            for (std::uint32_t y = 0; y < destination.height; ++y)
+            {
+                const auto offset = static_cast<std::size_t>(y * source.stride_bytes);
+                upload_rows({destination.x, destination.y + y, destination.width, 1},
+                            slot ? reinterpret_cast<const std::uint8_t *>(offset) : source.data + offset);
+            }
+        if (slot)
+        {
+            slot->fence = fence_sync_(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (!slot->fence)
+            {
+                delete_buffers_(1, &slot->buffer);
+                upload_stats_.staging_bytes -= slot->bytes;
+                *slot                        = {};
+                throw Error(ErrorCode::backend_failure, "Cannot fence image upload");
+            }
+        }
+    }
+
     void initialize(bool vsync)
     {
         if (!SDL_GL_MakeCurrent(window_, context_))
             throw Error(ErrorCode::backend_failure, SDL_GetError());
         // Unsupported VSync is non-fatal; rendering still works without it.
         SDL_GL_SetSwapInterval(vsync ? 1 : 0);
-        generate_mipmap_ = reinterpret_cast<PFNGLGENERATEMIPMAPPROC>(SDL_GL_GetProcAddress("glGenerateMipmap"));
-        bind_buffer_     = reinterpret_cast<PFNGLBINDBUFFERPROC>(SDL_GL_GetProcAddress("glBindBuffer"));
-        if (!generate_mipmap_ || !bind_buffer_)
+        generate_mipmap_  = reinterpret_cast<PFNGLGENERATEMIPMAPPROC>(SDL_GL_GetProcAddress("glGenerateMipmap"));
+        bind_buffer_      = reinterpret_cast<PFNGLBINDBUFFERPROC>(SDL_GL_GetProcAddress("glBindBuffer"));
+        gen_buffers_      = reinterpret_cast<PFNGLGENBUFFERSPROC>(SDL_GL_GetProcAddress("glGenBuffers"));
+        delete_buffers_   = reinterpret_cast<PFNGLDELETEBUFFERSPROC>(SDL_GL_GetProcAddress("glDeleteBuffers"));
+        buffer_data_      = reinterpret_cast<PFNGLBUFFERDATAPROC>(SDL_GL_GetProcAddress("glBufferData"));
+        fence_sync_       = reinterpret_cast<PFNGLFENCESYNCPROC>(SDL_GL_GetProcAddress("glFenceSync"));
+        client_wait_sync_ = reinterpret_cast<PFNGLCLIENTWAITSYNCPROC>(SDL_GL_GetProcAddress("glClientWaitSync"));
+        delete_sync_      = reinterpret_cast<PFNGLDELETESYNCPROC>(SDL_GL_GetProcAddress("glDeleteSync"));
+        if (!generate_mipmap_ || !bind_buffer_ || !gen_buffers_ || !delete_buffers_ || !buffer_data_ || !fence_sync_ ||
+            !client_wait_sync_ || !delete_sync_)
             throw Error(ErrorCode::backend_failure, "Missing OpenGL 3.3 entry points");
         GLint maximum = 0;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximum);
@@ -338,10 +466,19 @@ private:
         glTexSubImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(rect.x), static_cast<GLint>(rect.y),
                         static_cast<GLsizei>(rect.width), static_cast<GLsizei>(rect.height), GL_RGBA, GL_UNSIGNED_BYTE, data);
     }
-    SDL_Window *window_                      = nullptr;
-    SDL_GLContext context_                   = nullptr;
-    PFNGLGENERATEMIPMAPPROC generate_mipmap_ = nullptr;
-    PFNGLBINDBUFFERPROC bind_buffer_         = nullptr;
+    SDL_Window *window_                       = nullptr;
+    SDL_GLContext context_                    = nullptr;
+    PFNGLGENERATEMIPMAPPROC generate_mipmap_  = nullptr;
+    PFNGLBINDBUFFERPROC bind_buffer_          = nullptr;
+    PFNGLGENBUFFERSPROC gen_buffers_          = nullptr;
+    PFNGLDELETEBUFFERSPROC delete_buffers_    = nullptr;
+    PFNGLBUFFERDATAPROC buffer_data_          = nullptr;
+    PFNGLFENCESYNCPROC fence_sync_            = nullptr;
+    PFNGLCLIENTWAITSYNCPROC client_wait_sync_ = nullptr;
+    PFNGLDELETESYNCPROC delete_sync_          = nullptr;
+    std::array<UploadSlot, 8> uploads_{};
+    UploadStats upload_stats_{};
+    bool staged_uploads_ = true;
     std::vector<Texture> textures_;
     std::uint64_t budget_ = 0, used_ = 0, owner_ = 0;
     std::uint32_t max_edge_ = 0;
