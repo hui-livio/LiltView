@@ -57,9 +57,9 @@ void Viewer::begin_shutdown()
     closing_ = true;
     lv_core_begin_shutdown(core_);
 }
-bool Viewer::join_shutdown()
+bool Viewer::join_shutdown(std::uint32_t timeout_ms)
 {
-    return !core_ || lv_core_join(core_, 0) == LV_OK;
+    return !core_ || lv_core_join(core_, timeout_ms) == LV_OK;
 }
 
 void Viewer::shutdown()

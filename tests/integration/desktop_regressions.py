@@ -178,6 +178,77 @@ def test_status(executable, folder):
             assert all(abs(a - b) <= 3 for a, b in zip(*ink_bounds)), (theme, language, "status baselines differ", ink_bounds)
 
 
+def test_close(executable, folder):
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+
+    def check_order(text, route):
+        requests = re.findall(r"Close requested: window_hidden=true, frames=(\d+), hide_ms=([0-9.]+)", text)
+        stops = re.findall(r"Shutdown: stopping image work, window_hidden=true, frames=(\d+)", text)
+        completed = re.findall(r"Window closed cleanly after (\d+) frames", text)
+        assert len(requests) == len(stops) == len(completed) == 1, text
+        assert requests[0][0] == stops[0] == completed[0], "frame submitted after close request: " + text
+        assert text.index("Close requested:") < text.index("Shutdown: stopping image work") < text.index("Window closed cleanly"), text
+        assert "[error]" not in text and "[critical]" not in text, text
+        latencies = re.findall(
+            r"Close latency: source=(\w+), origin=(\w+), event_to_handler_ms=(-?[0-9.]+), "
+            r"handler_to_request_ms=(-?[0-9.]+), event_to_request_ms=(-?[0-9.]+), timing_valid=(true|false)", text)
+        assert len(latencies) == 1, text
+        source, origin, queued, dispatched, total, valid = latencies[0]
+        expected = {"menu": ("global_menu", "dbus_activation"), "signal": ("sdl_quit", "sdl_event"),
+                    "window": ("window_close", "sdl_event")}
+        assert (source, origin) == expected[route], latencies
+        assert valid == "true" and min(float(queued), float(dispatched), float(total)) >= 0, latencies
+        assert abs(float(queued) + float(dispatched) - float(total)) <= 0.003, latencies
+        print(f"latency {route}: event-to-handler={queued}ms, handler-to-request={dispatched}ms, origin={origin}")
+        return float(requests[0][1])
+
+    for route in ("menu", "signal", "window"):
+        for filename in (None, "red.bmp", "red-blue-loop.gif"):
+            directory = folder / f"{route}-{filename or 'empty'}"
+            directory.mkdir()
+            settings = directory / "settings.yaml"
+            settings.write_text("width: 777\nheight: 555\nmaximized: false\nlog_level: debug\nlanguage: en-US\n")
+            command = [str(executable), "--config-dir", str(directory)]
+            if route == "window":
+                # Smoke mode injects an actual SDL_EVENT_WINDOW_CLOSE_REQUESTED.
+                command.append("--smoke-test")
+            if filename:
+                command.append(str(fixtures / filename))
+            if route == "window":
+                result = subprocess.run(command, text=True, capture_output=True, timeout=10)
+                assert result.returncode == 0, result.stdout + result.stderr
+                check_order(result.stdout, route)
+                continue
+
+            log = directory / "app.log"
+            with log.open("w") as output:
+                app = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT)
+                try:
+                    service = find_service(app.pid)
+                    deadline = time.monotonic() + 5
+                    ready = f"Image displayed: {filename}" if filename else "started,"
+                    while ready not in log.read_text():
+                        assert app.poll() is None and time.monotonic() < deadline, log.read_text()
+                        time.sleep(0.005)
+                    # Exercise the idle wait path too, not only startup's active frames.
+                    time.sleep(0.25)
+                    started = time.monotonic()
+                    if route == "menu":
+                        bus_call(service, "Event", "12", "clicked", "<0>", "0")
+                    else:
+                        app.send_signal(signal.SIGINT)
+                    assert app.wait(timeout=5) == 0, log.read_text()
+                    elapsed_ms = (time.monotonic() - started) * 1000
+                    hide_ms = check_order(log.read_text(), route)
+                    print(f"close {route}/{filename or 'empty'}: hide={hide_ms:.3f}ms, request-to-exit={elapsed_ms:.1f}ms")
+                    saved = settings.read_text()
+                    assert "width: 777" in saved and "height: 555" in saved, saved
+                finally:
+                    if app.poll() is None:
+                        app.terminate()
+                        app.wait(timeout=5)
+
+
 def test_font(executable, folder):
     binary = folder / "liltview"
     shutil.copy2(executable, binary)
@@ -339,7 +410,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
          "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
-         "animation_app": test_animation_app, "status": test_status}[case](executable, Path(temporary))
+         "animation_app": test_animation_app, "status": test_status, "close": test_close}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 

@@ -18,7 +18,18 @@
 - `renderer/`：跨平台 image/frame API、句柄校验与 OpenGL 后端；图形对象不出现在 app/controller 接口。
 - `resources/`：从 256px 项目图标生成的 RGBA 数据，无运行时图标解码依赖；通过 renderer 上传后使用 mipmap 缩小采样。
 
-`viewer/` 管理原始分辨率流式场景、不可变分块缓存和动画；D3D11 renderer backend 后续实现。图片加载时经 C core event 上传；worker 线程不调用图形 API。静止时使用 SDL 事件等待，退出时先释放 renderer image / backend / context，再关闭 ImGui / SDL。
+`viewer/` 管理原始分辨率流式场景、不可变分块缓存和动画；D3D11 renderer backend 后续实现。图片加载时经 C core event 上传；worker 线程不调用图形 API。静止时使用 SDL 事件等待。菜单退出、Ctrl+Q、原生窗口关闭和 SDL 退出事件共用关闭入口：收到请求后先隐藏窗口，不再处理后续交互、消费文件选择结果、pump 或提交最后一帧；随后正常取消并等待图片工作、保存设置、撤销系统菜单关联，最后释放 renderer image / backend / context，再关闭 ImGui / SDL。核心 join 使用退出条件变量的有界等待，而非等待 SDL 通知超时；没有强制终止线程或跳过资源回收。
+
+关闭延迟诊断需要 `log_level: debug`。`Close latency` 日志分开记录：
+
+- `event_to_handler_ms`：事件时间到进入 UI 线程处理的耗时。
+- `handler_to_request_ms`：进入 UI 处理到调用 `request_quit()` 的耗时，包含窗口菜单等待 ImGui 消费输入 / 识别菜单项的时间。
+- `event_to_request_ms`：上述两段之和；原有 `hide_ms` 单独统计请求隐藏的调用耗时。
+- `source` 区分 `window_close`、`sdl_quit`、`shortcut`、`window_menu`、`global_menu`。
+- `origin=sdl_event/sdl_key_down/sdl_mouse_release` 使用 SDL 事件提供的纳秒时间戳。窗口菜单按 ImGui 实际消费的 EventId 关联，不使用“最后一个鼠标事件”猜测；不能唯一关联时标记 `origin=unavailable`、`timing_valid=false`，缺失区间为 `-1`，而不是伪造零耗时。
+- `origin=dbus_activation` 从应用进入 D-Bus 菜单激活回调开始计时，包含队列 / 主线程等待；不使用桌面面板传入的不同时间基准。
+
+这些指标不等于物理点击到视觉消失：SDL 的关闭事件时间戳可能是在系统事件被 pump 时才生成，D-Bus 指标也不包含面板到应用的前段传输；隐藏之后的合成器画面更新 / 动画同样不在这些指标内。所有计算统一使用 SDL 的单调纳秒时间基准，出现缺失或逆序时间戳会明确标为不可用。
 
 原生应用 ID 与 `.desktop` / icon 名保持一致，开发时用 `scripts/register_desktop.py` 注册。系统菜单适配对象在 `run()` 作用域内先销毁，撤销窗口关联并等待 D-Bus 工作线程退出，再由 Application 析构回收 GL、窗口与 SDL。
 

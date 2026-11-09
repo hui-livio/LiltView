@@ -146,6 +146,29 @@ TEST_CASE("viewer replaces in-flight requests and releases every renderer image"
     CHECK(renderer.textures.empty());
 }
 
+TEST_CASE("viewer shutdown joins idle and in-flight workers with a bounded wait", "[viewer][shutdown]")
+{
+    EventLoop loop;
+    for (const bool open_image : {false, true})
+    {
+        CAPTURE(open_image);
+        TestRenderer renderer;
+        liltview::Viewer viewer(renderer);
+        if (open_image)
+        {
+            viewer.open(sample);
+            viewer.pump();
+        }
+        viewer.begin_shutdown();
+        viewer.begin_shutdown();
+        REQUIRE(viewer.join_shutdown(5000));
+        CHECK(viewer.join_shutdown());
+        viewer.shutdown();
+        CHECK(viewer.join_shutdown(10));
+        CHECK(renderer.textures.empty());
+    }
+}
+
 TEST_CASE("viewer recovers from upload failure and from an invalid file", "[viewer]")
 {
     EventLoop loop;

@@ -105,7 +105,7 @@ public:
     }
     void shutdown();
     void begin_shutdown();
-    bool join_shutdown();
+    bool join_shutdown(std::uint32_t timeout_ms = 0);
 
 private:
     void submit_pending();

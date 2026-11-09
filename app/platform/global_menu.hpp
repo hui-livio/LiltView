@@ -10,6 +10,14 @@ struct SDL_Window;
 
 namespace liltview
 {
+struct GlobalMenuAction
+{
+    MenuAction action = MenuAction::none;
+    // SDL_GetTicksNS at application receipt of the D-Bus activation, not the
+    // panel's timestamp (which is in a different clock domain).
+    std::uint64_t received_ns = 0;
+};
+
 // Desktop-menu adapter. All public methods are called on the SDL/UI thread.
 // The D-Bus worker only queues actions and wakes SDL; it never accesses ImGui.
 class GlobalMenu
@@ -22,7 +30,7 @@ public:
 
     bool active();
     void update(const MenuItem &menu);
-    std::vector<MenuAction> take_actions();
+    std::vector<GlobalMenuAction> take_actions();
 
 private:
     struct Impl;

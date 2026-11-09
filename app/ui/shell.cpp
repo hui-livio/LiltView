@@ -169,6 +169,12 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
     begin_main_window(system_menu);
     if (!system_menu)
         action = draw_window_menu(menu);
+    if (action == MenuAction::quit)
+    {
+        // 菜单退出直接交还应用层隐藏窗口，不再准备或上传这一帧的图片。
+        ImGui::End();
+        return action;
+    }
 
     draw_canvas(language, renderer, icon, viewer);
     draw_status(language, viewer);

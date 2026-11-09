@@ -8,6 +8,7 @@
 #include "resources/icon_rgba.hpp"
 #include "settings/settings.hpp"
 #include "settings/store.hpp"
+#include "ui/close_timing.hpp"
 #include "ui/shell.hpp"
 #include "version.hpp"
 #include "viewer/viewer.hpp"
@@ -198,11 +199,14 @@ private:
                 inject_smoke_events(shell);
 
             process_events(options.smoke_test, shell);
-            consume_dialog();
-            viewer_->pump();
-
+            // 系统菜单动作由刚收到的 SDL 唤醒事件触发，不延后到下一帧。
+            if (!quit_)
+                dispatch_global_menu_actions(global_menu, shell);
             if (quit_)
                 break;
+
+            consume_dialog();
+            viewer_->pump();
 
             if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0)
                 continue;
@@ -213,14 +217,39 @@ private:
         }
     }
 
+    void request_quit(const CloseTiming &timing = {})
+    {
+        if (quit_)
+            return;
+        const auto started = SDL_GetTicksNS();
+        quit_              = true;
+        // 先让窗口从桌面消失，解码、总线及 GL 仍按原有安全顺序回收。
+        if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) == 0)
+        {
+            if (!SDL_HideWindow(window_))
+                spdlog::warn("Cannot hide closing window: {}", SDL_GetError());
+            // Wayland 的取消映射请求需要及时 flush，不能等资源回收结束再发送。
+            SDL_PumpEvents();
+        }
+        const auto hide_ms = static_cast<double>(SDL_GetTicksNS() - started) / 1000000.0;
+        spdlog::debug("Close requested: window_hidden={}, frames={}, hide_ms={:.3f}",
+                      (SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) != 0, rendered_frames_, hide_ms);
+        const auto event_to_handler   = close_elapsed_ms(timing.event_ns, timing.handled_ns);
+        const auto handler_to_request = close_elapsed_ms(timing.handled_ns, started);
+        spdlog::debug("Close latency: source={}, origin={}, event_to_handler_ms={:.3f}, handler_to_request_ms={:.3f}, "
+                      "event_to_request_ms={:.3f}, timing_valid={}",
+                      timing.source, timing.origin, event_to_handler, handler_to_request,
+                      close_elapsed_ms(timing.event_ns, started), event_to_handler >= 0 && handler_to_request >= 0);
+    }
+
     // 系统菜单、窗口菜单和快捷键统一分发，避免操作行为不一致。
-    void dispatch_menu_action(MenuAction action, Shell &shell)
+    void dispatch_menu_action(MenuAction action, Shell &shell, const CloseTiming &timing = {})
     {
         apply_menu_setting(action, settings_);
         switch (action)
         {
         case MenuAction::quit:
-            quit_ = true;
+            request_quit(timing);
             break;
         case MenuAction::fullscreen:
             toggle_fullscreen();
@@ -270,18 +299,26 @@ private:
 
     void dispatch_global_menu_actions(GlobalMenu &global_menu, Shell &shell)
     {
-        for (const auto action : global_menu.take_actions())
-            dispatch_menu_action(action, shell);
+        for (const auto &activation : global_menu.take_actions())
+        {
+            const CloseTiming timing{"global_menu", "dbus_activation", activation.received_ns, SDL_GetTicksNS()};
+            dispatch_menu_action(activation.action, shell, timing);
+            if (quit_)
+                break;
+        }
     }
 
     void stop_image_work()
     {
+        spdlog::debug("Shutdown: stopping image work, window_hidden={}, frames={}",
+                      (SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) != 0, rendered_frames_);
         viewer_->begin_shutdown();
-        while (!viewer_->join_shutdown())
+        // 等核心的退出条件变量，避免末次唤醒早于 exited 标志而额外等 10ms。
+        // 等待期间仍定期处理平台通知，但不再加载文件、渲染或分发菜单动作。
+        while (!viewer_->join_shutdown(10))
         {
-            // Join is polled while platform notifications continue to be processed.
             SDL_Event event;
-            if (SDL_WaitEventTimeout(&event, 10))
+            while (SDL_PollEvent(&event))
                 ImGui_ImplSDL3_ProcessEvent(&event);
         }
     }
@@ -300,26 +337,37 @@ private:
         do
         {
             handle_event(event, shell);
-        } while (SDL_PollEvent(&event));
+        } while (!quit_ && SDL_PollEvent(&event));
     }
 
     void handle_event(const SDL_Event &event, Shell &shell)
     {
+        const auto handled_ns  = SDL_GetTicksNS();
+        const bool trace_input = spdlog::should_log(spdlog::level::debug);
+        auto &context          = *ImGui::GetCurrentContext();
+        if (trace_input)
+            close_inputs_.begin_event(context);
         ImGui_ImplSDL3_ProcessEvent(&event);
+        if (trace_input)
+            close_inputs_.end_event(context, event.common.timestamp, handled_ns);
         last_activity_ = SDL_GetTicks();
         if (event.type == SDL_EVENT_SYSTEM_THEME_CHANGED)
             refresh_system_theme();
         if (event.type == SDL_EVENT_QUIT ||
             (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window_)))
-            quit_ = true;
+        {
+            request_quit(
+                {event.type == SDL_EVENT_QUIT ? "sdl_quit" : "window_close", "sdl_event", event.common.timestamp, handled_ns});
+            return;
+        }
         if (event.type == SDL_EVENT_KEY_DOWN)
-            handle_shortcut(event.key, shell);
+            handle_shortcut(event.key, shell, {"shortcut", "sdl_key_down", event.common.timestamp, handled_ns});
         if (event.type == SDL_EVENT_DROP_FILE && event.drop.data)
             viewer_->open(utf8_path(event.drop.data));
         update_window_settings(event);
     }
 
-    void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell)
+    void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell, const CloseTiming &timing)
     {
         // 文本输入和弹窗优先处理按键，避免应用快捷键抢走编辑操作。
         if (ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
@@ -343,7 +391,7 @@ private:
             shortcut.emplace_back(1, static_cast<char>('a' + key.key - SDLK_A));
         else
             shortcut.emplace_back(SDL_GetKeyName(key.key));
-        dispatch_menu_action(menu_action_for_shortcut(current_menu(), shortcut, key.repeat), shell);
+        dispatch_menu_action(menu_action_for_shortcut(current_menu(), shortcut, key.repeat), shell, timing);
     }
 
     static void SDLCALL dialog_callback(void *data, const char *const *files, int)
@@ -463,7 +511,16 @@ private:
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
         const auto action   = shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_);
-        dispatch_menu_action(action, shell);
+        auto &context       = *ImGui::GetCurrentContext();
+        const auto timing   = action == MenuAction::quit ? close_inputs_.activation(context) : CloseTiming{};
+        close_inputs_.discard_processed(context);
+        dispatch_menu_action(action, shell, timing);
+        if (quit_)
+        {
+            // 菜单退出不再提交最后一帧，避免等待 present/VSync。
+            ImGui::EndFrame();
+            return;
+        }
         ImGui::Render();
         present_frame(options);
         ++rendered_frames_;
@@ -598,6 +655,7 @@ private:
 
     // 应用状态只在主线程读写；GlobalMenu 在 run() 内先销毁，再回收这些图形资源。
     Settings settings_;
+    UiCloseTiming close_inputs_;
     MenuItem menu_;
     std::string locale_;
     Language menu_preference_  = Language::system;

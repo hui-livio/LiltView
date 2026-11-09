@@ -187,6 +187,7 @@ struct GlobalMenu::Impl
 
     bool activate(std::int32_t id, const char *event)
     {
+        const auto received_ns = SDL_GetTicksNS();
         std::lock_guard lock(mutex);
         const auto *item = find_menu_item(menu, id);
         if (item == nullptr)
@@ -194,7 +195,7 @@ struct GlobalMenu::Impl
         if (std::strcmp(event, "clicked") == 0 && item->enabled && item->action != MenuAction::none)
         {
             if (pending.size() < 64)
-                pending.push_back(item->action);
+                pending.push_back({item->action, received_ns});
             wake();
         }
         return true;
@@ -617,7 +618,7 @@ struct GlobalMenu::Impl
     SDL_Window *window;
     MenuItem menu;
     std::mutex mutex;
-    std::vector<MenuAction> pending;
+    std::vector<GlobalMenuAction> pending;
     std::string service;
     guint32 revision              = 1;
     Uint32 wakeup_event           = 0;
@@ -676,10 +677,10 @@ void GlobalMenu::update(const MenuItem &menu)
         });
 }
 
-std::vector<MenuAction> GlobalMenu::take_actions()
+std::vector<GlobalMenuAction> GlobalMenu::take_actions()
 {
     std::lock_guard lock(impl_->mutex);
-    std::vector<MenuAction> result;
+    std::vector<GlobalMenuAction> result;
     result.swap(impl_->pending);
     return result;
 }

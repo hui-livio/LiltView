@@ -16,7 +16,7 @@ bool GlobalMenu::active()
 void GlobalMenu::update(const MenuItem &)
 {
 }
-std::vector<MenuAction> GlobalMenu::take_actions()
+std::vector<GlobalMenuAction> GlobalMenu::take_actions()
 {
     return {};
 }
