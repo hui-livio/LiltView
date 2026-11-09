@@ -1,4 +1,5 @@
 #include <math.h>
+#include <string.h>
 #include "codec.h"
 
 bool lv_target_canvas(lv_request *r, lv_size_u32 source, lv_orientation orientation, lv_size_u32 *canvas, lv_error_info *error)
@@ -8,7 +9,9 @@ bool lv_target_canvas(lv_request *r, lv_size_u32 source, lv_orientation orientat
         error->code = LV_ERROR_DIMENSION_LIMIT;
         return false;
     }
-    if (r->desc.target.kind == LV_TARGET_FIT)
+    if (r->desc.target.kind == LV_TARGET_NATIVE)
+        *canvas = source;
+    else if (r->desc.target.kind == LV_TARGET_FIT)
         *canvas = lv_fit_size(source, r->desc.target.as.fit_bounds, orientation);
     else
     {
@@ -38,18 +41,45 @@ uint32_t lv_sample_nearest(uint32_t at, uint32_t source, uint32_t canvas)
     const double p = ((double)at + 0.5) * (double)source / (double)canvas;
     return p >= source ? source - 1 : (uint32_t)p;
 }
-static void filter_row(lv_rows *rows, uint32_t local_y, lv_axis_sample sy)
+static bool filter_row(lv_rows *rows, uint32_t local_y, lv_axis_sample sy, lv_error_info *error)
 {
     lv_frame *frame        = rows->frame;
     const lv_rect_u32 rect = frame->info.region;
     const uint8_t *top     = rows->data + (size_t)(sy.first & 1u) * rows->source.width * 4;
     const uint8_t *bottom  = rows->data + (size_t)(sy.second & 1u) * rows->source.width * 4;
-    uint8_t *out           = nullptr;
-    uint32_t remaining     = 0;
+    if (rows->source.width == frame->info.canvas.width && rows->source.height == frame->info.canvas.height)
+    {
+        for (uint32_t x = 0; x < rect.width;)
+        {
+            uint32_t span = 0;
+            uint8_t *out  = lv_frame_span(frame, x, local_y, &span);
+            if (!out)
+            {
+                error->code = frame->failure;
+                return false;
+            }
+            memcpy(out, top + (size_t)(rect.x + x) * 4, (size_t)span * 4);
+            // Keep the established canonical colour for fully transparent pixels.
+            for (uint32_t i = 0; i < span; ++i)
+                if (!out[i * 4 + 3])
+                    out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 0;
+            x += span;
+        }
+        return lv_frame_flush_rows(frame, local_y + 1, error);
+    }
+    uint8_t *out       = nullptr;
+    uint32_t remaining = 0;
     for (uint32_t x = 0; x < rect.width; ++x, out += 4, --remaining)
     {
         if (!remaining)
+        {
             out = lv_frame_span(frame, x, local_y, &remaining);
+            if (!out)
+            {
+                error->code = frame->failure;
+                return false;
+            }
+        }
         const lv_axis_sample sx = lv_sample_axis(rect.x + x, rows->source.width, frame->info.canvas.width);
         const uint8_t *p[4]     = {top + (size_t)sx.first * 4, top + (size_t)sx.second * 4, bottom + (size_t)sx.first * 4,
                                    bottom + (size_t)sx.second * 4};
@@ -67,6 +97,7 @@ static void filter_row(lv_rows *rows, uint32_t local_y, lv_axis_sample sy)
         }
         out[3] = (uint8_t)((alpha + (UINT64_C(1) << 31)) >> 32);
     }
+    return lv_frame_flush_rows(frame, local_y + 1, error);
 }
 bool lv_rows_init(lv_rows *rows, lv_frame *frame, lv_size_u32 source, lv_error_info *error)
 {
@@ -89,7 +120,7 @@ uint8_t *lv_rows_buffer(lv_rows *rows, uint32_t y)
 {
     return rows->data + (size_t)(y & 1u) * rows->source.width * 4;
 }
-void lv_rows_push(lv_rows *rows, uint32_t y)
+bool lv_rows_push(lv_rows *rows, uint32_t y, lv_error_info *error)
 {
     const lv_image_info *info = &rows->frame->info;
     while (rows->next_y < info->region.height)
@@ -97,8 +128,10 @@ void lv_rows_push(lv_rows *rows, uint32_t y)
         lv_axis_sample sy = lv_sample_axis(info->region.y + rows->next_y, rows->source.height, info->canvas.height);
         if (sy.second > y)
             break;
-        filter_row(rows, rows->next_y++, sy);
+        if (!filter_row(rows, rows->next_y++, sy, error))
+            return false;
     }
+    return true;
 }
 void lv_rows_release(lv_rows *rows)
 {
@@ -137,7 +170,11 @@ bool lv_raster_read(lv_frame *frame, lv_size_u32 source, lv_read_row_fn read, vo
         }
         if (!success)
             break;
-        filter_row(&rows, y, sy);
+        if (!filter_row(&rows, y, sy, error))
+        {
+            success = false;
+            break;
+        }
     }
     lv_rows_release(&rows);
     return success;

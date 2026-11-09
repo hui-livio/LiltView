@@ -23,11 +23,12 @@ TEST_CASE("viewport keeps 16K 32K and larger images logical with bounded visible
         CHECK(quad[1].x - quad[0].x == static_cast<float>(target.rect.width));
     }
 }
-TEST_CASE("large image tile coordinates retain subpixel camera precision", "[viewport][precision]")
+TEST_CASE("noninteger zoom keeps subpixel camera precision for very large images", "[viewport][precision]")
 {
     Viewport view;
     view.update({0, 0}, {512, 512}, 1, {1000000001u, 1000000001u}, 1);
     view.actual_size();
+    view.zoom(-1, {256, 256});
     const auto target = view.target(256);
     const auto before = view.quad(target.rect, target.canvas);
     view.pan(0.25, 0.5);
@@ -53,4 +54,24 @@ TEST_CASE("all EXIF orientations preserve region bounds and shared tile edges", 
         CHECK(a[2].x == b[3].x);
         CHECK(a[2].y == b[3].y);
     }
+}
+
+TEST_CASE("native image pixels align to the physical framebuffer after centering and panning", "[viewport][sharpness]")
+{
+    for (float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+        {
+            CAPTURE(density, orientation);
+            Viewport view;
+            view.update({13.25f, 37.75f}, {524.25f, 546.75f}, density, {32769, 32771}, orientation);
+            view.actual_size();
+            view.pan(0.25, -0.375);
+            const auto target = view.target(256);
+            const auto quad   = view.quad(target.rect, target.canvas);
+            for (const auto &point : quad)
+            {
+                CHECK(std::abs(point.x * density - std::round(point.x * density)) < 0.001f);
+                CHECK(std::abs(point.y * density - std::round(point.y * density)) < 0.001f);
+            }
+        }
 }

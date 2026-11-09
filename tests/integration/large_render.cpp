@@ -101,10 +101,18 @@ render::Readback render_view(Viewer &viewer, render::Renderer &renderer)
 }
 render::Readback settle(Viewer &viewer, render::Renderer &renderer, bool detail)
 {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    const auto start    = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::seconds(60);
+    auto report         = start;
     for (;;)
     {
         viewer.pump();
+        if (std::chrono::steady_clock::now() >= report)
+        {
+            std::fprintf(stderr, "native loaded tiles=%zu at %.3f s\n", viewer.loaded_tiles(),
+                         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+            report = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        }
         check(!viewer.failed(), "Viewer failed loading checkerboard");
         auto pixels = render_view(viewer, renderer);
         if (viewer.settled() && (!detail || viewer.detail_ready()))

@@ -7,6 +7,7 @@
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
+#include <system_error>
 
 namespace liltview
 {
@@ -22,8 +23,8 @@ void LV_CALL wake_core(void *)
 
 Viewer::Viewer(render::Renderer &renderer) :
     renderer_(renderer),
-    detail_(renderer),
-    pending_detail_(renderer)
+    scene_(renderer),
+    pending_scene_(renderer)
 {
     lv_core_config config;
     lv_core_config_init(&config);
@@ -65,8 +66,8 @@ void Viewer::shutdown()
     {
     }
     discard_pending();
-    detail_.clear();
-    pending_detail_.clear();
+    scene_.clear();
+    pending_scene_.clear();
     lv_event_release(preview_anchor_);
     preview_anchor_ = nullptr;
     renderer_.destroy_image(display_);
@@ -94,9 +95,8 @@ void Viewer::open(const std::filesystem::path &path)
     try_animation_   = true;
     reset_animation_ = false;
     completed_plays_ = 0;
-    clear_details();
+    visible_pending_ = false;
     viewport_.reset();
-    opening_path_ = absolute;
     pending_path_ = absolute;
     filename_     = absolute.filename().string();
     error_        = 0;
@@ -111,6 +111,7 @@ void Viewer::discard_pending()
     lv_event_release(pending_anchor_);
     pending_anchor_  = nullptr;
     pending_content_ = false;
+    pending_scene_.clear();
 }
 
 void Viewer::submit_pending()
@@ -122,14 +123,16 @@ void Viewer::submit_pending()
     lv_request_desc_init(&request);
     request.path     = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
     request.user_tag = generation_;
-    // Decode a bounded ordinary image once; window fit/100% is a GPU transform.
-    const auto bounds = renderer_.framebuffer_size();
-    // Bound preview storage by device and budget. Source dimensions are logical
-    // and may be much larger than any single texture.
-    const auto caps        = renderer_.capabilities();
-    const auto budget_edge = static_cast<std::uint32_t>(std::sqrt(static_cast<double>(caps.image_budget_bytes) / 16.0));
-    const auto edge        = std::max(1u, std::min(caps.max_texture_edge, try_animation_ ? caps.max_texture_edge : budget_edge));
-    request.target.as.fit_bounds = {std::clamp(bounds.width, 1u, edge), std::clamp(bounds.height, 1u, edge)};
+    // Only animations use a bounded immutable FIT canvas. Static images are
+    // decoded exactly once at native resolution, independent of the viewport.
+    if (try_animation_)
+    {
+        const auto bounds            = renderer_.framebuffer_size();
+        const auto edge              = std::max(1u, renderer_.capabilities().max_texture_edge);
+        request.target.as.fit_bounds = {std::clamp(bounds.width, 1u, edge), std::clamp(bounds.height, 1u, edge)};
+    }
+    else
+        request.target.kind = LV_TARGET_NATIVE;
     lv_status status;
     if (try_animation_)
     {
@@ -156,17 +159,16 @@ void Viewer::submit_pending()
         pending_path_.clear();
         fail(LV_ERROR_INTERNAL);
     }
-    else
-        submitted_at_ = std::chrono::steady_clock::now();
 }
 
 void Viewer::accept_completed()
 {
     renderer_.destroy_image(display_);
-    display_    = pending_;
-    pending_    = {};
-    info_       = pending_info_;
-    image_path_ = opening_path_; // Keep the displayed source after a later open fails.
+    display_ = pending_;
+    pending_ = {};
+    scene_.swap(pending_scene_);
+    pending_scene_.clear();
+    info_ = pending_info_;
     lv_event_release(preview_anchor_);
     preview_anchor_ = pending_anchor_;
     pending_anchor_ = nullptr;
@@ -181,11 +183,6 @@ void Viewer::consume(const lv_event_view &view)
     if (view.request_id != request_)
         return;
     const bool current = view.user_tag == generation_ && submitted_generation_ == generation_;
-    if (current && work_ == Work::static_detail)
-    {
-        consume_details(view);
-        return;
-    }
     if (current && work_ != Work::static_image)
     {
         consume_animation(view);
@@ -194,15 +191,21 @@ void Viewer::consume(const lv_event_view &view)
     if (current && view.type == LV_EVENT_IMAGE_INFO)
     {
         pending_info_ = view.as.image;
-        prepare_image(false);
+        // Preserve the old source/cache on failure, but do not let optional old
+        // GPU residency prevent admission of the replacement native scene.
+        scene_.release_details();
+        pending_scene_.begin(pending_info_);
     }
-    if (current && view.type == LV_EVENT_REGION_READY && pending_)
-        upload(view.as.region);
+    if (current && view.type == LV_EVENT_REGION_READY)
+    {
+        pending_scene_.upload(view.as.region);
+        pending_content_ = true;
+    }
     if (view.type == LV_EVENT_COMPLETE || view.type == LV_EVENT_ERROR || view.type == LV_EVENT_CANCELLED)
     {
         if (current)
         {
-            if (view.type == LV_EVENT_COMPLETE && pending_)
+            if (view.type == LV_EVENT_COMPLETE && !pending_scene_.empty())
                 accept_completed();
             else
             {
@@ -242,15 +245,8 @@ void Viewer::pump()
             spdlog::error("Image upload: {}", error.what());
             if (request_)
                 lv_core_cancel(core_, request_);
-            if (work_ == Work::static_detail)
-            {
-                ++generation_;
-                pending_detail_.clear();
-                detail_failed_ = true;
-                error_         = LV_ERROR_MEMORY_BUDGET;
-            }
-            else
-                fail(LV_ERROR_MEMORY_BUDGET);
+            const auto *io = dynamic_cast<const std::system_error *>(&error);
+            fail(io ? LV_ERROR_IO : LV_ERROR_MEMORY_BUDGET);
         }
         // Even an exception while processing a terminal must allow the next request.
         if (terminal)
@@ -260,20 +256,19 @@ void Viewer::pump()
         wake_core(nullptr); // Continue draining next frame even without another queue edge.
     submit_pending();
     advance_animation();
-    submit_details();
 }
 
 void Viewer::draw(render::Point min, render::Point max, float density)
 {
-    const bool reveal = work_ == Work::static_image && pending_ && pending_content_ && loading_ &&
-        std::chrono::steady_clock::now() - submitted_at_ >= std::chrono::milliseconds(100);
-    const auto image       = reveal ? pending_ : display_;
+    const bool native      = work_ == Work::static_image;
+    const bool reveal      = native && loading_ && !pending_scene_.empty();
+    auto &scene            = reveal ? pending_scene_ : scene_;
     const auto &image_info = reveal ? pending_info_ : info_;
-    if (!image)
+    const auto image       = display_;
+    if (scene.empty() && !image)
         return;
-    viewport_.update(min, max, density, image_info.format == LV_FORMAT_SVG ? image_info.canvas : image_info.source_size,
-                     image_info.orientation);
-    if (!loading_ && !playback_.started() && (info_.capabilities & LV_CAP_REGION_DECODE) && ImGui::IsWindowHovered())
+    viewport_.update(min, max, density, image_info.source_size, image_info.orientation);
+    if (!playback_.started() && ImGui::IsWindowHovered())
     {
         const auto &io = ImGui::GetIO();
         if (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y)
@@ -284,21 +279,35 @@ void Viewer::draw(render::Point min, render::Point max, float density)
                 viewport_.pan(io.MouseDelta.x, io.MouseDelta.y);
         }
     }
-    queue_details();
-    auto *list = ImGui::GetWindowDrawList();
+    auto *list       = ImGui::GetWindowDrawList();
+    visible_pending_ = false;
+    if (!scene.empty() && !playback_.started())
+    {
+        try
+        {
+            visible_pending_ = !scene.prepare(viewport_);
+        } catch (const std::exception &error)
+        {
+            spdlog::error("Native texture cache: {}", error.what());
+            error_ = dynamic_cast<const std::system_error *>(&error) ? LV_ERROR_IO : LV_ERROR_MEMORY_BUDGET;
+        }
+        if (visible_pending_)
+            wake_core(nullptr);
+    }
     list->PushClipRect({min.x, min.y}, {max.x, max.y}, true);
-    constexpr std::array<render::Point, 4> uv{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
-    renderer_.add_image_quad(list, image,
-                             viewport_.quad({0, 0, image_info.canvas.width, image_info.canvas.height}, image_info.canvas), uv);
-    if (!loading_ && !playback_.started())
-        detail_.draw(viewport_, list);
+    if (!scene.empty() && !playback_.started())
+        scene.draw(viewport_, list);
+    else if (image)
+    {
+        constexpr std::array<render::Point, 4> uv{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+        renderer_.add_image_quad(
+            list, image, viewport_.quad({0, 0, image_info.canvas.width, image_info.canvas.height}, image_info.canvas), uv);
+    }
     list->PopClipRect();
 }
 
 bool Viewer::has_visible_image() const
 {
-    return display_ ||
-        (work_ == Work::static_image && pending_ && pending_content_ && loading_ &&
-         std::chrono::steady_clock::now() - submitted_at_ >= std::chrono::milliseconds(100));
+    return has_image() || (work_ == Work::static_image && loading_ && !pending_scene_.empty());
 }
 } // namespace liltview

@@ -179,8 +179,8 @@ static void png_run(png_state *s, lv_error_info *error)
                 return;
             png_bytep row = passes > 1 ? s->image + (size_t)y * size.width * 4 : lv_rows_buffer(&s->rows, y);
             png_read_row(s->decoder, row, nullptr);
-            if (passes == 1)
-                lv_rows_push(&s->rows, y);
+            if (passes == 1 && !lv_rows_push(&s->rows, y, error))
+                return;
         }
     png_read_end(s->decoder, nullptr);
     if (passes > 1)
@@ -191,7 +191,8 @@ static void png_run(png_state *s, lv_error_info *error)
             if (lv_stopped(s->core, s->request))
                 return;
             stored_row(s, y, lv_rows_buffer(&s->rows, y), error);
-            lv_rows_push(&s->rows, y);
+            if (!lv_rows_push(&s->rows, y, error))
+                return;
         }
     }
     png_destroy_read_struct(&s->decoder, &s->metadata, nullptr);

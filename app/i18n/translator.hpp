@@ -48,6 +48,8 @@ enum class Text
     author,
     project_homepage,
     loading,
+    loading_detail,
+    loading_native,
     image_io_error,
     image_unsupported,
     image_corrupt,

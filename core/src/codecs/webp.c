@@ -91,7 +91,9 @@ void lv_decode_webp(lv_core *core, lv_request *r, lv_input *input, lv_error_info
     else if (lv_bitmap_size(core, (uint32_t)features.width, (uint32_t)features.height, error))
     {
         const lv_size_u32 size   = {(uint32_t)features.width, (uint32_t)features.height};
-        const lv_size_u32 canvas = lv_fit_size(size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
+        const lv_size_u32 canvas = r->desc.target.kind == LV_TARGET_NATIVE ?
+            size :
+            lv_fit_size(size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
         // Foreign codec memory has no allocator hook; reserve a conservative plan.
         const uint64_t scratch = UINT64_C(4) * 1024 * 1024 + (uint64_t)size.width * size.height * 16 + bytes * 2;
         if (lv_frame_prepare(&f, size, canvas, LV_FORMAT_WEBP, LV_CAP_SCALED_DECODE, scratch, error) &&

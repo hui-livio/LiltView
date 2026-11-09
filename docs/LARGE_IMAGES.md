@@ -1,6 +1,8 @@
 # 大图显示、像素所有权与内存复用
 
-日期：2026-11-08。当前 ABI 2 不变；Linux OpenGL 路径已实现静态 JPEG、PNG、未压缩 BMP、TIFF 的 FIT 预览和 REGION 细节。16K 是验收点，代码没有 16K 源尺寸上限；仍受格式、工作集、输出区域及 GPU 预算约束。普通 GIF 动画保持已有范围，不扩展到超大动图。
+> **2026-11-09 更新**：下方 FIT → REGION 方案及“UI 传递全部零拷贝”范围是历史实现记录，不再代表当前静态 viewer。当前采用单次 NATIVE 原始行带、不可变 tile / LOD 缓存和仅 GPU 变换 / 缓存恢复的相机路径；resident 上传不复制，缓存编码有显式工作缓冲。现状见 [应用说明](../app/README.md)、[本轮 review](RENDERING_REVIEW-2026-11-09.md)。自定义 shader / RGB / YUV 仅列入 [开发计划](RENDERING_PLAN.md)，暂不实现。
+
+历史说明日期：2026-11-08。当前 ABI 2 不变；Linux OpenGL 路径已实现静态 JPEG、PNG、未压缩 BMP、TIFF 的 FIT 预览和 REGION 细节。16K 是验收点，代码没有 16K 源尺寸上限；仍受格式、工作集、输出区域及 GPU 预算约束。普通 GIF 动画保持已有范围，不扩展到超大动图。
 
 ## 1. 显示和清晰度
 

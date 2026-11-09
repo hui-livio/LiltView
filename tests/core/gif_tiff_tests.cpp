@@ -272,12 +272,16 @@ TEST_CASE("TIFF tile edges separate planes 16-bit and explicit alpha become stra
                     options.planar = planar;
                     options.bits   = bits;
                     options.alpha  = alpha;
-                    auto result    = decode(tiff_fixture(options));
-                    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
-                    CHECK(result.pixels[0] >= 250);
-                    CHECK(result.pixels[2] == 0);
-                    CHECK(result.pixels[3] == (alpha == 1 || alpha == 2 ? 128 : 255));
-                    CHECK(result.pixels[result.pixels.size() - 2] >= 250);
+                    for (bool native : {false, true})
+                    {
+                        CAPTURE(native);
+                        auto result = native ? decode_native(tiff_fixture(options)) : decode(tiff_fixture(options));
+                        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+                        CHECK(result.pixels[0] >= 250);
+                        CHECK(result.pixels[2] == 0);
+                        CHECK(result.pixels[3] == (alpha == 1 || alpha == 2 ? 128 : 255));
+                        CHECK(result.pixels[result.pixels.size() - 2] >= 250);
+                    }
                 }
 }
 

@@ -218,6 +218,8 @@ static bool tiff_sample_blocks(tiff_input *source, TIFF *tif, lv_frame *f, uint3
         const uint32_t by = sy / block.height * block.height;
         uint32_t end_y    = y + 1;
         while (end_y < region.height &&
+               (!f->streaming || block.width >= region.width ||
+                (region.y + end_y) / f->info.tile_edge == (region.y + y) / f->info.tile_edge) &&
                lv_sample_nearest(region.y + end_y, size.height, canvas.height) / block.height == by / block.height)
             ++end_y;
         for (uint32_t x = 0; x < region.width;)
@@ -230,20 +232,53 @@ static bool tiff_sample_blocks(tiff_input *source, TIFF *tif, lv_frame *f, uint3
             while (end_x < region.width &&
                    lv_sample_nearest(region.x + end_x, size.width, canvas.width) / block.width == bx / block.width)
                 ++end_x;
+            const uint32_t raster_y  = f->streaming ? region.y + y : by;
             const lv_size_u32 extent = {size.width - bx < block.width ? size.width - bx : block.width,
-                                        size.height - by < block.height ? size.height - by : block.height};
-            if (!tiff_rgba(source, tif, raster, extent, bx, by, error))
+                                        f->streaming ? end_y - y :
+                                                       (size.height - by < block.height ? size.height - by : block.height)};
+            if (!tiff_rgba(source, tif, raster, extent, bx, raster_y, error))
                 return false;
 
             for (uint32_t oy = y; oy < end_y; ++oy)
             {
-                const uint32_t py  = lv_sample_nearest(region.y + oy, size.height, canvas.height) - by;
+                const uint32_t py = lv_sample_nearest(region.y + oy, size.height, canvas.height) - raster_y;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+                if (extras == 0 && canvas.width == size.width && canvas.height == size.height)
+                {
+                    // TIFFRGBA's opaque packed words are already native RGBA8
+                    // on little-endian machines: no per-pixel sampling/division.
+                    for (uint32_t ox = x; ox < end_x;)
+                    {
+                        uint32_t span = 0;
+                        uint8_t *out  = lv_frame_span(f, ox, oy, &span);
+                        if (!out)
+                        {
+                            error->code = f->failure;
+                            return false;
+                        }
+                        if (span > end_x - ox)
+                            span = end_x - ox;
+                        memcpy(out, raster + (size_t)py * extent.width + region.x + ox - bx, (size_t)span * 4);
+                        ox += span;
+                    }
+                    if (x == 0 && end_x == region.width && !lv_frame_flush_rows(f, oy + 1, error))
+                        return false;
+                    continue;
+                }
+#endif
                 uint8_t *out       = nullptr;
                 uint32_t remaining = 0;
                 for (uint32_t ox = x; ox < end_x; ++ox, out += 4, --remaining)
                 {
                     if (!remaining)
+                    {
                         out = lv_frame_span(f, ox, oy, &remaining);
+                        if (!out)
+                        {
+                            error->code = f->failure;
+                            return false;
+                        }
+                    }
                     const uint32_t px    = lv_sample_nearest(region.x + ox, size.width, canvas.width) - bx;
                     const uint32_t value = raster[(size_t)py * extent.width + px], a = alpha ? TIFFGetA(value) : 255;
                     const uint32_t channels[3] = {TIFFGetR(value), TIFFGetG(value), TIFFGetB(value)};
@@ -254,9 +289,13 @@ static bool tiff_sample_blocks(tiff_input *source, TIFF *tif, lv_frame *f, uint3
                     }
                     out[3] = (uint8_t)a;
                 }
+                if (x == 0 && end_x == region.width && !lv_frame_flush_rows(f, oy + 1, error))
+                    return false;
             }
             x = end_x;
         }
+        if (!lv_frame_flush_rows(f, end_y, error))
+            return false;
         y = end_y;
     }
     return true;

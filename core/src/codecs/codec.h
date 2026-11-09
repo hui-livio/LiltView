@@ -30,7 +30,9 @@ typedef struct lv_frame
     size_t bytes;
     uint64_t tile_reserve;
     lv_frame_tile *tiles;
-    size_t tile_count, tile_columns;
+    size_t tile_count, tile_columns, next_publish;
+    bool streaming;
+    lv_error_code failure;
 } lv_frame;
 
 typedef struct lv_axis_sample
@@ -51,7 +53,7 @@ lv_axis_sample lv_sample_axis(uint32_t coordinate, uint32_t source, uint32_t can
 uint32_t lv_sample_nearest(uint32_t coordinate, uint32_t source, uint32_t canvas);
 bool lv_rows_init(lv_rows *, lv_frame *, lv_size_u32, lv_error_info *);
 uint8_t *lv_rows_buffer(lv_rows *, uint32_t y);
-void lv_rows_push(lv_rows *, uint32_t y);
+bool lv_rows_push(lv_rows *, uint32_t y, lv_error_info *);
 void lv_rows_release(lv_rows *);
 bool lv_raster_read(lv_frame *, lv_size_u32, lv_read_row_fn, void *, lv_error_info *);
 
@@ -61,6 +63,7 @@ bool lv_frame_prepare(lv_frame *, lv_size_u32 source, lv_size_u32 canvas, lv_for
                       lv_error_info *);
 bool lv_frame_info(lv_frame *, lv_error_info *);
 bool lv_frame_finish(lv_frame *, lv_error_info *);
+bool lv_frame_flush_rows(lv_frame *, uint32_t completed_rows, lv_error_info *);
 void lv_frame_release(lv_frame *);
 // Local output coordinates. Returns a writable row span ending at a tile edge.
 uint8_t *lv_frame_span(lv_frame *, uint32_t x, uint32_t y, uint32_t *width);

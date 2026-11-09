@@ -36,9 +36,21 @@ public:
     void set_viewport(render::Point min, render::Point max, float density = 1);
     void pan(double x, double y);
     void zoom(double wheel, render::Point anchor);
+    std::size_t loaded_tiles() const
+    {
+        return loading_ ? pending_scene_.loaded_tiles() : scene_.loaded_tiles();
+    }
     bool detail_ready() const
     {
-        return !detail_.empty() && completed_detail_ == wanted_detail_ && !detail_failed_;
+        return !loading_ && !scene_.empty() && !visible_pending_;
+    }
+    bool detail_loading() const
+    {
+        return visible_pending_;
+    }
+    bool native_loading() const
+    {
+        return loading_ && work_ == Work::static_image;
     }
     bool loading() const
     {
@@ -46,19 +58,17 @@ public:
     }
     bool has_image() const
     {
-        return static_cast<bool>(display_);
+        return display_ || !scene_.empty();
     }
     bool can_actual_size() const
     {
-        return display_ &&
-            ((info_.capabilities & LV_CAP_REGION_DECODE) ||
-             (info_.canvas.width == info_.source_size.width && info_.canvas.height == info_.source_size.height));
+        return !scene_.empty() || (loading_ && !pending_scene_.empty()) ||
+            (display_ && info_.canvas.width == info_.source_size.width && info_.canvas.height == info_.source_size.height);
     }
     bool has_visible_image() const;
     bool settled() const
     {
-        return !loading_ && pending_path_.empty() && (playback_.started() || request_ == 0) &&
-            (!wanted_detail_.rect.width || viewport_.fitting() || detail_failed_ || completed_detail_ == wanted_detail_);
+        return !loading_ && !visible_pending_ && pending_path_.empty() && (playback_.started() || request_ == 0);
     }
     bool failed() const
     {
@@ -92,16 +102,11 @@ private:
     void consume_animation(const lv_event_view &);
     void advance_animation();
     void close_animation();
-    void queue_details();
-    void submit_details();
-    void consume_details(const lv_event_view &);
-    void clear_details();
 
     void fail(lv_error_code);
     enum class Work
     {
         static_image,
-        static_detail,
         animation_open,
         animation_next,
         animation_reset
@@ -116,16 +121,13 @@ private:
 
     render::Renderer &renderer_;
     Viewport viewport_;
-    Tiles detail_, pending_detail_;
-    RegionTarget wanted_detail_{}, submitted_detail_{}, completed_detail_{};
-    bool detail_failed_       = false;
+    Tiles scene_, pending_scene_;
+    bool visible_pending_     = false;
     lv_event *preview_anchor_ = nullptr, *pending_anchor_ = nullptr;
-    std::filesystem::path image_path_, opening_path_;
 
     lv_core *core_            = nullptr;
     lv_request_id request_    = 0;
     std::uint64_t generation_ = 0, submitted_generation_ = 0;
-    std::chrono::steady_clock::time_point submitted_at_{};
     std::filesystem::path pending_path_;
     std::string filename_;
     render::Image display_, pending_;

@@ -477,3 +477,16 @@ TEST_CASE("transparent FIT filtering does not create dark fringes", "[formats][p
     CHECK(result.pixels[7] < 255);
     CHECK(result.pixels[11] == 0);
 }
+
+TEST_CASE("NATIVE ignores FIT bounds for complete-output WebP RLE BMP and SVG", "[native][formats]")
+{
+    for (const auto &bytes : {webp(false), webp(true), bmp_rle(8, false), bmp_rle(4, true), red_svg()})
+    {
+        const auto result = decode_native(bytes);
+        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+        CHECK(result.info.canvas.width == result.info.source_size.width);
+        CHECK(result.info.canvas.height == result.info.source_size.height);
+        CHECK(result.info.canvas.width == 7);
+        CHECK(result.info.canvas.height == 5);
+    }
+}

@@ -15,15 +15,15 @@
 
 ### 1.2 当前实现范围
 
-- 所有公共函数已有实现；七类格式报告静态显示可用。JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 报 ANIMATION；JPEG / PNG / BMP / TIFF 的构建级能力另报 REGION_DECODE，具体文件 INFO 再收窄（RLE BMP 不报 REGION）。不报告解码中的增量扫描预览。
-- Linux 常规本地文件、DISPLAY / FIT，以及 JPEG / PNG / 未压缩 BMP / TIFF 的 DISPLAY / REGION；一个前台 worker。PREFETCH 同步返回 UNSUPPORTED，不支持 REGION 的 codec 异步返回 TARGET_UNSUPPORTED；多 worker、非零 cache / disk cache 预算仍在 create 返回 UNSUPPORTED。
+- 所有公共函数已有实现；七类格式报告静态显示可用。JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 报 ANIMATION；JPEG / PNG / BMP / TIFF 的构建级能力另报 REGION_DECODE，具体文件 INFO 再收窄（RLE BMP 不报 REGION）。NATIVE 支持完成的原始行带增量输出；不把渐进扫描的中间像素冒充最终像素。
+- Linux 常规本地文件、DISPLAY / FIT / NATIVE，以及 JPEG / PNG / 未压缩 BMP / TIFF 的 DISPLAY / REGION；一个前台 worker。PREFETCH 同步返回 UNSUPPORTED，不支持 REGION 的 codec 异步返回 TARGET_UNSUPPORTED；多 worker、非零 cache / disk cache 预算仍在 create 返回 UNSUPPORTED。
 - 16K JPEG / PNG / BMP 与 32K TIFF 大图已验证，16K 不是源尺寸上限。REGION canvas 只表示坐标空间，分配取决于实际区域及 codec 工作集；不能承诺 JPEG / PNG 随机读取延迟。progressive JPEG 和 Adam7 PNG 仍可能因完整系数 / 合并工作集超过预算而失败。
 - 常规格式和 GIF 动画范围见[格式兼容表](IMAGE_FORMATS.md)；不支持超大动图、TIFF 翻页、APNG / 动画 WebP、SVG 文字 / 裁剪 / 内嵌位图。JPEG 保持 8 位 RGB / 灰度、baseline / progressive 最终结果和 EXIF 1..8。
-- 流式静态路径取消统一 64 MiB 文件和 256 MiB 原图 RGBA 上限；单次输出区域仍不超过 `min(large_pixel_bytes, 256 MiB)`，并须满足 CPU 预算。WebP / GIF / RLE BMP 等保留原有有界范围，SVG 另有文本 / 文档限制。
+- 流式静态路径取消统一 64 MiB 文件和 256 MiB 原图 RGBA 上限；FIT / REGION 的单次输出区域仍不超过 `min(large_pixel_bytes, 256 MiB)`，并须满足 CPU 预算；NATIVE 的区域解码 codec 例外：完整 canvas 是逻辑坐标，只为活动行带分配像素并按队列预算发布 / 回收。WebP / GIF / RLE BMP 等保留原有有界范围，SVG 另有文本 / 文档限制。
 - JPEG / PNG / 未压缩 BMP / TIFF 直接写最终像素 tiles；连续输出路径发布共享 backing 的带 stride 视图。从最终输出到事件和 UI 不深拷贝像素。最后一个引用释放后才允许有界复用；细节及所有权见[大图实现](LARGE_IMAGES.md)。
-- 所有像素在解码和源版本核验后发布。INFO 可更早交付；tile 可分帧上传，UI 超时揭示不代表 core 已提供扫描中预览。内部 codec 合成 / 重采样工作不等同于传输深拷贝。
+- 所有像素在对应最终结果解码和源版本核验后发布。NATIVE 允许完整行带在整图解码结束前发布，带 `LV_PRESENT_IMMEDIATE`；后续源变化或数据错误仍可能产生带部分输出的 ERROR，调用方须处理，不能把收到首块等同于整图成功。FIT / REGION 保持原有完成校验与发布策略。内部 codec 合成 / 重采样工作不等同于传输深拷贝。
 - CPU 账本包含已分配像素、共享 backing、元数据和空闲池；预约不计入 accounted_cpu_bytes。空闲池不是解码内容缓存。第三方内部及 C runtime 内存按保守 allowance 准入，预算不承诺 RSS 硬上限。
-- app 当前 CPU / 队列 / GPU 图片预算为 384 / 4 / 128 MiB。版本、取消、引用存活、关闭、REGION 覆盖、大尺寸坐标和真实 OpenGL 边界像素均有测试；缓存 / 预读仍未实现。
+- app 当前 CPU / 队列 / GPU 图片预算为 384 / 4 / 128 MiB。版本、取消、引用存活、关闭、REGION 覆盖、大尺寸坐标和真实 OpenGL 边界像素均有测试；core 配置中的缓存 / 预读仍未实现；app 单独维护不可变原始场景和匿名本地纹理缓存，见 [应用说明](../app/README.md)。
 
 ## 2. 核心对象与函数
 
@@ -104,6 +104,14 @@
 `fit_bounds` 是经过方向变换后的物理像素边界，由 UI 将窗口尺寸乘以 DPI 得到。位图保持比例且不放大；SVG 按固有比例栅格化。`IMAGE_INFO.canvas` 返回实际未应用方向变换的输出尺寸，区域为整个输出画布。
 
 FIT 不要求 UI 先知道原图尺寸，一次请求即可完成探测、适应计算和像素交付。方向旋转 90 度时，应先交换可用边界的宽高，再计算源坐标下的输出尺寸。
+
+### NATIVE：原始分辨率流式场景
+
+`target.kind = LV_TARGET_NATIVE`，union 中的 FIT / REGION 字段不参与计算，无需提前知道源尺寸。位图 canvas 等于未旋转的 source_size；SVG 按自然尺寸栅格化。静态区域 codec 只保留活动行带，按全图固定 tile 网格、自上而下发布不可变 `REGION_READY`，完成后恰好覆盖原始画面。已经发布的像素不会被后续扫描改写。完整逻辑画面不受单块纹理或单次 REGION 的 256 MiB 输出上限约束，但索引、工作集、队列和存活像素仍须通过 CPU 预算准入。
+
+普通 PNG、baseline JPEG、BMP 和 TIFF 可在整图完成前显示行带。Adam7 / progressive JPEG 的内在工作集限制仍适用；其他静态 codec 可以完整解码后按原始尺寸发布。任何 codec 都不得静默把 NATIVE 改成 FIT。动画 OPEN 仍只接受 FIT。新增枚举不改变 ABI 2 的结构布局或默认 FIT 行为。
+
+UI 缓存此次唯一请求的最终原始像素；相机操作只做 GPU 变换 / 已生成纹理的缓存恢复，不需要重新提交 NATIVE 或 REGION。此缓存属于 app，不会启用 core 尚未实现的 `disk_cache_*` 配置。
 
 ### 5.2 REGION：指定分辨率下的区域
 

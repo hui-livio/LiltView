@@ -140,7 +140,9 @@ typedef uint32_t lv_target_kind;
 enum
 {
     LV_TARGET_FIT    = 1,
-    LV_TARGET_REGION = 2
+    LV_TARGET_REGION = 2,
+    /* Original pixel canvas. Regional codecs stream immutable tile rows; no FIT preview. */
+    LV_TARGET_NATIVE = 3
 };
 
 typedef struct lv_target

@@ -162,3 +162,7 @@ CPU 与 GPU 预算独立。renderer 不持有 core 像素引用；一次同步�
 3. Microsoft DXGI `ResizeBuffers`：<https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiswapchain-resizebuffers>
 
 2026-11-08 补充验证：真实 OpenGL 单张 2×2 棋盘放大逐像素检查、32K 源在最大 128px 局部纹理下的 FIT / 原尺寸 / 放大 / 平移 / 缩小回读，以及 core 指针交付、stride 视图、引用存活和池复用。未来 DX11 需实现同一 magnification 与源 row pitch 契约；目前仍未实现或验证 Windows。
+
+## 2026-11-09 review 与后续计划
+
+当前仍通过 ImGui OpenGL3 backend 绘制 RGBA8。原始分辨率 native 场景及缓存变换见 [应用说明](../app/README.md)；已发现问题、修复和剩余风险见 [review](RENDERING_REVIEW-2026-11-09.md)。独立 image shader / RGB / YUV 多平面输入仅列入 [开发计划](RENDERING_PLAN.md)，本轮不实现，不把未来 plane 描述当成现有 `Pixels` 契约。

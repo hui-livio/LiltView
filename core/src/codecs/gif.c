@@ -141,10 +141,11 @@ void lv_decode_gif(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
         (uint32_t)desc->Top > size.height || (uint32_t)desc->Width > size.width - (uint32_t)desc->Left ||
         (uint32_t)desc->Height > size.height - (uint32_t)desc->Top)
         goto done;
-    image_bytes              = (size_t)size.width * size.height * 4;
-    row_bytes                = (size_t)desc->Width;
-    const lv_size_u32 canvas = lv_fit_size(size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
-    const bool native        = canvas.width == size.width && canvas.height == size.height;
+    image_bytes = (size_t)size.width * size.height * 4;
+    row_bytes   = (size_t)desc->Width;
+    const lv_size_u32 canvas =
+        r->desc.target.kind == LV_TARGET_NATIVE ? size : lv_fit_size(size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
+    const bool native = canvas.width == size.width && canvas.height == size.height;
     if (!lv_frame_prepare(&f, size, canvas, LV_FORMAT_GIF, 0, (native ? 0 : image_bytes) + row_bytes, error))
         goto done;
     image = native ? f.data : lv_workspace_allocate(core, r, image_bytes);

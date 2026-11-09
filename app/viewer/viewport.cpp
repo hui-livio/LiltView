@@ -125,11 +125,11 @@ std::array<double, 2> Viewport::unorient(double x, double y) const
         return {x, y};
     }
 }
-RegionTarget Viewport::target(std::uint32_t edge) const
+RegionTarget Viewport::target(std::uint32_t edge, bool native) const
 {
     if (!source_.width || !source_.height || !edge)
         return {};
-    const double resolution = std::min(1.0, std::pow(2.0, std::ceil(std::log2(scale_))));
+    const double resolution = native ? 1.0 : std::min(1.0, std::pow(2.0, std::ceil(std::log2(scale_))));
     const lv_size_u32 canvas{std::max(1u, static_cast<std::uint32_t>(source_.width * resolution)),
                              std::max(1u, static_cast<std::uint32_t>(source_.height * resolution))};
     const double hw = static_cast<double>(max_.x - min_.x) * density_ / (2 * scale_),
@@ -153,13 +153,26 @@ std::array<render::Point, 4> Viewport::quad(lv_rect_u32 rect, lv_size_u32 canvas
          {static_cast<double>(rect.x) + rect.width, static_cast<double>(rect.y)},
          {static_cast<double>(rect.x) + rect.width, static_cast<double>(rect.y) + rect.height},
          {static_cast<double>(rect.x), static_cast<double>(rect.y) + rect.height}}};
+    const double cx = (static_cast<double>(min_.x) + max_.x) / 2;
+    const double cy = (static_cast<double>(min_.y) + max_.y) / 2;
+    double snap_x = 0, snap_y = 0;
+    if (scale_ >= 1 && std::abs(scale_ - std::round(scale_)) < 1e-9)
+    {
+        // Snap the shared image origin, NOT each tile independently. At 100%
+        // one source pixel must cover exactly one physical framebuffer pixel,
+        // including odd canvas sizes, fractional UI positions and HiDPI.
+        const double origin_x = cx * density_ - center_x_ * scale_;
+        const double origin_y = cy * density_ - center_y_ * scale_;
+        snap_x                = std::round(origin_x) - origin_x;
+        snap_y                = std::round(origin_y) - origin_y;
+    }
     std::array<render::Point, 4> result{};
     for (unsigned i = 0; i < 4; ++i)
     {
         const auto p = orient(corners[i][0] * source_.width / canvas.width, corners[i][1] * source_.height / canvas.height);
         // Subtract the camera in double precision BEFORE converting to GPU floats.
-        result[i] = {static_cast<float>((min_.x + max_.x) / 2 + (p[0] - center_x_) * scale_ / density_),
-                     static_cast<float>((min_.y + max_.y) / 2 + (p[1] - center_y_) * scale_ / density_)};
+        result[i] = {static_cast<float>(cx + ((p[0] - center_x_) * scale_ + snap_x) / density_),
+                     static_cast<float>(cy + ((p[1] - center_y_) * scale_ + snap_y) / density_)};
     }
     return result;
 }

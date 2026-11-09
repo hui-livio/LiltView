@@ -123,8 +123,8 @@ static bool prepare_tiles(lv_frame *f, lv_error_info *error)
             lv_frame_tile *tile = &f->tiles[at++];
             tile->rect          = (lv_rect_u32){x, y, (uint32_t)(right - x), (uint32_t)(bottom - y)};
             tile->id            = (gy / edge) * columns + gx / edge;
-            tile->pixels        = lv_pixels_new(f->core, f->request, tile->rect.width, tile->rect.height);
-            if (!tile->pixels)
+            tile->pixels = f->streaming ? nullptr : lv_pixels_new(f->core, f->request, tile->rect.width, tile->rect.height);
+            if (!f->streaming && !tile->pixels)
                 goto failed;
         }
     return true;
@@ -140,7 +140,13 @@ bool lv_frame_prepare(lv_frame *f, lv_size_u32 source, lv_size_u32 canvas, lv_fo
     const lv_rect_u32 region = f->request->desc.target.kind == LV_TARGET_REGION ?
         f->request->desc.target.as.region.rect :
         (lv_rect_u32){0, 0, canvas.width, canvas.height};
-    if (!lv_bitmap_size(f->core, region.width, region.height, error))
+    f->streaming             = f->request->desc.target.kind == LV_TARGET_NATIVE && (caps & LV_CAP_REGION_DECODE);
+    if (!region.width || !region.height || (uint64_t)region.width * region.height > UINT64_MAX / 4)
+    {
+        error->code = LV_ERROR_DIMENSION_LIMIT;
+        return false;
+    }
+    if (!f->streaming && !lv_bitmap_size(f->core, region.width, region.height, error))
         return false;
     const uint64_t bytes   = (uint64_t)region.width * region.height * 4;
     const uint64_t edge    = f->core->config.tile_edge;
@@ -149,8 +155,9 @@ bool lv_frame_prepare(lv_frame *f, lv_size_u32 source, lv_size_u32 canvas, lv_fo
     const bool tiled       = (caps & LV_CAP_REGION_DECODE) && !f->request->animation;
     f->bytes               = (size_t)bytes;
     f->tile_reserve        = count * (sizeof(lv_event) + (tiled ? 0 : sizeof(lv_pixels)));
-    const uint64_t plan    = tiled ? bytes + count * (sizeof(lv_frame_tile) + sizeof(lv_pixels) + sizeof(lv_event)) + scratch :
-                                     bytes + sizeof(lv_pixels) + f->tile_reserve + scratch;
+    const uint64_t plan    = f->streaming ? count * (sizeof(lv_frame_tile) + sizeof(lv_event)) + scratch :
+        tiled ? bytes + count * (sizeof(lv_frame_tile) + sizeof(lv_pixels) + sizeof(lv_event)) + scratch :
+                bytes + sizeof(lv_pixels) + f->tile_reserve + scratch;
     if (!lv_reserve(f->core, f->request, plan))
     {
         *error = (lv_error_info){
@@ -201,7 +208,20 @@ uint8_t *lv_frame_span(lv_frame *f, uint32_t x, uint32_t y, uint32_t *width)
     const uint32_t gx = region.x + x, gy = region.y + y, edge = f->info.tile_edge;
     const size_t col = gx / edge - region.x / edge, row = gy / edge - region.y / edge;
     lv_frame_tile *tile = &f->tiles[row * f->tile_columns + col];
-    *width              = tile->rect.width - (gx - tile->rect.x);
+    if (f->streaming && !tile->pixels)
+    {
+        const uint64_t bytes = sizeof(lv_pixels) + (uint64_t)tile->rect.width * tile->rect.height * 4;
+        if (!lv_reserve(f->core, f->request, bytes))
+            f->failure = LV_ERROR_MEMORY_BUDGET;
+        else if (!(tile->pixels = lv_pixels_new(f->core, f->request, tile->rect.width, tile->rect.height)))
+            f->failure = LV_ERROR_OUT_OF_MEMORY;
+        if (f->failure)
+        {
+            *width = 0;
+            return nullptr;
+        }
+    }
+    *width = tile->rect.width - (gx - tile->rect.x);
     return tile->pixels->data + ((size_t)(gy - tile->rect.y) * tile->rect.width + gx - tile->rect.x) * 4;
 }
 
@@ -255,6 +275,35 @@ static bool publish_slices(lv_frame *f, lv_error_info *error)
         }
     return true;
 }
+bool lv_frame_flush_rows(lv_frame *f, uint32_t completed_rows, lv_error_info *error)
+{
+    if (!f->streaming || f->next_publish == f->tile_count ||
+        (uint64_t)f->tiles[f->next_publish].rect.y + f->tiles[f->next_publish].rect.height >
+            (uint64_t)f->info.region.y + completed_rows)
+        return true;
+    if (!lv_file_unchanged(f->input->file, f->request->path, &f->input->version))
+    {
+        error->code = LV_ERROR_SOURCE_CHANGED;
+        return false;
+    }
+    while (f->next_publish < f->tile_count)
+    {
+        lv_frame_tile *tile = &f->tiles[f->next_publish];
+        if ((uint64_t)tile->rect.y + tile->rect.height > (uint64_t)f->info.region.y + completed_rows)
+            break;
+        if (!tile->pixels || !lv_publish_tile(f->core, f->request, tile->pixels, tile->rect, tile->id))
+        {
+            if (!lv_stopped(f->core, f->request))
+                error->code = LV_ERROR_OUT_OF_MEMORY;
+            return false;
+        }
+        tile->pixels     = nullptr; // Immutable published row band; never touched again.
+        f->tile_reserve -= sizeof(lv_event);
+        ++f->next_publish;
+    }
+    return true;
+}
+
 bool lv_frame_finish(lv_frame *f, lv_error_info *error)
 {
     if (lv_stopped(f->core, f->request))
@@ -264,6 +313,8 @@ bool lv_frame_finish(lv_frame *f, lv_error_info *error)
         error->code = LV_ERROR_SOURCE_CHANGED;
         return false;
     }
+    if (f->streaming && !lv_frame_flush_rows(f, f->info.region.height, error))
+        return false;
     // Only event records remain reserved. Decoder-owned tiles are already live.
     mtx_lock(&f->core->mutex);
     f->core->reserved       -= f->request->reservation - f->tile_reserve;
@@ -271,7 +322,7 @@ bool lv_frame_finish(lv_frame *f, lv_error_info *error)
     mtx_unlock(&f->core->mutex);
     if (!f->tiles)
         return publish_slices(f, error);
-    for (size_t i = 0; i < f->tile_count; ++i)
+    for (size_t i = f->next_publish; i < f->tile_count; ++i)
     {
         lv_frame_tile *tile = &f->tiles[i];
         // Success moves the sole reference into the event. Never write it again.

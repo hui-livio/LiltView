@@ -32,6 +32,7 @@ public:
     std::uint32_t next         = 1;
     bool fail_upload           = false;
     unsigned uploads           = 0;
+    unsigned upload_delay_ms   = 0;
     unsigned creates           = 0;
     std::uint64_t image_budget = 16 * 1024 * 1024;
     std::uint32_t max_edge     = 4096;
@@ -68,6 +69,8 @@ public:
         }
         liltview::render::validate_upload(textures.at(image.slot).size, rect, pixels);
         ++uploads;
+        if (upload_delay_ms)
+            SDL_Delay(upload_delay_ms);
     }
     void destroy_image(Image image) noexcept override
     {
@@ -254,71 +257,64 @@ TEST_CASE("animation GPU budget failure keeps the last complete texture", "[view
     CHECK(renderer.textures.size() == 1);
 }
 
-TEST_CASE("static details use local textures and rapid pan cancels obsolete regions", "[viewer][region]")
+TEST_CASE("native scenes retain every decoded tile across camera changes", "[viewer][native]")
 {
     EventLoop loop;
     TestRenderer renderer;
     renderer.max_edge = 128;
     liltview::Viewer viewer(renderer);
-    auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-viewer-region-" + std::to_string(SDL_GetPerformanceCounter()));
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-native-cache-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "board.png";
-    liltview::test::checkerboard(path, 2048, 2048, 128);
+    liltview::test::checkerboard(path, 512, 512, 1);
     viewer.open(path);
     loop.settle(viewer);
     REQUIRE(viewer.has_image());
-    CHECK(viewer.can_actual_size());
-    viewer.set_viewport({0, 0}, {512, 512});
-    viewer.actual_size();
-    loop.settle(viewer);
-    REQUIRE_FALSE(viewer.failed());
-    CHECK(viewer.detail_ready());
-    CHECK(renderer.textures.size() > 2);
-    unsigned nearest = 0;
-    for (const auto &[id, texture] : renderer.textures)
+    REQUIRE(viewer.detail_ready());
+    REQUIRE(renderer.textures.size() == 16); // Native tiles, no FIT texture.
+    const auto uploads = renderer.uploads;
+    const auto creates = renderer.creates;
+    std::filesystem::remove(path); // There is no source left to decode again.
+    viewer.set_viewport({0, 0}, {128, 96});
+    for (unsigned i = 0; i < 12; ++i)
     {
-        (void)id;
-        nearest += texture.magnification == liltview::render::ImageDesc::Magnification::nearest;
+        viewer.actual_size();
+        viewer.pan(-20, 10);
+        viewer.zoom(-2, {64, 48});
+        viewer.fit();
+        loop.settle(viewer);
+        CHECK_FALSE(viewer.failed());
+        CHECK(viewer.detail_ready());
     }
-    CHECK(nearest > 1);
-    for (unsigned i = 0; i < 8; ++i)
-    {
-        viewer.pan(-80, 0);
-        viewer.pump();
-    }
-    loop.settle(viewer);
-    CHECK_FALSE(viewer.failed());
-    CHECK(viewer.detail_ready());
-    viewer.fit();
-    viewer.pump();
-    CHECK(renderer.textures.size() == 1);
+    CHECK(renderer.uploads == uploads);
+    CHECK(renderer.creates == creates);
     viewer.shutdown();
     CHECK(renderer.textures.empty());
     std::filesystem::remove_all(folder);
 }
-TEST_CASE("changed file details cannot mix with an older FIT preview", "[viewer][region][source]")
+
+TEST_CASE("cached native scene remains an immutable snapshot after source replacement", "[viewer][native][source]")
 {
     EventLoop loop;
     TestRenderer renderer;
     liltview::Viewer viewer(renderer);
-    auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-viewer-source-" + std::to_string(SDL_GetPerformanceCounter()));
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-native-snapshot-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "board.png";
-    liltview::test::checkerboard(path, 1024, 1024, 128);
+    liltview::test::checkerboard(path, 513, 513, 17);
     viewer.open(path);
     loop.settle(viewer);
-    {
-        std::ofstream out(path, std::ios::binary | std::ios::app);
-        out.put('x');
-    }
+    REQUIRE(viewer.detail_ready());
+    const auto uploads = renderer.uploads;
+    liltview::test::checkerboard(path, 1024, 1024, 23);
     viewer.set_viewport({0, 0}, {128, 96});
     viewer.actual_size();
     loop.settle(viewer);
-    CHECK(viewer.error() == LV_ERROR_SOURCE_CHANGED);
-    CHECK(viewer.has_image());
-    CHECK_FALSE(viewer.detail_ready());
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.source_size().width == 513);
+    CHECK(renderer.uploads == uploads);
     viewer.shutdown();
     std::filesystem::remove_all(folder);
 }
@@ -344,6 +340,56 @@ TEST_CASE("failed replacement preserves the displayed source for sharp regional 
     viewer.actual_size();
     loop.settle(viewer);
     CHECK_FALSE(viewer.failed());
+    CHECK(viewer.detail_ready());
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("a native-size preview uses pixel-preserving magnification", "[viewer][sharpness]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-native-preview-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    const auto path = folder / "small.png";
+    liltview::test::checkerboard(path, 17, 13, 1);
+    liltview::Viewer viewer(renderer);
+    viewer.open(path);
+    loop.settle(viewer);
+    REQUIRE(viewer.has_image());
+    REQUIRE(renderer.textures.size() == 1);
+    CHECK(renderer.textures.begin()->second.magnification == liltview::render::ImageDesc::Magnification::nearest);
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("native row bands are visible before the complete image finishes decoding", "[viewer][native][stream]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    renderer.upload_delay_ms = 5; // Stop the UI pump after the first uploaded tile.
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-native-first-band-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    const auto path = folder / "stream.png";
+    liltview::test::checkerboard(path, 1024, 4096, 7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(path);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!viewer.has_visible_image())
+    {
+        viewer.pump();
+        REQUIRE_FALSE(viewer.failed());
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Delay(1);
+    }
+    CHECK(viewer.loading());
+    CHECK_FALSE(viewer.settled());
+    CHECK(viewer.source_size().width == 1024);
+    CHECK(viewer.source_size().height == 4096);
+    renderer.upload_delay_ms = 0;
+    loop.settle(viewer);
     CHECK(viewer.detail_ready());
     viewer.shutdown();
     std::filesystem::remove_all(folder);

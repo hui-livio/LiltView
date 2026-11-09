@@ -131,7 +131,7 @@ lv_status lv_validate_request(const lv_request_desc *r)
     if (r->priority > LV_PRIORITY_PREFETCH || (r->kind == LV_REQUEST_DISPLAY && r->priority == LV_PRIORITY_PREFETCH) ||
         (r->kind == LV_REQUEST_PREFETCH && r->priority != LV_PRIORITY_PREFETCH))
         return LV_INVALID_ARGUMENT;
-    if (r->target.kind != LV_TARGET_FIT && r->target.kind != LV_TARGET_REGION)
+    if (r->target.kind != LV_TARGET_FIT && r->target.kind != LV_TARGET_REGION && r->target.kind != LV_TARGET_NATIVE)
         return LV_INVALID_ARGUMENT;
     if (r->target.kind == LV_TARGET_FIT && (!r->target.as.fit_bounds.width || !r->target.as.fit_bounds.height))
         return LV_INVALID_ARGUMENT;

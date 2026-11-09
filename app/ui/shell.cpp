@@ -282,7 +282,11 @@ void Shell::draw_status(Language language, const Viewer &viewer)
         return translate(language, text);
     };
     const float scale = ImGui::GetStyle().FontScaleDpi;
-    Text status       = viewer.loading() ? Text::loading : Text::ready;
+    Text status       = Text::ready;
+    if (viewer.loading())
+        status = viewer.native_loading() ? Text::loading_native : Text::loading;
+    else if (viewer.detail_loading())
+        status = Text::loading_detail;
     if (viewer.failed())
         status = image_error_text(viewer.error());
     if (viewer.filename().empty())

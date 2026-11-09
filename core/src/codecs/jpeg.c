@@ -134,10 +134,18 @@ static void exif_marker(j_decompress_ptr decoder)
     }
 }
 
-static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s)
+static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s, lv_error_info *error)
 {
     struct jpeg_decompress_struct *d = &s->decoder;
-    while (d->output_scanline < d->output_height)
+    const lv_image_info *info        = &s->frame.info;
+    const uint32_t first             = lv_sample_axis(info->region.y, s->rows.source.height, info->canvas.height).first;
+    const uint32_t end =
+        lv_sample_axis(info->region.y + info->region.height - 1, s->rows.source.height, info->canvas.height).second + 1;
+    // Skip offscreen scanlines instead of converting every pixel of a huge JPEG
+    // to RGBA for a small native viewport. The input manager remains cancellable.
+    if (first && jpeg_skip_scanlines(d, first) != first)
+        return false;
+    while (d->output_scanline < end)
     {
         if (lv_stopped(core, request))
             return false;
@@ -145,8 +153,14 @@ static bool decode_rows(lv_core *core, lv_request *request, jpeg_state *s)
         JSAMPROW row     = lv_rows_buffer(&s->rows, y);
         if (jpeg_read_scanlines(d, &row, 1) != 1)
             return false;
-        lv_rows_push(&s->rows, y);
+        if (!lv_rows_push(&s->rows, y, error))
+            return false;
     }
+    if (lv_stopped(core, request))
+        return false;
+    const JDIMENSION remaining = d->output_height - d->output_scanline;
+    if (remaining && jpeg_skip_scanlines(d, remaining) != remaining)
+        return false;
     return s->rows.next_y == s->frame.info.region.height;
 }
 
@@ -224,9 +238,10 @@ static void run_decode(lv_core *core, lv_request *r, jpeg_state *s, lv_input *in
     if (!prepare_output(r, s, error) || !lv_frame_info(&s->frame, error) || lv_stopped(core, r))
         return;
     jpeg_start_decompress(&s->decoder);
-    if (!decode_rows(core, r, s) || !jpeg_finish_decompress(&s->decoder) || s->warning)
+    if (!decode_rows(core, r, s, error) || !jpeg_finish_decompress(&s->decoder) || s->warning)
     {
-        error->code = LV_ERROR_CORRUPT_DATA;
+        if (!error->code)
+            error->code = LV_ERROR_CORRUPT_DATA;
         return;
     }
     jpeg_destroy_decompress(&s->decoder);

@@ -31,7 +31,7 @@ liltview_configure_cxx_target(liltview_cli)
 
 add_library(liltview_viewer STATIC viewer/viewer.cpp viewer/animation.cpp viewer/playback.cpp viewer/details.cpp viewer/viewport.cpp viewer/tiles.cpp)
 target_include_directories(liltview_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog)
+target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog ZLIB::ZLIB)
 liltview_configure_cxx_target(liltview_viewer)
 add_library(liltview_ui STATIC ui/shell.cpp)
 add_library(LiltView::ui ALIAS liltview_ui)

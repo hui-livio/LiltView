@@ -121,7 +121,12 @@ static bool svg_canvas(lv_request *r, plutosvg_document_t *document, lv_size_u32
         error->code = LV_ERROR_DIMENSION_LIMIT;
         return false;
     }
-    *source                  = (lv_size_u32){(uint32_t)ceil(w), (uint32_t)ceil(h)};
+    *source = (lv_size_u32){(uint32_t)ceil(w), (uint32_t)ceil(h)};
+    if (r->desc.target.kind == LV_TARGET_NATIVE)
+    {
+        *canvas = *source;
+        return true;
+    }
     const lv_size_u32 bounds = r->desc.target.as.fit_bounds;
     const double scale       = fmin(bounds.width / w, bounds.height / h);
     const double out_w = floor(w * scale), out_h = floor(h * scale);

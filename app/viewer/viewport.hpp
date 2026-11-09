@@ -25,7 +25,11 @@ public:
     {
         return fit_;
     }
-    RegionTarget target(std::uint32_t edge) const;
+    RegionTarget target(std::uint32_t edge, bool native = false) const;
+    double scale() const
+    {
+        return scale_;
+    }
     std::array<render::Point, 4> quad(lv_rect_u32, lv_size_u32 canvas) const;
 
 private:

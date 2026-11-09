@@ -88,6 +88,13 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_executable(liltview_animation_render integration/animation_render.cpp)
     target_link_libraries(liltview_animation_render PRIVATE liltview_viewer liltview_sdl_platform)
     liltview_configure_cxx_target(liltview_animation_render)
+    add_executable(liltview_viewer_sharpness integration/viewer_sharpness.cpp)
+    target_link_libraries(liltview_viewer_sharpness PRIVATE liltview_viewer liltview_sdl_platform
+        liltview_jpeg png_static TIFF::tiff)
+    liltview_configure_cxx_target(liltview_viewer_sharpness)
+    add_test(NAME desktop.viewer_sharpness COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_viewer_sharpness>)
+    set_tests_properties(desktop.viewer_sharpness PROPERTIES TIMEOUT 60)
     add_test(NAME desktop.animation COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_animation_render> "${PROJECT_SOURCE_DIR}/tests/fixtures/red-first-frame.gif")
     set_tests_properties(desktop.animation PROPERTIES TIMEOUT 15)

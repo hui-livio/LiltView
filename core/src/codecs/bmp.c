@@ -282,7 +282,9 @@ static void decode_rle_file(lv_core *core, lv_request *r, lv_input *input, lv_er
     if (!lv_bitmap_size(core, h.size.width, h.size.height, error))
         goto done;
     image_bytes        = (size_t)h.size.width * h.size.height * 4;
-    lv_size_u32 canvas = lv_fit_size(h.size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
+    lv_size_u32 canvas = r->desc.target.kind == LV_TARGET_NATIVE ?
+        h.size :
+        lv_fit_size(h.size, r->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
     const bool native  = canvas.width == h.size.width && canvas.height == h.size.height;
     if (!lv_frame_prepare(&f, h.size, canvas, LV_FORMAT_BMP, 0, native ? 0 : image_bytes, error))
         goto done;

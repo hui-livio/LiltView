@@ -22,7 +22,11 @@ void Viewer::fail(lv_error_code error)
 }
 void Viewer::prepare_image(bool animation)
 {
-    const render::ImageDesc desc{{pending_info_.canvas.width, pending_info_.canvas.height}, false};
+    const bool native = pending_info_.canvas.width == pending_info_.source_size.width &&
+        pending_info_.canvas.height == pending_info_.source_size.height;
+    const render::ImageDesc desc{{pending_info_.canvas.width, pending_info_.canvas.height},
+                                 false,
+                                 native ? render::ImageDesc::Magnification::nearest : render::ImageDesc::Magnification::linear};
     if (animation && pending_)
         return; // Reuse the prior display as the next back texture.
     const auto caps  = renderer_.capabilities();
@@ -112,6 +116,7 @@ void Viewer::advance_animation()
         {
             renderer_.destroy_image(display_);
             display_ = {};
+            scene_.clear();
             lv_event_release(preview_anchor_);
             preview_anchor_ = nullptr;
         }

@@ -382,7 +382,12 @@ bool lv_publish_tile(lv_core *core, lv_request *request, lv_pixels *pixels, lv_r
         mtx_unlock(&core->mutex);
         return false;
     }
-    const lv_region_info region = {tile, 1, rect, LV_REGION_FINAL, LV_PRESENT_AT_COMPLETE, pixels};
+    const lv_region_info region = {tile,
+                                   1,
+                                   rect,
+                                   LV_REGION_FINAL,
+                                   request->desc.target.kind == LV_TARGET_NATIVE ? LV_PRESENT_IMMEDIATE : LV_PRESENT_AT_COMPLETE,
+                                   pixels};
     const bool animated         = request->animation != nullptr;
     if (animated)
         event->view.as.frame_region = (lv_animation_region_info){request->frame.key, region};

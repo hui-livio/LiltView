@@ -182,6 +182,21 @@ inline Decoded collect(Engine &engine)
         }
     }
 }
+inline Decoded decode_native(const std::vector<unsigned char> &bytes)
+{
+    Files files;
+    const auto path = files.write("native-input", bytes);
+    Engine engine;
+    lv_request_desc request;
+    lv_request_desc_init(&request);
+    request.path                 = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+    request.target.kind          = LV_TARGET_NATIVE;
+    request.target.as.fit_bounds = {1, 1}; // Must be ignored for a native target.
+    lv_request_id id             = 0;
+    REQUIRE(lv_core_submit(engine.core, &request, &id) == LV_OK);
+    return collect(engine);
+}
+
 inline Decoded decode(const std::vector<unsigned char> &bytes, lv_size_u32 bounds = {100, 100})
 {
     Files files;
