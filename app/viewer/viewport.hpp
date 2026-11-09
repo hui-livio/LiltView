@@ -16,6 +16,10 @@ class Viewport
 {
 public:
     void reset();
+    bool same_view(const Viewport &) const;
+    bool same_layout(const Viewport &) const;
+    Viewport toward(const Viewport &, double fraction) const;
+    bool visible(lv_rect_u32 native_rect) const;
     void update(render::Point min, render::Point max, float density, lv_size_u32 source, lv_orientation orientation);
     void fit();
     void actual_size();

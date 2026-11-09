@@ -21,10 +21,11 @@ void LV_CALL wake_core(void *)
 }
 } // namespace
 
-Viewer::Viewer(render::Renderer &renderer) :
+Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
     renderer_(renderer),
-    scene_(renderer),
-    pending_scene_(renderer)
+    camera_policy_(policy),
+    scene_(renderer, wake_core),
+    pending_scene_(renderer, wake_core)
 {
     lv_core_config config;
     lv_core_config_init(&config);
@@ -112,6 +113,7 @@ void Viewer::discard_pending()
     pending_anchor_  = nullptr;
     pending_content_ = false;
     pending_scene_.clear();
+    pending_scene_id_ = 0;
 }
 
 void Viewer::submit_pending()
@@ -168,7 +170,9 @@ void Viewer::accept_completed()
     pending_ = {};
     scene_.swap(pending_scene_);
     pending_scene_.clear();
-    info_ = pending_info_;
+    scene_id_         = pending_scene_id_;
+    pending_scene_id_ = 0;
+    info_             = pending_info_;
     lv_event_release(preview_anchor_);
     preview_anchor_ = pending_anchor_;
     pending_anchor_ = nullptr;
@@ -190,7 +194,8 @@ void Viewer::consume(const lv_event_view &view)
     }
     if (current && view.type == LV_EVENT_IMAGE_INFO)
     {
-        pending_info_ = view.as.image;
+        pending_info_     = view.as.image;
+        pending_scene_id_ = view.request_id;
         // Preserve the old source/cache on failure, but do not let optional old
         // GPU residency prevent admission of the replacement native scene.
         scene_.release_details();
@@ -260,6 +265,12 @@ void Viewer::pump()
 
 void Viewer::draw(render::Point min, render::Point max, float density)
 {
+    // Align the canvas clipping rectangle with physical pixels too. Image
+    // vertices were aligned already; fractional clip edges otherwise make
+    // offscreen border tiles look necessary at HiDPI.
+    density                = std::max(0.01f, density);
+    min                    = {std::round(min.x * density) / density, std::round(min.y * density) / density};
+    max                    = {std::round(max.x * density) / density, std::round(max.y * density) / density};
     const bool native      = work_ == Work::static_image;
     const bool reveal      = native && loading_ && !pending_scene_.empty();
     auto &scene            = reveal ? pending_scene_ : scene_;
@@ -283,20 +294,71 @@ void Viewer::draw(render::Point min, render::Point max, float density)
     visible_pending_ = false;
     if (!scene.empty() && !playback_.started())
     {
-        try
+        const auto scene_id = reveal ? pending_scene_id_ : scene_id_;
+        if (presented_scene_id_ != scene_id)
         {
-            visible_pending_ = !scene.prepare(viewport_);
-        } catch (const std::exception &error)
-        {
-            spdlog::error("Native texture cache: {}", error.what());
-            error_ = dynamic_cast<const std::system_error *>(&error) ? LV_ERROR_IO : LV_ERROR_MEMORY_BUDGET;
+            // A new source is allowed to appear row by row. Its identity remains
+            // stable when the pending scene is promoted after COMPLETE.
+            presented_scene_id_ = scene_id;
+            presented_viewport_ = viewport_;
+            failed_restore_.reset();
         }
-        if (visible_pending_)
-            wake_core(nullptr);
+        if (failed_restore_ && !failed_restore_->same_view(viewport_))
+            retry_restore();
+        const bool changing_view = !presented_viewport_.same_view(viewport_);
+        if (!failed_restore_)
+        {
+            try
+            {
+                const bool ready = scene.prepare(viewport_, changing_view ? &presented_viewport_ : nullptr);
+                visible_pending_ = !ready;
+                // Streaming may extend the current image, but a new camera is
+                // committed atomically, never a few restored tiles at a time.
+                if (ready)
+                {
+                    scene.commit_restore();
+                    presented_viewport_ = viewport_;
+                }
+                else if (!loading_ && changing_view && camera_policy_ == CameraPolicy::covered_motion &&
+                         presented_viewport_.same_layout(viewport_))
+                {
+                    // Keep every presented view complete, but do not freeze the
+                    // camera just because the final destination is still cold.
+                    // Intermediate views use resident textures at sufficient
+                    // resolution: no preview stretching and no uncovered tiles.
+                    double low = 0, high = 1;
+                    auto next = presented_viewport_;
+                    for (unsigned step = 0; step < 8; ++step)
+                    {
+                        const double fraction = (low + high) / 2;
+                        auto candidate        = presented_viewport_.toward(viewport_, fraction);
+                        if (scene.covered(candidate))
+                        {
+                            low  = fraction;
+                            next = candidate;
+                        }
+                        else
+                            high = fraction;
+                    }
+                    if (low > 0 && !next.same_view(presented_viewport_))
+                    {
+                        scene.commit_restore();
+                        presented_viewport_ = next;
+                    }
+                }
+            } catch (const std::exception &error)
+            {
+                spdlog::error("Native texture cache: {}", error.what());
+                failed_restore_ = viewport_;
+                error_          = dynamic_cast<const std::system_error *>(&error) ? LV_ERROR_IO : LV_ERROR_MEMORY_BUDGET;
+            }
+        }
+        if (!failed_restore_ && scene.upload_pending())
+            wake_core(nullptr); // Worker wakes handle I/O; only ready GPU work schedules another frame.
     }
     list->PushClipRect({min.x, min.y}, {max.x, max.y}, true);
     if (!scene.empty() && !playback_.started())
-        scene.draw(viewport_, list);
+        scene.draw(presented_viewport_, list, !presented_viewport_.same_view(viewport_));
     else if (image)
     {
         constexpr std::array<render::Point, 4> uv{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};

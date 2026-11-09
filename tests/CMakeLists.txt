@@ -54,7 +54,7 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
         catch_discover_tests(liltview_app_tests TEST_PREFIX "app.")
-        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp)
+        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
         target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff Catch2::Catch2WithMain)
         target_compile_definitions(liltview_viewer_tests PRIVATE
             LILTVIEW_IMAGE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures"
@@ -95,6 +95,15 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.viewer_sharpness COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_viewer_sharpness>)
     set_tests_properties(desktop.viewer_sharpness PROPERTIES TIMEOUT 60)
+    add_test(NAME desktop.viewport_restore COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_viewer_sharpness> --restore)
+    set_tests_properties(desktop.viewport_restore PROPERTIES TIMEOUT 60)
+    add_test(NAME desktop.interaction COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_viewer_sharpness> --interaction)
+    set_tests_properties(desktop.interaction PROPERTIES TIMEOUT 60)
+    add_test(NAME desktop.covered_motion COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_viewer_sharpness> --motion)
+    set_tests_properties(desktop.covered_motion PROPERTIES TIMEOUT 60)
     add_test(NAME desktop.animation COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_animation_render> "${PROJECT_SOURCE_DIR}/tests/fixtures/red-first-frame.gif")
     set_tests_properties(desktop.animation PROPERTIES TIMEOUT 15)

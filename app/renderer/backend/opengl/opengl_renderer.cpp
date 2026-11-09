@@ -148,6 +148,49 @@ public:
         return {owner_, slot, texture.generation};
     }
 
+    Image create_uploaded_image(ImageDesc desc, Pixels source) override
+    {
+        if (desc.size.width > max_edge_ || desc.size.height > max_edge_)
+            throw Error(ErrorCode::dimension_limit, "Image exceeds device texture dimensions");
+        const auto bytes = image_storage_bytes(desc);
+        validate_upload(desc.size, {0, 0, desc.size.width, desc.size.height}, source);
+        if (bytes > budget_ - used_)
+            throw Error(ErrorCode::memory_budget, "Renderer image budget exceeded");
+        const auto slot = vacant_slot();
+        UploadState state(bind_buffer_);
+        GLuint name = 0;
+        glGenTextures(1, &name);
+        glBindTexture(GL_TEXTURE_2D, name);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, desc.mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                        desc.magnification == ImageDesc::Magnification::nearest ? GL_NEAREST : GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        const bool pitched = source.stride_bytes % 4 == 0 &&
+            source.stride_bytes / 4 <= static_cast<std::uint64_t>(std::numeric_limits<GLint>::max());
+        if (pitched)
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(source.stride_bytes / 4));
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(desc.size.width), static_cast<GLsizei>(desc.size.height), 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, pitched ? source.data : nullptr);
+        if (!pitched)
+            for (std::uint32_t y = 0; y < desc.size.height; ++y)
+                upload_rows({0, y, desc.size.width, 1}, source.data + static_cast<std::size_t>(y * source.stride_bytes));
+        if (desc.mipmaps)
+            generate_mipmap_(GL_TEXTURE_2D);
+        if (!name || glGetError() != GL_NO_ERROR)
+        {
+            if (name)
+                glDeleteTextures(1, &name);
+            throw Error(ErrorCode::backend_failure, "Cannot create populated image texture");
+        }
+        auto &texture  = textures_[slot];
+        texture.name   = name;
+        texture.desc   = desc;
+        texture.bytes  = bytes;
+        used_         += bytes;
+        return {owner_, slot, texture.generation};
+    }
+
     void update_image(Image image, Rect destination, Pixels source) override
     {
         auto &texture = get(image);

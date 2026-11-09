@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <liltview/core.h>
+#include <optional>
 #include <string>
 #include "playback.hpp"
 #include "renderer/renderer.hpp"
@@ -14,7 +15,12 @@ namespace liltview
 class Viewer
 {
 public:
-    explicit Viewer(render::Renderer &);
+    enum class CameraPolicy
+    {
+        covered_motion,
+        atomic
+    };
+    explicit Viewer(render::Renderer &, CameraPolicy = CameraPolicy::covered_motion);
     ~Viewer();
     Viewer(const Viewer &)            = delete;
     Viewer &operator=(const Viewer &) = delete;
@@ -40,9 +46,17 @@ public:
     {
         return loading_ ? pending_scene_.loaded_tiles() : scene_.loaded_tiles();
     }
+    const Viewport &presented_view() const
+    {
+        return presented_viewport_;
+    }
+    Tiles::Stats cache_stats() const
+    {
+        return loading_ ? pending_scene_.stats() : scene_.stats();
+    }
     bool detail_ready() const
     {
-        return !loading_ && !scene_.empty() && !visible_pending_;
+        return !loading_ && !scene_.empty() && !visible_pending_ && !failed_restore_;
     }
     bool detail_loading() const
     {
@@ -102,6 +116,7 @@ private:
     void consume_animation(const lv_event_view &);
     void advance_animation();
     void close_animation();
+    void retry_restore();
 
     void fail(lv_error_code);
     enum class Work
@@ -120,7 +135,10 @@ private:
     Playback playback_;
 
     render::Renderer &renderer_;
-    Viewport viewport_;
+    CameraPolicy camera_policy_;
+    Viewport viewport_, presented_viewport_;
+    std::optional<Viewport> failed_restore_;
+    lv_request_id scene_id_ = 0, pending_scene_id_ = 0, presented_scene_id_ = 0;
     Tiles scene_, pending_scene_;
     bool visible_pending_     = false;
     lv_event *preview_anchor_ = nullptr, *pending_anchor_ = nullptr;

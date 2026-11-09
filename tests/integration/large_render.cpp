@@ -182,6 +182,7 @@ void exercise(render::Renderer &real, const std::filesystem::path &path, const s
     verify(native, source.width, 1, center, center);
     save(folder / "checkerboard-native.ppm", native);
     verify_sharp_edges(native);
+    check(viewer.cache_stats().indexed_tiles < 256, "32K camera work scales with the full image instead of the viewport");
     viewer.zoom(4, {256, 256});
     auto magnified = settle(viewer, renderer, true);
     verify_sharp_edges(magnified);

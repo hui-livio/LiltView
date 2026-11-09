@@ -166,3 +166,9 @@ CPU 与 GPU 预算独立。renderer 不持有 core 像素引用；一次同步�
 ## 2026-11-09 review 与后续计划
 
 当前仍通过 ImGui OpenGL3 backend 绘制 RGBA8。原始分辨率 native 场景及缓存变换见 [应用说明](../app/README.md)；已发现问题、修复和剩余风险见 [review](RENDERING_REVIEW-2026-11-09.md)。独立 image shader / RGB / YUV 多平面输入仅列入 [开发计划](RENDERING_PLAN.md)，本轮不实现，不把未来 plane 描述当成现有 `Pixels` 契约。
+
+### 完整 tile 的创建与上传合并
+
+`Renderer::create_uploaded_image(ImageDesc, Pixels)` 是同步消费完整像素的事务接口：成功返回完整 image，失败不泄漏新纹理，不保留 CPU 指针。默认实现调用已有 create / update / destroy，保持适配器及故障注入行为；OpenGL 后端直接 `glTexImage2D` 上传完整合法 stride 的数据，不能表达的非四字节 pitch 逐行填入后再发布，只生成一次 mipmap。GL unpack / PBO / texture-binding 状态恢复不变。
+
+这个优化不替换原 `create_image` 的透明初始化；部分填充的 atlas 仍通过原接口创建，不能采样未初始化内容。未引入自定义 GLSL、PBO 或异步 CPU 指针所有权。后台 tile reader 只负责文件读取 / 解压，所有图形 API 仍在渲染线程。

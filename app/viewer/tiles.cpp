@@ -140,22 +140,48 @@ void Tiles::open_cache()
         cache_error("Cannot open native tile cache");
     }
 }
+void Tiles::commit_restore() noexcept
+{
+    for (const auto index : preserved_)
+    {
+        auto &tile = tiles_[index];
+        renderer_.destroy_image(tile.preserved);
+        tile.preserved = {};
+        if (!tile.detail)
+            resident_.erase(index);
+    }
+    preserved_.clear();
+}
+void Tiles::cancel_restore() noexcept
+{
+    for (const auto index : preserved_)
+    {
+        auto &tile = tiles_[index];
+        renderer_.destroy_image(tile.detail);
+        tile.detail       = tile.preserved;
+        tile.detail_level = tile.preserved_level;
+        tile.preserved    = {};
+    }
+    preserved_.clear();
+}
 void Tiles::release_details() noexcept
 {
-    for (auto &tile : tiles_)
+    commit_restore();
+    for (const auto index : resident_)
     {
-        renderer_.destroy_image(tile.detail);
-        tile.detail = {};
+        renderer_.destroy_image(tiles_[index].detail);
+        tiles_[index].detail = {};
     }
+    resident_.clear();
 }
 void Tiles::clear() noexcept
 {
-    for (const auto &tile : tiles_)
-    {
-        if (!cache_)
+    // Join the CPU-only reader before closing its backing file or dropping metadata.
+    reader_.reset();
+    release_details();
+    if (!cache_)
+        for (const auto &tile : tiles_)
             renderer_.destroy_image(tile.overview);
-        renderer_.destroy_image(tile.detail);
-    }
     tiles_.clear();
     for (const auto &atlas : atlases_)
         renderer_.destroy_image(atlas.image);
@@ -167,12 +193,23 @@ void Tiles::clear() noexcept
     cache_       = nullptr;
     info_        = {};
     ready_       = 0;
-    cache_bytes_ = clock_ = 0;
-    overview_level_       = 0;
+    cache_bytes_ = clock_ = gpu_restores_ = 0;
+    overview_level_                       = 0;
+    indexed_tiles_                        = 0;
+    cache_dirty_ = upload_pending_ = false;
 }
 void Tiles::swap(Tiles &other)
 {
     tiles_.swap(other.tiles_);
+    reader_.swap(other.reader_);
+    resident_.swap(other.resident_);
+    preserved_.swap(other.preserved_);
+    std::swap(wake_, other.wake_);
+    std::swap(userdata_, other.userdata_);
+    std::swap(cache_dirty_, other.cache_dirty_);
+    std::swap(upload_pending_, other.upload_pending_);
+    std::swap(gpu_restores_, other.gpu_restores_);
+    std::swap(indexed_tiles_, other.indexed_tiles_);
     atlases_.swap(other.atlases_);
     uniform_levels_.swap(other.uniform_levels_);
     std::swap(atlas_edge_, other.atlas_edge_);
@@ -189,15 +226,21 @@ void Tiles::make_room(std::uint64_t bytes)
     auto caps = renderer_.capabilities();
     while (bytes > caps.image_budget_bytes - caps.image_bytes)
     {
-        Tile *oldest = nullptr;
-        for (auto &tile : tiles_)
-            if (tile.detail && tile.touched != clock_ && (!oldest || tile.touched < oldest->touched))
-                oldest = &tile;
-        if (!oldest)
+        auto oldest = resident_.end();
+        for (auto at = resident_.begin(); at != resident_.end(); ++at)
+        {
+            const auto &tile = tiles_[*at];
+            if (tile.detail && tile.touched != clock_ && (oldest == resident_.end() || tile.touched < tiles_[*oldest].touched))
+                oldest = at;
+        }
+        if (oldest == resident_.end())
             throw render::Error(render::ErrorCode::memory_budget, "Visible native textures exceed GPU budget");
-        renderer_.destroy_image(oldest->detail);
-        oldest->detail = {};
-        caps           = renderer_.capabilities();
+        auto &tile = tiles_[*oldest];
+        renderer_.destroy_image(tile.detail);
+        tile.detail = {};
+        if (!tile.preserved)
+            resident_.erase(oldest);
+        caps = renderer_.capabilities();
     }
 }
 render::Image Tiles::upload_texture(render::Size size, unsigned level, const std::uint8_t *data, std::uint64_t stride,
@@ -210,16 +253,7 @@ render::Image Tiles::upload_texture(render::Size size, unsigned level, const std
         stride = static_cast<std::uint64_t>(size.width) * 4;
     if (!bytes)
         bytes = stride * (size.height - 1) + static_cast<std::uint64_t>(size.width) * 4;
-    auto image = renderer_.create_image(desc);
-    try
-    {
-        renderer_.update_image(image, {0, 0, size.width, size.height}, {data, bytes, stride, size});
-    } catch (...)
-    {
-        renderer_.destroy_image(image);
-        throw;
-    }
-    return image;
+    return renderer_.create_uploaded_image(desc, {data, bytes, stride, size});
 }
 void Tiles::upload_overview(Tile &tile, render::Size size, unsigned level, const std::uint8_t *data)
 {
@@ -299,6 +333,7 @@ void Tiles::upload(const lv_region_info &region)
                 cache_error("Cannot write native tile cache");
             tile.levels.push_back({size, cache_bytes_, static_cast<std::uint32_t>(bytes)});
             cache_bytes_ += bytes;
+            cache_dirty_  = true;
             if (level == overview_level_ || (size.width == 1 && size.height == 1 && !tile.overview))
             {
                 upload_overview(tile, size, level, data.data());
@@ -318,14 +353,30 @@ unsigned Tiles::level_for(const Viewport &view) const
 {
     return static_cast<unsigned>(std::max(0.0, std::floor(-std::log2(view.scale()))));
 }
-bool Tiles::visible(const Tile &tile, lv_rect_u32 visible) const
+std::vector<std::size_t> Tiles::indices(const Viewport &view, unsigned margin) const
 {
-    if (!tile.overview)
-        return false;
-    return tile.rect.x < static_cast<std::uint64_t>(visible.x) + visible.width &&
-        tile.rect.y < static_cast<std::uint64_t>(visible.y) + visible.height &&
-        visible.x < static_cast<std::uint64_t>(tile.rect.x) + tile.rect.width &&
-        visible.y < static_cast<std::uint64_t>(tile.rect.y) + tile.rect.height;
+    const auto rect = view.target(1, true).rect;
+    if (!rect.width || !rect.height)
+        return {};
+    const std::uint64_t edge    = info_.tile_edge;
+    const std::uint64_t columns = (static_cast<std::uint64_t>(info_.canvas.width) + edge - 1) / edge;
+    const std::uint64_t rows    = (static_cast<std::uint64_t>(info_.canvas.height) + edge - 1) / edge;
+    const auto left             = rect.x / edge > margin ? rect.x / edge - margin : 0;
+    const auto top              = rect.y / edge > margin ? rect.y / edge - margin : 0;
+    const auto right            = std::min(columns, (static_cast<std::uint64_t>(rect.x) + rect.width - 1) / edge + 1 + margin);
+    const auto bottom           = std::min(rows, (static_cast<std::uint64_t>(rect.y) + rect.height - 1) / edge + 1 + margin);
+    std::vector<std::size_t> result;
+    result.reserve(static_cast<std::size_t>((right - left) * (bottom - top)));
+    for (auto y = top; y < bottom; ++y)
+        for (auto x = left; x < right; ++x)
+        {
+            const lv_rect_u32 cell{static_cast<std::uint32_t>(x * edge), static_cast<std::uint32_t>(y * edge),
+                                   static_cast<std::uint32_t>(std::min(edge, info_.canvas.width - x * edge)),
+                                   static_cast<std::uint32_t>(std::min(edge, info_.canvas.height - y * edge))};
+            if (margin || view.visible(cell))
+                result.push_back(static_cast<std::size_t>(y * columns + x));
+        }
+    return result;
 }
 render::Image Tiles::texture(const Tile &tile, unsigned level) const
 {
@@ -335,44 +386,225 @@ render::Image Tiles::texture(const Tile &tile, unsigned level) const
         return tile.detail;
     return {};
 }
-bool Tiles::prepare(const Viewport &view)
+bool Tiles::covered(const Viewport &view) const
 {
+    const auto level = level_for(view);
+    if (cache_ && level >= overview_level_)
+        return decoded(view);
+    for (const auto index : indices(view))
+        if (!tiles_[index].overview || !texture(tiles_[index], level))
+            return false;
+    return true;
+}
+bool Tiles::decoded(const Viewport &view) const
+{
+    if (complete())
+        return true;
+    if (view.fitting())
+        return false; // FIT covers the entire source; no scan of the whole tile index.
+    for (const auto index : indices(view))
+        if (!tiles_[index].overview)
+            return false;
+    return true;
+}
+std::vector<TileReader::Request> Tiles::requests(const std::vector<std::size_t> &order, unsigned level) const
+{
+    std::vector<TileReader::Request> result;
+    result.reserve(std::min(order.size(), TileReader::max_requests));
+    for (const auto index : order)
+    {
+        const auto &tile = tiles_[index];
+        if (!tile.overview || texture(tile, level))
+            continue;
+        const auto &stored = tile.levels.at(level);
+        result.push_back({{index, level}, stored.size, stored.offset, stored.bytes});
+        if (result.size() == TileReader::max_requests)
+            break;
+    }
+    return result;
+}
+void Tiles::request_reads(const std::vector<TileReader::Request> &jobs)
+{
+    if (jobs.empty() && !reader_)
+        return;
+    if (cache_dirty_)
+    {
+        // Only the first loading/append phase can write. The worker uses pread
+        // on a duplicate fd, never this FILE's shared seek position.
+        if (std::fflush(cache_) != 0)
+            cache_error("Cannot flush native tile cache");
+        cache_dirty_ = false;
+    }
+    if (!reader_)
+        reader_ = std::make_unique<TileReader>(fileno(cache_), wake_, userdata_);
+    reader_->request(jobs);
+}
+bool Tiles::restore(std::size_t index, unsigned level, const Viewport *preserve)
+{
+    auto &tile      = tiles_[index];
+    const auto data = reader_ ? reader_->find({index, level}) : TileReader::Data{};
+    if (!data)
+        return false; // The disk/decompression worker will wake the UI on completion.
+    const auto &stored   = tile.levels.at(level);
+    bool retain_previous = false;
+    if (preserve && tile.detail && !tile.preserved)
+    {
+        const auto rect    = preserve->target(1, true).rect;
+        const bool overlap = tile.rect.x < static_cast<std::uint64_t>(rect.x) + rect.width &&
+            tile.rect.y < static_cast<std::uint64_t>(rect.y) + rect.height &&
+            rect.x < static_cast<std::uint64_t>(tile.rect.x) + tile.rect.width &&
+            rect.y < static_cast<std::uint64_t>(tile.rect.y) + tile.rect.height;
+        const auto previous = texture(tile, level_for(*preserve));
+        retain_previous     = overlap && previous && previous.slot == tile.detail.slot;
+    }
+    const bool already_owned = resident_.contains(index);
+    resident_.insert(index); // Bookkeeping allocation must succeed before creating GL resources.
+    try
+    {
+        if (retain_previous)
+            preserved_.insert(index);
+        const auto replacement = upload_texture(stored.size, level, data->data());
+        if (retain_previous)
+        {
+            tile.preserved       = tile.detail;
+            tile.preserved_level = tile.detail_level;
+        }
+        else
+            renderer_.destroy_image(tile.detail);
+        tile.detail       = replacement;
+        tile.detail_level = level;
+        tile.touched      = clock_;
+    } catch (...)
+    {
+        if (retain_previous)
+            preserved_.erase(index);
+        if (!already_owned)
+            resident_.erase(index);
+        throw;
+    }
+    ++gpu_restores_;
+    return true;
+}
+void Tiles::warm(const std::vector<std::size_t> &order, unsigned level)
+{
+    if (!reader_)
+        return;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1);
+    unsigned uploaded   = 0;
+    for (const auto index : order)
+    {
+        const auto &tile = tiles_[index];
+        if (!tile.overview || texture(tile, level))
+            continue;
+        const auto caps    = renderer_.capabilities();
+        const auto &size   = tile.levels.at(level).size;
+        const auto bytes   = render::image_storage_bytes({size, true});
+        const auto reserve = std::min<std::uint64_t>(8ULL * 1024 * 1024, caps.image_budget_bytes / 4);
+        if (caps.image_bytes + bytes + reserve > caps.image_budget_bytes)
+            continue; // Speculation must never evict visible data or exhaust admission headroom.
+        try
+        {
+            const auto data = reader_->find({index, level});
+            if (!data)
+                continue;
+            if (uploaded >= 2 || std::chrono::steady_clock::now() >= deadline)
+            {
+                upload_pending_ = true;
+                break;
+            }
+            restore(index, level, nullptr);
+            ++uploaded;
+        } catch (const std::exception &)
+        {
+            // An offscreen prefetch failure must not invalidate a complete view.
+            // A later visible request will report the actual error normally.
+        }
+    }
+}
+bool Tiles::prepare(const Viewport &view, const Viewport *preserve)
+{
+    if (!preserve)
+        cancel_restore();
     ++clock_;
+    upload_pending_      = false;
+    indexed_tiles_       = 0;
     const unsigned level = level_for(view);
     if (cache_ && level >= overview_level_)
-        return true; // FIT is already resident and batched in a few atlas textures.
-    const auto region = view.target(1, true).rect;
-    for (auto &tile : tiles_)
-        if (visible(tile, region))
-            tile.touched = clock_;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(4);
-    bool ready          = true;
-    for (auto &tile : tiles_)
     {
-        if (tile.touched != clock_ || texture(tile, level))
+        // Preheat the native center while FIT remains on screen. This is a
+        // bounded cache restore, not another source decode or a full-image scan.
+        if (complete())
+        {
+            auto native = view;
+            native.actual_size();
+            auto near      = indices(native, 1);
+            indexed_tiles_ = near.size();
+            try
+            {
+                // FIT only prefetches decoded CPU data. Do not change GPU LOD
+                // residency before the user requests that scale (notably alpha).
+                request_reads(requests(near, 0));
+            } catch (const std::exception &)
+            {
+            }
+        }
+        return decoded(view);
+    }
+    const auto visible = indices(view);
+    indexed_tiles_     = visible.size();
+    for (const auto index : visible)
+        tiles_[index].touched = clock_;
+    if (preserve && cache_ && level_for(*preserve) < overview_level_)
+    {
+        const auto previous_level  = level_for(*preserve);
+        const auto previous        = indices(*preserve);
+        indexed_tiles_            += previous.size();
+        for (const auto index : previous)
+        {
+            auto &tile = tiles_[index];
+            if (tile.detail && !tile.preserved)
+                if (const auto image = texture(tile, previous_level); image && image.slot == tile.detail.slot)
+                    tile.touched = clock_;
+        }
+    }
+    auto jobs        = cache_ ? requests(visible, level) : std::vector<TileReader::Request>{};
+    const auto near  = cache_ ? indices(view, 1) : std::vector<std::size_t>{};
+    indexed_tiles_  += near.size();
+    for (const auto &job : cache_ ? requests(near, level) : std::vector<TileReader::Request>{})
+        if (jobs.size() < TileReader::max_requests &&
+            std::none_of(jobs.begin(), jobs.end(), [&](const auto &queued) { return queued.key == job.key; }))
+            jobs.push_back(job);
+    if (cache_)
+        request_reads(jobs);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+    bool ready          = decoded(view);
+    bool uploaded       = false;
+    std::uint64_t bytes = 0;
+    for (const auto index : visible)
+    {
+        const auto &tile = tiles_[index];
+        if (!tile.overview || texture(tile, level))
             continue;
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (uploaded && (bytes >= 4ULL * 1024 * 1024 || std::chrono::steady_clock::now() >= deadline))
+        {
+            ready = false;
+            if (reader_ && reader_->find({index, level}))
+                upload_pending_ = true;
+            continue;
+        }
+        if (!restore(index, level, preserve))
         {
             ready = false;
             continue;
         }
-        const auto &stored = tile.levels.at(level);
-        std::vector<std::uint8_t> compressed(stored.bytes);
-        seek(cache_, stored.offset);
-        if (std::fread(compressed.data(), 1, compressed.size(), cache_) != compressed.size())
-            cache_error("Cannot read native tile cache");
-        std::vector<std::uint8_t> data(static_cast<std::size_t>(stored.size.width) * stored.size.height * 4);
-        uLongf bytes = data.size();
-        if (uncompress(data.data(), &bytes, compressed.data(), compressed.size()) != Z_OK || bytes != data.size())
-            throw std::runtime_error("Invalid native tile cache");
-        renderer_.destroy_image(tile.detail);
-        tile.detail       = {};
-        tile.detail       = upload_texture(stored.size, level, data.data());
-        tile.detail_level = level;
+        uploaded  = true;
+        bytes    += static_cast<std::uint64_t>(tile.levels.at(level).size.width) * tile.levels.at(level).size.height * 4;
     }
+    if (ready && !preserve && cache_)
+        warm(near, level);
     return ready;
 }
-void Tiles::draw(const Viewport &viewport, ImDrawList *list) const
+void Tiles::draw(const Viewport &viewport, ImDrawList *list, bool preserving) const
 {
     constexpr std::array<render::Point, 4> uv{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
     const auto level = level_for(viewport);
@@ -393,11 +625,14 @@ void Tiles::draw(const Viewport &viewport, ImDrawList *list) const
         }
         return;
     }
-    const auto region = viewport.target(1, true).rect;
-    for (const auto &tile : tiles_)
-        if (visible(tile, region))
-            if (const auto image = texture(tile, level))
-                renderer_.add_image_quad(list, image, viewport.quad(tile.rect, info_.canvas),
-                                         image.slot == tile.overview.slot ? tile.overview_uv : uv);
+    for (const auto index : indices(viewport))
+    {
+        const auto &tile = tiles_[index];
+        if (!tile.overview)
+            continue;
+        if (const auto image = preserving && tile.preserved ? tile.preserved : texture(tile, level))
+            renderer_.add_image_quad(list, image, viewport.quad(tile.rect, info_.canvas),
+                                     image.slot == tile.overview.slot ? tile.overview_uv : uv);
+    }
 }
 } // namespace liltview

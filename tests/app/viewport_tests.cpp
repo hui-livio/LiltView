@@ -75,3 +75,47 @@ TEST_CASE("native image pixels align to the physical framebuffer after centering
             }
         }
 }
+
+TEST_CASE("GPU readiness excludes offscreen decode-halo tiles at native size", "[viewport][coverage]")
+{
+    for (float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+        {
+            CAPTURE(density, orientation);
+            Viewport view;
+            view.update({0, 0}, {512 / density, 512 / density}, density, {4096, 4096}, orientation);
+            view.actual_size();
+            unsigned visible = 0;
+            for (unsigned row = 6; row < 10; ++row)
+                for (unsigned column = 6; column < 10; ++column)
+                    visible += view.visible({column * 256, row * 256, 256, 256});
+            CHECK(visible == 4); // Decode padding used to turn this into 16 required textures.
+        }
+}
+TEST_CASE("intermediate camera transforms preserve the wheel anchor and reject incompatible layouts", "[viewport][motion]")
+{
+    Viewport before;
+    before.update({0, 0}, {512, 512}, 1, {4096, 4096}, 1);
+    before.actual_size();
+    auto target = before;
+    const render::Point anchor{190, 210};
+    target.zoom(-2, anchor);
+    const auto full       = lv_rect_u32{0, 0, 4096, 4096};
+    const auto origin     = before.quad(full, {4096, 4096});
+    const double source_x = (anchor.x - origin[0].x) * 4096 / (origin[1].x - origin[0].x);
+    const double source_y = (anchor.y - origin[0].y) * 4096 / (origin[3].y - origin[0].y);
+    for (double amount : {0.25, 0.5, 0.75})
+    {
+        const auto middle = before.toward(target, amount);
+        const auto q      = middle.quad(full, {4096, 4096});
+        CHECK(middle.scale() < before.scale());
+        CHECK(middle.scale() > target.scale());
+        CHECK(std::abs((anchor.x - q[0].x) * 4096 / (q[1].x - q[0].x) - source_x) < 0.001);
+        CHECK(std::abs((anchor.y - q[0].y) * 4096 / (q[3].y - q[0].y) - source_y) < 0.001);
+    }
+    CHECK(before.toward(target, 0).same_view(before));
+    CHECK(before.toward(target, 1).same_view(target));
+    target.update({0, 0}, {600, 400}, 1, {4096, 4096}, 1);
+    CHECK_FALSE(before.same_layout(target));
+    CHECK(before.toward(target, 0.5).same_view(before));
+}

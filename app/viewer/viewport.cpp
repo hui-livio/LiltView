@@ -9,6 +9,58 @@ bool RegionTarget::operator==(const RegionTarget &other) const
     return canvas.width == other.canvas.width && canvas.height == other.canvas.height && rect.x == other.rect.x &&
         rect.y == other.rect.y && rect.width == other.rect.width && rect.height == other.rect.height;
 }
+bool Viewport::same_view(const Viewport &other) const
+{
+    return min_.x == other.min_.x && min_.y == other.min_.y && max_.x == other.max_.x && max_.y == other.max_.y &&
+        source_.width == other.source_.width && source_.height == other.source_.height && orientation_ == other.orientation_ &&
+        density_ == other.density_ && scale_ == other.scale_ && center_x_ == other.center_x_ && center_y_ == other.center_y_;
+}
+bool Viewport::same_layout(const Viewport &other) const
+{
+    return min_.x == other.min_.x && min_.y == other.min_.y && max_.x == other.max_.x && max_.y == other.max_.y &&
+        source_.width == other.source_.width && source_.height == other.source_.height && orientation_ == other.orientation_ &&
+        density_ == other.density_;
+}
+Viewport Viewport::toward(const Viewport &other, double fraction) const
+{
+    if (fraction >= 1)
+        return other;
+    if (fraction <= 0 || !same_layout(other))
+        return *this;
+    auto result   = *this;
+    result.scale_ = std::lerp(scale_, other.scale_, fraction);
+    // Interpolate the affine transform, not camera coordinates independently:
+    // a source point under the wheel anchor stays at that anchor throughout.
+    result.center_x_    = std::lerp(center_x_ * scale_, other.center_x_ * other.scale_, fraction) / result.scale_;
+    result.center_y_    = std::lerp(center_y_ * scale_, other.center_y_ * other.scale_, fraction) / result.scale_;
+    result.zoom_        = result.scale_;
+    result.fit_         = false;
+    result.initialized_ = true;
+    result.clamp();
+    return result;
+}
+bool Viewport::visible(lv_rect_u32 rect) const
+{
+    if (!source_.width || !source_.height || max_.x <= min_.x || max_.y <= min_.y)
+        return false;
+    const auto points = quad(rect, source_);
+    float left = points[0].x, right = points[0].x, top = points[0].y, bottom = points[0].y;
+    for (const auto &point : points)
+    {
+        left   = std::min(left, point.x);
+        right  = std::max(right, point.x);
+        top    = std::min(top, point.y);
+        bottom = std::max(bottom, point.y);
+    }
+    const auto density = static_cast<float>(density_);
+    // Use rendered pixel-center coverage, not the decode/filter halo. An
+    // offscreen neighbor must not hold up the entire displayed camera.
+    const float first_x = std::floor(min_.x * density) + 0.5f;
+    const float first_y = std::floor(min_.y * density) + 0.5f;
+    const float last_x  = std::ceil(max_.x * density) - 0.5f;
+    const float last_y  = std::ceil(max_.y * density) - 0.5f;
+    return right * density >= first_x && left * density <= last_x && bottom * density >= first_y && top * density <= last_y;
+}
 void Viewport::reset()
 {
     *this = {};

@@ -4,7 +4,9 @@
 #include <liltview/core.h>
 #include <map>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
+#include "tile_reader.hpp"
 #include "viewport.hpp"
 
 namespace liltview
@@ -15,8 +17,10 @@ namespace liltview
 class Tiles
 {
 public:
-    explicit Tiles(render::Renderer &renderer) :
-        renderer_(renderer)
+    explicit Tiles(render::Renderer &renderer, lv_wakeup_fn wake = nullptr, void *userdata = nullptr) :
+        renderer_(renderer),
+        wake_(wake),
+        userdata_(userdata)
     {
     }
     ~Tiles()
@@ -29,9 +33,33 @@ public:
     void upload(const lv_region_info &);
     void clear() noexcept;
     void release_details() noexcept;
+    void retry_reads()
+    {
+        if (reader_)
+            reader_->retry_errors();
+    }
+    void commit_restore() noexcept;
+    void cancel_restore() noexcept;
     void swap(Tiles &);
-    bool prepare(const Viewport &); // Upload cached visible textures before building draw commands.
-    void draw(const Viewport &, ImDrawList *) const;
+    bool prepare(const Viewport &,
+                 const Viewport *preserve = nullptr); // Upload cached visible textures before building draw commands.
+    void draw(const Viewport &, ImDrawList *, bool preserving = false) const;
+    bool covered(const Viewport &) const; // GPU-only readiness: no cache I/O or upload.
+    struct Stats
+    {
+        TileReader::Stats ram;
+        std::uint64_t gpu_restores = 0;
+        std::size_t indexed_tiles  = 0;
+        bool upload_pending        = false;
+    };
+    Stats stats() const
+    {
+        return {reader_ ? reader_->stats() : TileReader::Stats{}, gpu_restores_, indexed_tiles_, upload_pending_};
+    }
+    bool upload_pending() const
+    {
+        return upload_pending_;
+    }
     bool empty() const
     {
         return ready_ == 0;
@@ -55,9 +83,9 @@ private:
     struct Tile
     {
         lv_rect_u32 rect{};
-        render::Image overview{}, detail{};
+        render::Image overview{}, detail{}, preserved{};
         std::vector<Level> levels;
-        unsigned overview_level = 0, detail_level = 0;
+        unsigned overview_level = 0, detail_level = 0, preserved_level = 0;
         std::uint64_t touched = 0;
         std::array<render::Point, 4> overview_uv{};
     };
@@ -66,15 +94,27 @@ private:
         lv_rect_u32 rect{};
         render::Image image{};
     };
+    bool decoded(const Viewport &) const;
     unsigned level_for(const Viewport &) const;
-    bool visible(const Tile &, lv_rect_u32) const;
+    std::vector<std::size_t> indices(const Viewport &, unsigned margin = 0) const;
     render::Image texture(const Tile &, unsigned level) const;
     void make_room(std::uint64_t bytes);
     render::Image upload_texture(render::Size, unsigned level, const std::uint8_t *, std::uint64_t stride = 0,
                                  std::uint64_t bytes = 0);
     void open_cache();
+    void request_reads(const std::vector<TileReader::Request> &);
+    std::vector<TileReader::Request> requests(const std::vector<std::size_t> &, unsigned) const;
+    bool restore(std::size_t, unsigned, const Viewport *preserve);
+    void warm(const std::vector<std::size_t> &, unsigned);
     void upload_overview(Tile &, render::Size, unsigned, const std::uint8_t *);
     render::Renderer &renderer_;
+    lv_wakeup_fn wake_;
+    void *userdata_;
+    std::unique_ptr<TileReader> reader_;
+    std::unordered_set<std::size_t> resident_, preserved_;
+    bool cache_dirty_ = false, upload_pending_ = false;
+    std::uint64_t gpu_restores_ = 0;
+    std::size_t indexed_tiles_  = 0;
     lv_image_info info_{};
     std::vector<Tile> tiles_;
     std::vector<Atlas> atlases_;

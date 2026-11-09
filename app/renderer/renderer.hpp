@@ -110,6 +110,23 @@ public:
     virtual Image create_image(ImageDesc)     = 0;
     // On return (also on failure) no source pointer is retained.
     virtual void update_image(Image, Rect destination, Pixels source) = 0;
+    // Atomically create a fully populated immutable image. Backends may skip
+    // transparent initialization and generate mipmaps only once. No CPU pointer
+    // is retained on return, including failure. Default preserves adapter behavior.
+    virtual Image create_uploaded_image(ImageDesc desc, Pixels source)
+    {
+        auto image = create_image(desc);
+        try
+        {
+            update_image(image, {0, 0, desc.size.width, desc.size.height}, source);
+        } catch (...)
+        {
+            destroy_image(image);
+            throw;
+        }
+        return image;
+    }
+
     // Call after the last draw using this image was submitted, or before NewFrame.
     virtual void destroy_image(Image) noexcept                                                                              = 0;
     virtual void add_image(ImDrawList *, Image, Point min, Point max, Point uv_min = {0, 0}, Point uv_max = {1, 1})         = 0;
