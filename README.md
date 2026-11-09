@@ -27,6 +27,19 @@
 
 没有可显示图片时，平移、缩放、适应窗口和 100% 菜单项禁用；图片尚不支持原尺寸显示时，100% 也会禁用。文本输入或弹窗打开时，不触发应用快捷键。
 
+## 窗口外观
+
+默认使用无边框圆角窗口，自绘标题栏左侧显示图标 / 名称，右侧提供最小化、最大化 / 恢复和关闭按钮；边框根据明暗主题绘制高对比度高亮颜色。
+
+在 **设置 → 外观** 中可切换：
+
+- **启用系统标题栏**：勾选后恢复系统标题栏和边框，取消勾选使用自绘模式。运行时切换，保留图片和缓存，不重新解码。X11 使用不透明原生窗口 / 透明自绘窗口交接；Wayland 原地调整装饰和不透明区域，保留同一个 surface，避免重新居中。
+- **关闭圆角**：默认不勾选；勾选将无边框窗口改为直角。使用系统标题栏时该项禁用，但保留原有选择。最大化和全屏自动使用直角。
+
+无边框模式中，拖动标题栏空白区域或底部状态栏可移动窗口；四条边及四个角支持原生拖动调整窗口大小，最小尺寸为 640 × 480。按钮、菜单和图片内容区域不会触发移动；图片区域仍用于平移图片。最大化时不启用拉伸，全屏不显示自绘标题栏 / 边框。原生移动 / 缩放需窗口后端支持 SDL hit test（Wayland / X11 路径；offscreen 仅用于绘制测试）。
+
+圆角使用透明 framebuffer 和原生窗口输入区域，不用黑色模拟透明；Linux Wayland 使用输入 region，X11 使用 Shape 扩展，随窗口大小 / 缩放变化更新。设置保存为 YAML 的 `system_titlebar` 和 `disable_rounding`。切换时先关闭菜单，X11 清空旧窗口画面并同步隐藏 / 销毁后再显示新窗口，按图片视口位置补偿标题栏高度差，并根据真实坐标校正位置；Wayland 原地切换，不产生第二个窗口。
+
 ## 构建与检查
 
 需要 CMake 3.30+、Ninja 以及支持所需 C23 / C++23 特性的工具链。x86 建议安装 NASM 以启用 libjpeg-turbo SIMD；没有 NASM 时上游回退标量构建。先初始化固定 submodule，CMake 只使用本地源码，不下载依赖：
@@ -51,7 +64,7 @@ ctest --preset dev
 ./build/dev/app/liltview /path/to/photo.jpg
 ```
 
-裁剪后的 SDL3 以 **静态库**链接到主程序，不链接或安装 `libSDL3.so`，不覆盖系统 SDL。Linux 仍使用系统 OpenGL、Fontconfig 和 X11 / Wayland 运行库；全局菜单默认开启，另需 GIO / GLib、Wayland 客户端和 `wayland-scanner`。可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。
+裁剪后的 SDL3 以 **静态库**链接到主程序，不链接或安装 `libSDL3.so`，不覆盖系统 SDL。Linux 仍使用系统 OpenGL、Fontconfig 和 X11 / Wayland 运行库；圆角窗口依赖 Wayland 客户端及 X11 / Xext；全局菜单默认开启，另需 GIO / GLib 和 `wayland-scanner`。可通过 `-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 构建窗口内菜单版本，不依赖 Qt。可用 `--language zh-CN` 或 `--language en-US` 指定启动语言。程序随包使用 **HarmonyOS Sans SC Regular**，附带其独立许可证；字体约 7.88 MiB。
 
 字体加载前校验随包文件，损坏时回退系统字体；没有中文字体时使用英文。命令行使用 CLI11，设置使用 iguana 读写 YAML，保存到 SDL 用户配置目录的 `settings.yaml`。只保留 YAML，不读取或迁移旧 INI；完整写入临时文件并检查刷新 / 关闭后再替换，失败会记录原因。
 

@@ -48,7 +48,7 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
     include("${LILTVIEW_CATCH_SCRIPT}")
     catch_discover_tests(liltview_core_tests TEST_PREFIX "core.")
     if(TARGET LiltView::app_model)
-        add_executable(liltview_app_tests app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
+        add_executable(liltview_app_tests app/window_chrome_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
         target_link_libraries(liltview_app_tests PRIVATE liltview_cli LiltView::logging spdlog::spdlog LiltView::app_model
             liltview_fonts LiltView::renderer LiltView::ui Catch2::Catch2WithMain)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
@@ -116,7 +116,7 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.renderer_direct COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_renderer_contract> --direct)
     set_tests_properties(desktop.renderer_direct PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg formats animation_app settings logging status close)
+    foreach(case menu font save jpeg formats animation_app settings logging status close chrome)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"

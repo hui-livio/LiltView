@@ -295,3 +295,63 @@ TEST_CASE("theme menu checks the preference rather than the current resolved app
     apply_menu_setting(MenuAction::theme_system, settings);
     CHECK(settings.theme == Theme::system);
 }
+
+TEST_CASE("system titlebar setting defaults to borderless and persists in YAML", "[chrome][settings]")
+{
+    CHECK_FALSE(Settings{}.system_titlebar);
+    CHECK_FALSE(parse_settings("").system_titlebar);
+    CHECK_FALSE(parse_settings("theme: light\n").system_titlebar);
+    for (const bool enabled : {false, true})
+    {
+        Settings settings;
+        settings.system_titlebar = enabled;
+        CHECK(parse_settings(serialize_settings(settings)).system_titlebar == enabled);
+    }
+    CHECK(parse_settings("system_titlebar: true\n").system_titlebar);
+    CHECK_FALSE(parse_settings("system_titlebar: false\n").system_titlebar);
+    CHECK(parse_settings("width: 1440\nsystem_titlebar: invalid\n").width == Settings{}.width);
+}
+
+TEST_CASE("system titlebar is a bilingual independent appearance checkbox", "[chrome][menu]")
+{
+    Settings settings;
+    for (const auto language : {Language::english, Language::chinese})
+    {
+        const auto menu        = build_menu(settings, language, true, false);
+        const auto *appearance = find_menu_item(menu, 34);
+        REQUIRE(appearance != nullptr);
+        const auto *entry = find_menu_item(*appearance, 38);
+        REQUIRE(entry != nullptr);
+        CHECK(entry->action == MenuAction::system_titlebar);
+        CHECK(entry->label == translate(language, Text::system_titlebar));
+        CHECK(entry->checkable);
+        CHECK_FALSE(entry->checked);
+    }
+    apply_menu_setting(MenuAction::system_titlebar, settings);
+    CHECK(settings.system_titlebar);
+    CHECK(settings.theme == Theme::system);
+    CHECK(find_menu_item(build_menu(settings, Language::chinese, true, false), 38)->checked);
+    apply_menu_setting(MenuAction::system_titlebar, settings);
+    CHECK_FALSE(settings.system_titlebar);
+}
+
+TEST_CASE("rounded borderless corners default on and can be independently disabled", "[chrome][rounding][settings]")
+{
+    Settings settings;
+    CHECK_FALSE(settings.disable_rounding);
+    CHECK_FALSE(parse_settings("").disable_rounding);
+    apply_menu_setting(MenuAction::disable_rounding, settings);
+    CHECK(settings.disable_rounding);
+    CHECK(parse_settings(serialize_settings(settings)).disable_rounding);
+    auto menu = build_menu(settings, Language::chinese, true, false);
+    REQUIRE(find_menu_item(menu, 41) != nullptr);
+    CHECK(find_menu_item(menu, 41)->checked);
+    CHECK(find_menu_item(menu, 41)->enabled);
+    CHECK(find_menu_item(menu, 41)->label == "关闭圆角");
+    apply_menu_setting(MenuAction::system_titlebar, settings);
+    menu = build_menu(settings, Language::english, true, false);
+    CHECK_FALSE(find_menu_item(menu, 41)->enabled);
+    CHECK(find_menu_item(menu, 41)->checked); // Retain preference while native decorations are enabled.
+    apply_menu_setting(MenuAction::disable_rounding, settings);
+    CHECK_FALSE(settings.disable_rounding);
+}

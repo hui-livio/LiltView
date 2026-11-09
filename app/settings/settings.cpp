@@ -28,8 +28,10 @@ struct SettingsDocument
     std::string theme     = "system";
     std::string language  = "system";
     std::string log_level = std::string(log_level_name(default_log_level()));
+    bool system_titlebar  = false;
+    bool disable_rounding = false;
 };
-YLT_REFL(SettingsDocument, width, height, maximized, theme, language, log_level);
+YLT_REFL(SettingsDocument, width, height, maximized, theme, language, log_level, system_titlebar, disable_rounding);
 
 Theme parse_theme(std::string_view value)
 {
@@ -122,10 +124,12 @@ Settings parse_settings(std::string_view data)
         settings.width = document.width;
     if (document.height >= 480 && document.height <= 8192)
         settings.height = document.height;
-    settings.maximized = document.maximized;
-    settings.theme     = parse_theme(document.theme);
-    settings.language  = parse_language(document.language);
-    settings.log_level = parse_log_level(document.log_level);
+    settings.maximized        = document.maximized;
+    settings.system_titlebar  = document.system_titlebar;
+    settings.disable_rounding = document.disable_rounding;
+    settings.theme            = parse_theme(document.theme);
+    settings.language         = parse_language(document.language);
+    settings.log_level        = parse_log_level(document.log_level);
     return settings;
 }
 
@@ -138,7 +142,9 @@ std::string serialize_settings(const Settings &settings)
                                         settings.theme == Theme::light ? "light" :
                                                                          "system",
                                     std::string(language_code(settings.language)),
-                                    std::string(log_level_name(settings.log_level))};
+                                    std::string(log_level_name(settings.log_level)),
+                                    settings.system_titlebar,
+                                    settings.disable_rounding};
     std::string yaml;
     iguana::to_yaml(document, yaml);
     return yaml;

@@ -3,6 +3,8 @@
 #include "version.hpp"
 #include "viewer/viewer.hpp"
 
+#include <imgui_internal.h>
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -62,24 +64,37 @@ Text image_error_text(lv_error_code code)
     }
 }
 
-float status_bar_height()
-{
-    // 状态栏只容纳一行文字及上下各 4px 留白，不沿用按钮的 FramePadding。
-    return ImGui::GetTextLineHeight() + 8.0f * ImGui::GetStyle().FontScaleDpi;
-}
-
-void begin_main_window(bool system_menu)
+void begin_main_window(bool system_menu, bool custom_titlebar, float radius)
 {
     const auto *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
     // 原生窗口边框内铺满矩形内容，避免自绘圆角外露出清屏底色；仅影响主窗口。
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0f, 0.0f});
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, radius);
     ImGui::Begin("LiltView###main", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus | (system_menu ? 0 : ImGuiWindowFlags_MenuBar));
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+                     ((system_menu || custom_titlebar) ? 0 : ImGuiWindowFlags_MenuBar));
     ImGui::PopStyleVar(2);
+}
+
+void rounded_modal_dim(float radius, ImVec4 color)
+{
+    const auto *viewport = ImGui::GetMainViewport();
+    const ImVec2 max{viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y};
+    auto *list = ImGui::GetWindowDrawList();
+    // Like ImGui's modal dim insertion, prepend a dedicated draw command behind
+    // this popup's background. Unlike its viewport-sized quad, preserve alpha
+    // outside the rounded native window (including while About is open).
+    list->AddDrawCmd();
+    list->PushClipRect(viewport->Pos, max, false);
+    list->AddRectFilled(viewport->Pos, max, ImGui::GetColorU32(color), radius);
+    const auto command = list->CmdBuffer.back();
+    list->CmdBuffer.pop_back();
+    list->CmdBuffer.push_front(command);
+    list->AddDrawCmd();
+    list->PopClipRect();
 }
 
 MenuAction draw_menu(const MenuItem &root)
@@ -161,24 +176,47 @@ void apply_style(bool dark, float scale)
     style.FontScaleDpi = scale;
 }
 
+void Shell::dismiss_transient_menus()
+{
+    ImGui::ClosePopupsExceptModals();
+}
+
 MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu, render::Renderer &renderer, render::Image icon,
-                       Viewer &viewer)
+                       Viewer &viewer, const WindowChromeState &chrome)
 {
     // 按区域组织一帧；窗口、子画布和弹窗的 Begin/End 在对应函数中配对。
-    MenuAction action = MenuAction::none;
-    begin_main_window(system_menu);
-    if (!system_menu)
-        action = draw_window_menu(menu);
-    if (action == MenuAction::quit)
+    const auto metrics = window_chrome_metrics(ImGui::GetMainViewport()->Size, chrome);
+    MenuAction action  = MenuAction::none;
+    begin_main_window(system_menu, metrics.custom, metrics.radius);
+    if (metrics.custom)
     {
-        // 菜单退出直接交还应用层隐藏窗口，不再准备或上传这一帧的图片。
+        action = draw_window_titlebar(metrics, chrome, language, renderer, icon);
+        ImGui::SetCursorPos({metrics.border, metrics.title_bottom()});
+        if (!system_menu)
+        {
+            const float menu_height = ImGui::GetFrameHeight();
+            ImGui::BeginChild("window_menu", {metrics.width - 2 * metrics.border, menu_height}, ImGuiChildFlags_None,
+                              ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            const auto selected = draw_window_menu(menu);
+            if (selected != MenuAction::none)
+                action = selected;
+            ImGui::EndChild();
+            ImGui::SetCursorPos({metrics.border, metrics.title_bottom() + menu_height});
+        }
+    }
+    else if (!system_menu)
+        action = draw_window_menu(menu);
+    if (action == MenuAction::quit || action == MenuAction::close_window)
+    {
+        // 菜单 / 自绘关闭按钮直接交还应用层，不再准备或上传图片。
         ImGui::End();
         return action;
     }
 
-    draw_canvas(language, renderer, icon, viewer);
-    draw_status(language, viewer);
-    draw_about(language, renderer, icon);
+    draw_canvas(language, renderer, icon, viewer, metrics);
+    draw_status(language, viewer, metrics);
+    draw_window_border(metrics, chrome.dark);
+    draw_about(language, renderer, icon, metrics.radius);
     ImGui::End();
     return action;
 }
@@ -194,15 +232,17 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
     return selected;
 }
 
-void Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer)
+void Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer,
+                        const WindowChromeMetrics &chrome)
 {
     // 画布填满无内边距的主窗口，仅为底部状态栏预留高度。
     const auto t = [language](Text text)
     {
         return translate(language, text);
     };
-    const float canvas_height = std::max(1.0f, ImGui::GetContentRegionAvail().y - status_bar_height());
-    ImGui::BeginChild("canvas", {0.0f, canvas_height}, ImGuiChildFlags_None,
+    ImGui::SetCursorPosX(chrome.border);
+    const float canvas_height = std::max(1.0f, ImGui::GetWindowPos().y + chrome.status_top() - ImGui::GetCursorScreenPos().y);
+    ImGui::BeginChild("canvas", {std::max(1.0f, chrome.width - 2 * chrome.border), canvas_height}, ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     const auto available = ImGui::GetContentRegionAvail();
     if (viewer.has_visible_image())
@@ -243,7 +283,7 @@ void Shell::draw_canvas(Language language, render::Renderer &renderer, render::I
     ImGui::EndChild();
 }
 
-void Shell::draw_status(Language language, const Viewer &viewer)
+void Shell::draw_status(Language language, const Viewer &viewer, const WindowChromeMetrics &chrome)
 {
     const auto t = [language](Text text)
     {
@@ -266,20 +306,20 @@ void Shell::draw_status(Language language, const Viewer &viewer)
     const auto origin         = ImGui::GetWindowPos();
     const auto size           = ImGui::GetWindowSize();
     const auto &style         = ImGui::GetStyle();
-    const float top           = origin.y + size.y - status_bar_height();
-    const float text_y        = top + (status_bar_height() - ImGui::GetTextLineHeight()) * 0.5f;
-    const float left          = origin.x + style.WindowPadding.x;
-    const float right         = origin.x + size.x - style.WindowPadding.x - ImGui::CalcTextSize(language_name).x;
+    const float top           = origin.y + chrome.status_top();
+    const float text_y        = top + (chrome.status_height - ImGui::GetTextLineHeight()) * 0.5f;
+    const float left          = origin.x + chrome.border + style.WindowPadding.x;
+    const float right         = origin.x + size.x - chrome.border - style.WindowPadding.x - ImGui::CalcTextSize(language_name).x;
     const auto color          = ImGui::GetColorU32(ImGuiCol_TextDisabled);
     auto *list                = ImGui::GetWindowDrawList();
     // 两侧共用居中的文字基线；长文件名裁切在语言标签之前，不撑高或覆盖状态栏。
-    list->PushClipRect({left, top}, {std::max(left, right - style.ItemSpacing.x), origin.y + size.y}, true);
+    list->PushClipRect({left, top}, {std::max(left, right - style.ItemSpacing.x), origin.y + size.y - chrome.border}, true);
     list->AddText({left, text_y}, color, text.c_str());
     list->PopClipRect();
     list->AddText({right, text_y}, color, language_name);
 }
 
-void Shell::draw_about(Language language, render::Renderer &renderer, render::Image icon)
+void Shell::draw_about(Language language, render::Renderer &renderer, render::Image icon, float frame_radius)
 {
     // OpenPopup 和 BeginPopupModal 使用同一 ID，并处于相同的父窗口作用域。
     const auto id = [language](Text text, const char *stable_id)
@@ -295,8 +335,21 @@ void Shell::draw_about(Language language, render::Renderer &renderer, render::Im
     }
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
     ImGui::SetNextWindowSize({std::min(viewport->Size.x - 36.0f * scale, 440.0f * scale), 0.0f}, ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("about_dialog", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    auto dim = ImGui::GetStyleColorVec4(ImGuiCol_ModalWindowDimBg);
+    if (frame_radius > 0)
+        ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4{0, 0, 0, 0});
+    const bool visible =
+        ImGui::BeginPopupModal("about_dialog", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize);
+    if (frame_radius > 0)
+        ImGui::PopStyleColor();
+    if (visible)
     {
+        if (frame_radius > 0)
+        {
+            about_dim_ratio_  = std::min(1.0f, about_dim_ratio_ + ImGui::GetIO().DeltaTime * 6);
+            dim.w            *= about_dim_ratio_;
+            rounded_modal_dim(frame_radius, dim);
+        }
         draw_about_header(language, renderer, icon);
         draw_about_licenses(language);
         draw_about_author(language);
@@ -304,6 +357,8 @@ void Shell::draw_about(Language language, render::Renderer &renderer, render::Im
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+    else
+        about_dim_ratio_ = 0;
 }
 
 void Shell::draw_about_header(Language language, render::Renderer &renderer, render::Image icon)

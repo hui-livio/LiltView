@@ -16,6 +16,9 @@ bool GlobalMenu::active()
 void GlobalMenu::update(const MenuItem &)
 {
 }
+void GlobalMenu::rebind_window(SDL_Window *)
+{
+}
 std::vector<GlobalMenuAction> GlobalMenu::take_actions()
 {
     return {};

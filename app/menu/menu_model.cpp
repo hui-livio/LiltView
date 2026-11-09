@@ -118,6 +118,15 @@ MenuItem appearance_menu(const Settings &settings, Language language)
     appearance.children = {toggle(language, 37, Text::follow_system, MenuAction::theme_system, settings.theme == Theme::system),
                            toggle(language, 35, Text::dark, MenuAction::theme_dark, settings.theme == Theme::dark),
                            toggle(language, 36, Text::light, MenuAction::theme_light, settings.theme == Theme::light)};
+    MenuItem separator;
+    separator.id        = 39;
+    separator.separator = true;
+    appearance.children.push_back(separator);
+    appearance.children.push_back(
+        toggle(language, 38, Text::system_titlebar, MenuAction::system_titlebar, settings.system_titlebar));
+    auto square    = toggle(language, 41, Text::disable_rounding, MenuAction::disable_rounding, settings.disable_rounding);
+    square.enabled = !settings.system_titlebar;
+    appearance.children.push_back(square);
     return appearance;
 }
 } // namespace
@@ -166,6 +175,12 @@ void apply_menu_setting(MenuAction action, Settings &settings)
 {
     switch (action)
     {
+    case MenuAction::disable_rounding:
+        settings.disable_rounding = !settings.disable_rounding;
+        break;
+    case MenuAction::system_titlebar:
+        settings.system_titlebar = !settings.system_titlebar;
+        break;
     case MenuAction::language_system:
         settings.language = Language::system;
         break;

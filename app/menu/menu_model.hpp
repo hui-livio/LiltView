@@ -31,7 +31,12 @@ enum class MenuAction
     language_chinese,
     theme_dark,
     theme_light,
-    theme_system
+    theme_system,
+    system_titlebar,
+    disable_rounding,
+    minimize,
+    maximize_restore,
+    close_window
 };
 
 struct MenuItem

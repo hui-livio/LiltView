@@ -103,6 +103,7 @@ struct Readback
 {
     Size size;
     std::vector<std::uint8_t> rgb;
+    std::vector<std::uint8_t> alpha; // Optional top-left alpha plane, for transparent-window diagnostics.
 }; // top-left, packed RGB8
 
 // Render-thread only; ImGui context and native window must outlive this object.
@@ -147,10 +148,21 @@ public:
     virtual void destroy_image(Image) noexcept                                                                              = 0;
     virtual void add_image(ImDrawList *, Image, Point min, Point max, Point uv_min = {0, 0}, Point uv_max = {1, 1})         = 0;
     virtual void add_image_quad(ImDrawList *, Image, const std::array<Point, 4> &positions, const std::array<Point, 4> &uv) = 0;
-    virtual void begin_frame()                                                                                              = 0;
-    virtual void render_frame(ImDrawData *)                                                                                 = 0;
-    virtual void present()                                                                                                  = 0;
-    virtual Readback readback() = 0; // test/tooling, before present; synchronous
+    // Remove the old front-buffer image before unmapping/replacing a window,
+    // so desktop hide animations cannot retain a stale menu/image snapshot.
+    virtual void retire_surface()
+    {
+    }
+    // UI thread, outside an ImGui frame. Preserve images/cache while rebinding
+    // to a compatible native window with different decoration/transparency.
+    virtual void rebind_surface(void *)
+    {
+        throw Error(ErrorCode::backend_failure, "This renderer cannot rebind a window");
+    }
+    virtual void begin_frame()              = 0;
+    virtual void render_frame(ImDrawData *) = 0;
+    virtual void present()                  = 0;
+    virtual Readback readback()             = 0; // test/tooling, before present; synchronous
 };
 
 // Exactly one backend is selected at configure time; no silent fallback.

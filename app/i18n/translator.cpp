@@ -55,7 +55,12 @@ constexpr Dictionary english{"File",
                              "Image exceeds the limits supported by this decoder or output region.",
                              "Not enough memory to load or display the image.",
                              "The file changed while loading. Open it again.",
-                             "Cannot load this image. Try opening another file."};
+                             "Cannot load this image. Try opening another file.",
+                             "Enable system titlebar",
+                             "Disable rounded corners",
+                             "Minimize",
+                             "Maximize",
+                             "Restore"};
 
 constexpr Dictionary chinese{"文件",
                              "打开图片…",
@@ -104,7 +109,12 @@ constexpr Dictionary chinese{"文件",
                              "图片超过当前解码器或输出区域支持的限制。",
                              "加载或显示图片所需内存不足。",
                              "文件在加载时发生变化，请重新打开。",
-                             "无法加载图片，请尝试打开其他文件。"};
+                             "无法加载图片，请尝试打开其他文件。",
+                             "启用系统标题栏",
+                             "关闭圆角",
+                             "最小化",
+                             "最大化",
+                             "恢复"};
 
 constexpr bool complete(const Dictionary &dictionary)
 {

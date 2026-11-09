@@ -32,12 +32,14 @@ std::string_view log_level_name(LogLevel level);
 
 struct Settings
 {
-    int width          = 1120;
-    int height         = 760;
-    bool maximized     = false;
-    Theme theme        = Theme::system;
-    Language language  = Language::system;
-    LogLevel log_level = default_log_level();
+    int width             = 1120;
+    int height            = 760;
+    bool maximized        = false;
+    Theme theme           = Theme::system;
+    Language language     = Language::system;
+    LogLevel log_level    = default_log_level();
+    bool system_titlebar  = false;
+    bool disable_rounding = false;
 };
 
 // YAML only. Invalid syntax returns defaults; missing keys keep their defaults.

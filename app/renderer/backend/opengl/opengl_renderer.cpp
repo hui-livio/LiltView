@@ -81,6 +81,7 @@ class OpenGLRenderer final : public Renderer
 public:
     explicit OpenGLRenderer(const Config &config) :
         staged_uploads_(config.staged_uploads),
+        vsync_(config.vsync),
         budget_(config.image_budget_bytes),
         owner_(next_owner.fetch_add(1))
     {
@@ -276,6 +277,61 @@ public:
                        {uv_max.x, uv_max.y});
     }
 
+    void retire_surface() override
+    {
+        if (!SDL_GL_MakeCurrent(window_, context_))
+            throw Error(ErrorCode::backend_failure, SDL_GetError());
+        SDL_GL_SetSwapInterval(0); // No additional VSync wait for a retiring surface.
+        glDisable(GL_SCISSOR_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        const bool transparent = (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0;
+        glClearColor(transparent ? 0 : 0.075f, transparent ? 0 : 0.085f, transparent ? 0 : 0.10f, transparent ? 0 : 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        if (!SDL_GL_SwapWindow(window_))
+        {
+            const std::string error = SDL_GetError();
+            SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
+            throw Error(ErrorCode::backend_failure, error.c_str());
+        }
+        glClear(GL_COLOR_BUFFER_BIT); // Retire both buffers, including debug readback.
+        glFinish();                   // Publish the empty front buffer before the native hide request.
+        SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
+    }
+
+    void rebind_surface(void *surface) override
+    {
+        auto *replacement = static_cast<SDL_Window *>(surface);
+        if (!replacement)
+            throw Error(ErrorCode::invalid_argument, "Missing replacement window");
+        // Always create a context for the replacement drawable's visual.
+        // Merely MakeCurrent can succeed across differing X11 depths, yet a
+        // later Mesa software swap can fail with BadMatch / X_ShmPutImage.
+        if (!SDL_GL_MakeCurrent(window_, context_) || !SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1))
+            throw Error(ErrorCode::backend_failure, SDL_GetError());
+        // Complete outstanding uploads before the new context reads shared
+        // resources. This synchronization is only on window-mode transitions.
+        glFinish();
+        const auto shared              = SDL_GL_CreateContext(replacement);
+        const std::string create_error = shared ? "" : SDL_GetError();
+        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
+        if (!shared)
+        {
+            SDL_GL_MakeCurrent(window_, context_);
+            throw Error(ErrorCode::backend_failure, create_error.c_str());
+        }
+        if (!SDL_GL_MakeCurrent(replacement, shared))
+        {
+            const std::string bind_error = SDL_GetError();
+            SDL_GL_DestroyContext(shared);
+            SDL_GL_MakeCurrent(window_, context_);
+            throw Error(ErrorCode::backend_failure, bind_error.c_str());
+        }
+        SDL_GL_DestroyContext(context_);
+        context_ = shared;
+        window_  = replacement;
+        SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
+    }
+
     void begin_frame() override
     {
         ImGui_ImplOpenGL3_NewFrame();
@@ -296,7 +352,10 @@ public:
         if (!size.width || !size.height)
             return;
         glViewport(0, 0, static_cast<GLsizei>(size.width), static_cast<GLsizei>(size.height));
-        glClearColor(0.055f, 0.063f, 0.075f, 1.0f);
+        if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0)
+            glClearColor(0, 0, 0, 0);
+        else
+            glClearColor(0.055f, 0.063f, 0.075f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(data);
         check_gl("Frame render failed");
@@ -311,22 +370,47 @@ public:
 
     Readback readback() override
     {
-        Readback result{framebuffer_size(), {}};
+        Readback result{framebuffer_size(), {}, {}};
         if (!result.size.width || !result.size.height)
             return result;
-        const auto row = static_cast<std::size_t>(result.size.width) * 3;
-        result.rgb.resize(row * result.size.height);
+        // Keep opaque renderer benchmarks on their original packed RGB path.
+        // Alpha diagnostics are only needed for explicitly transparent windows.
+        if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) == 0)
+        {
+            const auto row = static_cast<std::size_t>(result.size.width) * 3;
+            result.rgb.resize(row * result.size.height);
+            GLint alignment = 0;
+            glGetIntegerv(GL_PACK_ALIGNMENT, &alignment);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, static_cast<GLsizei>(result.size.width), static_cast<GLsizei>(result.size.height), GL_RGB,
+                         GL_UNSIGNED_BYTE, result.rgb.data());
+            glPixelStorei(GL_PACK_ALIGNMENT, alignment);
+            check_gl("Screenshot readback failed");
+            for (std::uint32_t y = 0; y < result.size.height / 2; ++y)
+                std::swap_ranges(result.rgb.begin() + static_cast<std::ptrdiff_t>(y * row),
+                                 result.rgb.begin() + static_cast<std::ptrdiff_t>((y + 1) * row),
+                                 result.rgb.begin() + static_cast<std::ptrdiff_t>((result.size.height - 1 - y) * row));
+            return result;
+        }
+        const auto count = static_cast<std::size_t>(result.size.width) * result.size.height;
+        std::vector<std::uint8_t> rgba(count * 4);
         GLint alignment = 0;
         glGetIntegerv(GL_PACK_ALIGNMENT, &alignment);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels(0, 0, static_cast<GLsizei>(result.size.width), static_cast<GLsizei>(result.size.height), GL_RGB,
-                     GL_UNSIGNED_BYTE, result.rgb.data());
+        glReadPixels(0, 0, static_cast<GLsizei>(result.size.width), static_cast<GLsizei>(result.size.height), GL_RGBA,
+                     GL_UNSIGNED_BYTE, rgba.data());
         glPixelStorei(GL_PACK_ALIGNMENT, alignment);
         check_gl("Screenshot readback failed");
-        for (std::uint32_t y = 0; y < result.size.height / 2; ++y)
-            std::swap_ranges(result.rgb.begin() + static_cast<std::ptrdiff_t>(y * row),
-                             result.rgb.begin() + static_cast<std::ptrdiff_t>((y + 1) * row),
-                             result.rgb.begin() + static_cast<std::ptrdiff_t>((result.size.height - 1 - y) * row));
+        result.rgb.resize(count * 3);
+        result.alpha.resize(count);
+        for (std::uint32_t y = 0; y < result.size.height; ++y)
+            for (std::uint32_t x = 0; x < result.size.width; ++x)
+            {
+                const auto dest   = static_cast<std::size_t>(y) * result.size.width + x;
+                const auto source = (static_cast<std::size_t>(result.size.height - 1 - y) * result.size.width + x) * 4;
+                std::copy_n(rgba.data() + source, 3, result.rgb.data() + dest * 3);
+                result.alpha[dest] = rgba[source + 3];
+            }
         return result;
     }
 
@@ -479,6 +563,7 @@ private:
     std::array<UploadSlot, 8> uploads_{};
     UploadStats upload_stats_{};
     bool staged_uploads_ = true;
+    bool vsync_          = true;
     std::vector<Texture> textures_;
     std::uint64_t budget_ = 0, used_ = 0, owner_ = 0;
     std::uint32_t max_edge_ = 0;

@@ -124,7 +124,7 @@ def test_status(executable, folder):
         for language in ("en-US", "zh-CN"):
             directory = folder / f"{theme}-{language}"
             directory.mkdir()
-            (directory / "settings.yaml").write_text(f"theme: {theme}\nlanguage: {language}\n")
+            (directory / "settings.yaml").write_text(f"theme: {theme}\nlanguage: {language}\nsystem_titlebar: true\n")
             screenshot = directory / "status.ppm"
             command = [str(executable), "--smoke-test", "--config-dir", str(directory), "--screenshot", str(screenshot)]
             if theme == "dark":
@@ -176,6 +176,107 @@ def test_status(executable, folder):
                 ink_bounds.append((min(rows), max(rows)))
             # Chinese glyphs and Latin descenders share a baseline, not identical ink bounds.
             assert all(abs(a - b) <= 3 for a, b in zip(*ink_bounds)), (theme, language, "status baselines differ", ink_bounds)
+
+
+def test_chrome(executable, folder):
+    for theme in ("light", "dark"):
+        for square in (False, True):
+            directory = folder / f"{theme}-{square}"
+            directory.mkdir()
+            (directory / "settings.yaml").write_text(f"theme: {theme}\nlanguage: en-US\ndisable_rounding: {str(square).lower()}\n")
+            screenshot = directory / "chrome.ppm"
+            result = subprocess.run([str(executable), "--smoke-test", "--config-dir", str(directory), "--screenshot", str(screenshot)],
+                                    text=True, capture_output=True, timeout=10)
+            assert result.returncode == 0, result.stdout + result.stderr
+            header, dimensions, maximum, pixels = screenshot.read_bytes().split(b"\n", 3)
+            assert header == b"P6" and maximum == b"255"
+            width, height = map(int, dimensions.split())
+            alpha_header, alpha_dimensions, alpha_max, alpha = (directory / "chrome-alpha.pgm").read_bytes().split(b"\n", 3)
+            assert alpha_header == b"P5" and alpha_dimensions == dimensions and alpha_max == b"255"
+
+            def pixel(x, y):
+                offset = (y * width + x) * 3
+                return pixels[offset:offset + 3]
+
+            border = bytes((97, 179, 255) if theme == "dark" else (20, 79, 173))
+            start, end = (0, 0) if square else (14, 14)
+            for y in (0, 1, height - 2, height - 1):
+                assert all(pixel(x, y) == border for x in range(start, width - end)), (theme, "incomplete horizontal border", y)
+            for x in (0, 1, width - 2, width - 1):
+                assert all(pixel(x, y) == border for y in range(start, height - end)), (theme, "incomplete vertical border", x)
+            corners = (0, width - 1, (height - 1) * width, width * height - 1)
+            assert all(alpha[index] == (255 if square else 0) for index in corners), (theme, square, "incorrect corner alpha")
+            assert alpha[(height // 2) * width + width // 2] == 255
+            _, _, _, about_alpha = (directory / "chrome-about-alpha.pgm").read_bytes().split(b"\n", 3)
+            assert all(about_alpha[index] == (255 if square else 0) for index in corners), (theme, square, "modal painted transparent corners")
+            title = pixel(width // 2, 20)
+            menu = pixel(width // 2, 50)
+            canvas = pixel(width // 2, 100)
+            assert title != menu != canvas, (theme, "missing title/menu/canvas rows")
+            assert pixel(2, 69) == canvas and pixel(width - 3, 69) == canvas, (theme, "padded canvas")
+            footer = pixel(width // 2, height - 3)
+            assert footer != border and footer != canvas, (theme, "missing status bar")
+
+    # Native -> custom -> native must retain the same process, menu and loaded image.
+    directory = folder / "toggle"
+    directory.mkdir()
+    settings = directory / "settings.yaml"
+    settings.write_text("system_titlebar: true\nlog_level: debug\nlanguage: en-US\n")
+    sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
+    log = directory / "app.log"
+    with log.open("w") as output:
+        app = subprocess.Popen([str(executable), "--config-dir", str(directory), str(sample)], stdout=output, stderr=subprocess.STDOUT)
+        try:
+            service = find_service(app.pid)
+            deadline = time.monotonic() + 5
+            while "Image displayed: red.bmp" not in log.read_text():
+                assert app.poll() is None and time.monotonic() < deadline, log.read_text()
+                time.sleep(0.01)
+            assert "checkmark" in bus_call(service, "GetProperty", "38", "toggle-type").stdout
+            assert "checkmark" in bus_call(service, "GetProperty", "41", "toggle-type").stdout
+            assert "false" in bus_call(service, "GetProperty", "41", "enabled").stdout
+            assert "Enable system titlebar" in bus_call(service, "GetProperty", "38", "label").stdout
+            for enabled in (False, True, False):
+                bus_call(service, "Event", "38", "clicked", "<0>", "0")
+                deadline = time.monotonic() + 5
+                while f"<{int(enabled)}>" not in bus_call(service, "GetProperty", "38", "toggle-state").stdout:
+                    assert app.poll() is None and time.monotonic() < deadline, log.read_text()
+                    time.sleep(0.01)
+            bus_call(service, "Event", "41", "clicked", "<0>", "0")
+            deadline = time.monotonic() + 5
+            while "<1>" not in bus_call(service, "GetProperty", "41", "toggle-state").stdout:
+                assert app.poll() is None and time.monotonic() < deadline, log.read_text()
+                time.sleep(0.01)
+            bus_call(service, "Event", "12", "clicked", "<0>", "0")
+            assert app.wait(timeout=10) == 0, log.read_text()
+            text = log.read_text()
+            assert len(re.findall(r"LiltView [^\n]+ started,", text)) == 1, text
+            assert text.count("Image displayed: red.bmp") == 1, text
+            windows = re.findall(r"Window created: system_titlebar=(true|false), transparent=(true|false), native_window_id=(\d+)", text)
+            if os.environ.get("SDL_VIDEODRIVER") == "wayland":
+                assert [(native, alpha) for native, alpha, _ in windows] == [("true", "true")], text
+                reused = re.findall(r"native_window_id=(\d+), surface_reused=true", text)
+                assert reused == [windows[0][2]] * 3, text
+            else:
+                assert [(native, alpha) for native, alpha, _ in windows] == [
+                    ("true", "false"), ("false", "true"), ("true", "false"), ("false", "true")], text
+                assert len({ident for _, _, ident in windows}) == 4, text
+                for _, _, ident in windows[:-1]:
+                    stages = re.findall(rf"Window handoff: old_id={ident}, stage=(\w+)", text)
+                    assert stages == ["hidden", "destroyed", "replacement_shown"], text
+                positions = re.findall(r"Window placement: requested=\((-?\d+), (-?\d+)\), actual=\((-?\d+), (-?\d+)\)", text)
+                for x, y, actual_x, actual_y in positions:
+                    # Some WMs clamp a position at the screen's edges. Reject
+                    # recentering/large jumps while allowing a frame-size clamp.
+                    assert abs(int(x) - int(actual_x)) <= 48 and abs(int(y) - int(actual_y)) <= 48, text
+            assert text.count("Window decoration applied:") == 3, text
+            assert "[error]" not in text and "[critical]" not in text, text
+            assert "system_titlebar: false" in settings.read_text(), settings.read_text()
+            assert "disable_rounding: true" in settings.read_text(), settings.read_text()
+        finally:
+            if app.poll() is None:
+                app.terminate()
+                app.wait(timeout=5)
 
 
 def test_close(executable, folder):
@@ -410,7 +511,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
          "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
-         "animation_app": test_animation_app, "status": test_status, "close": test_close}[case](executable, Path(temporary))
+         "animation_app": test_animation_app, "status": test_status, "close": test_close, "chrome": test_chrome}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 

@@ -4,6 +4,7 @@
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
 #include "platform/sdl_render_host.hpp"
+#include "platform/window_shape.hpp"
 #include "renderer/renderer.hpp"
 #include "resources/icon_rgba.hpp"
 #include "settings/settings.hpp"
@@ -25,6 +26,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -69,6 +71,10 @@ class Application
 public:
     ~Application()
     {
+        window_shape_.reset(); // Own Wayland proxies must go before SDL's display connection.
+        // 先撤销原生命中测试，后续窗口 / ImGui 析构期间不再访问 Application 状态。
+        if (window_ != nullptr)
+            SDL_SetWindowHitTest(window_, nullptr, nullptr);
         // 逆初始化顺序释放；标志位也覆盖启动途中抛异常的情况。
         viewer_.reset();
         if (renderer_)
@@ -117,9 +123,12 @@ private:
             settings_.language = *options.language;
 
         create_window();
+        window_shape_ = std::make_unique<WindowShape>();
         initialize_imgui();
         create_icon();
         load_font();
+        update_visual_style();
+        configure_hit_test();
         viewer_ = std::make_unique<Viewer>(*renderer_);
         if (!options.image_path.empty())
             viewer_->open(utf8_path(options.image_path));
@@ -133,13 +142,169 @@ private:
     }
 
     // 窗口和 GL 上下文准备完成后才创建纹理；任一阶段失败都由析构函数回收已完成部分。
-    void create_window()
+    SDL_Window *make_window(int width, int height, bool system_titlebar)
     {
         const auto render_flags = prepare_render_window();
-        window_ = SDL_CreateWindow("LiltView", settings_.width, settings_.height,
-                                   render_flags | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+        auto *window            = SDL_CreateWindow(
+            "LiltView", width, height,
+            render_flags | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN |
+                (system_titlebar ? 0 : SDL_WINDOW_BORDERLESS) |
+                ((!system_titlebar || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland") ? SDL_WINDOW_TRANSPARENT : 0));
+        if (!window)
+            return nullptr;
+        if (!SDL_SetWindowMinimumSize(window, 640, 480))
+        {
+            SDL_DestroyWindow(window);
+            return nullptr;
+        }
+        spdlog::debug("Window created: system_titlebar={}, transparent={}, native_window_id={}", system_titlebar,
+                      (SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) != 0, SDL_GetWindowID(window));
+        return window;
+    }
+
+    void create_window()
+    {
+        window_ = make_window(settings_.width, settings_.height, settings_.system_titlebar);
         require(window_ != nullptr, "SDL_CreateWindow");
-        require(SDL_SetWindowMinimumSize(window_, 640, 480), "SDL_SetWindowMinimumSize");
+        applied_system_titlebar_ = settings_.system_titlebar;
+    }
+
+    void configure_hit_test()
+    {
+        if (!SDL_SetWindowHitTest(window_, applied_system_titlebar_ ? nullptr : window_hit_test,
+                                  applied_system_titlebar_ ? nullptr : this) &&
+            !applied_system_titlebar_)
+            spdlog::warn("Window hit testing is unavailable: {}. Enable the system titlebar if native move/resize is needed.",
+                         SDL_GetError());
+    }
+
+    void apply_window_mode(GlobalMenu &global_menu, Shell &shell)
+    {
+        if (settings_.system_titlebar == applied_system_titlebar_)
+            return;
+        if (dialog_)
+        {
+            settings_.system_titlebar = applied_system_titlebar_;
+            spdlog::warn("Close the file dialog before switching window decorations");
+            return;
+        }
+        pending_window_position_.reset();
+        shell.dismiss_transient_menus();
+        const auto flags = SDL_GetWindowFlags(window_);
+        int width = settings_.width, height = settings_.height;
+        const bool normal = (flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN)) == 0;
+        if (normal)
+            SDL_GetWindowSize(window_, &width, &height);
+        auto before            = current_chrome_state();
+        before.system_titlebar = applied_system_titlebar_;
+        before.maximized = before.fullscreen = false;
+        auto after                           = before;
+        after.system_titlebar                = settings_.system_titlebar;
+        int x = 0, y = 0;
+        const bool positioned = query_window_position(window_, x, y);
+        const auto placement  = preserve_content_placement(x, y, width, height, before, after);
+
+        if (std::string_view(SDL_GetCurrentVideoDriver()) == "wayland")
+        {
+            // Wayland has no global toplevel positioning API. Recreating the
+            // surface lets the compositor place it elsewhere. Keep its identity
+            // and explicitly change the opaque/input regions with decorations.
+            if (!SDL_SetWindowBordered(window_, settings_.system_titlebar))
+            {
+                settings_.system_titlebar = applied_system_titlebar_;
+                return;
+            }
+            applied_system_titlebar_ = settings_.system_titlebar;
+            configure_hit_test();
+            shape_width_ = shape_height_ = 0;
+            if (normal)
+                SDL_SetWindowSize(window_, placement.width, placement.height);
+            SDL_SyncWindow(window_);
+            SDL_PumpEvents();
+            settings_.width  = placement.width;
+            settings_.height = placement.height;
+            close_inputs_    = {};
+            spdlog::debug(
+                "Window decoration applied: system_titlebar={}, transparent=true, native_window_id={}, surface_reused=true",
+                settings_.system_titlebar, SDL_GetWindowID(window_));
+            return;
+        }
+        auto *replacement = make_window(placement.width, placement.height, settings_.system_titlebar);
+        if (!replacement)
+        {
+            settings_.system_titlebar = applied_system_titlebar_;
+            spdlog::warn("Cannot create replacement window: {}", SDL_GetError());
+            return;
+        }
+        if (positioned)
+            SDL_SetWindowPosition(replacement, placement.x, placement.y);
+        const auto old_id            = SDL_GetWindowID(window_);
+        const bool visible           = (flags & SDL_WINDOW_HIDDEN) == 0;
+        const float previous_opacity = SDL_GetWindowOpacity(window_);
+        try
+        {
+            if (visible)
+            {
+                renderer_->retire_surface();
+                // Also retire the native frame where supported; a compositor
+                // may otherwise animate its cached window snapshot on unmap.
+                SDL_SetWindowOpacity(window_, 0);
+                require(SDL_HideWindow(window_), "Hide retiring window");
+                SDL_SyncWindow(window_);
+                SDL_PumpEvents();
+                spdlog::debug("Window handoff: old_id={}, stage=hidden", old_id);
+            }
+            renderer_->rebind_surface(replacement);
+        } catch (const std::exception &error)
+        {
+            SDL_DestroyWindow(replacement);
+            if (visible)
+            {
+                SDL_SetWindowOpacity(window_, previous_opacity < 0 ? 1 : previous_opacity);
+                SDL_ShowWindow(window_);
+            }
+            settings_.system_titlebar = applied_system_titlebar_;
+            spdlog::warn("Cannot switch window decorations: {}", error.what());
+            return;
+        }
+        auto *previous = window_;
+        SDL_SetWindowHitTest(previous, nullptr, nullptr);
+        ImGui_ImplSDL3_Shutdown();
+        platform_ready_          = false;
+        window_                  = replacement;
+        applied_system_titlebar_ = settings_.system_titlebar;
+        platform_ready_          = initialize_imgui_platform(window_);
+        require(platform_ready_, "Rebind ImGui SDL3 backend");
+        configure_hit_test();
+        global_menu.rebind_window(window_); // Old surface stays alive until all native associations are removed.
+        shape_width_ = shape_height_ = 0;
+        create_window_icon();
+        if (flags & SDL_WINDOW_MAXIMIZED)
+            SDL_MaximizeWindow(window_);
+        if (flags & SDL_WINDOW_FULLSCREEN)
+            SDL_SetWindowFullscreen(window_, true);
+        // Destroy and flush the old toplevel before mapping the replacement;
+        // never keep both visible during the desktop's hide animation.
+        SDL_DestroyWindow(previous);
+        SDL_PumpEvents();
+        spdlog::debug("Window handoff: old_id={}, stage=destroyed", old_id);
+        if (visible)
+        {
+            require(SDL_ShowWindow(window_), "Show replacement window");
+            SDL_SyncWindow(window_);
+            SDL_PumpEvents();
+            if (positioned && normal && (flags & SDL_WINDOW_MINIMIZED) == 0)
+                pending_window_position_ = SDL_Point{placement.x, placement.y};
+            if (flags & SDL_WINDOW_MINIMIZED)
+                SDL_MinimizeWindow(window_);
+            spdlog::debug("Window handoff: old_id={}, stage=replacement_shown", old_id);
+        }
+        settings_.width  = placement.width;
+        settings_.height = placement.height;
+        close_inputs_    = {};
+        spdlog::debug("Window decoration applied: system_titlebar={}, transparent={}, native_window_id={}",
+                      settings_.system_titlebar, (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0,
+                      SDL_GetWindowID(window_));
     }
 
     void initialize_imgui()
@@ -182,18 +347,21 @@ private:
     // 所有 SDL / ImGui 操作限定在主线程；D-Bus 工作线程只提交菜单动作。
     void run_event_loop(const LaunchOptions &options, Shell &shell, GlobalMenu &global_menu)
     {
-        last_activity_        = SDL_GetTicks();
-        menu_preference_      = settings_.language;
-        menu_theme_           = settings_.theme;
-        menu_fullscreen_      = is_fullscreen();
-        menu_has_image_       = viewer_->has_image();
-        menu_can_actual_size_ = viewer_->can_actual_size();
+        last_activity_         = SDL_GetTicks();
+        menu_preference_       = settings_.language;
+        menu_theme_            = settings_.theme;
+        menu_fullscreen_       = is_fullscreen();
+        menu_system_titlebar_  = settings_.system_titlebar;
+        menu_disable_rounding_ = settings_.disable_rounding;
+        menu_has_image_        = viewer_->has_image();
+        menu_can_actual_size_  = viewer_->can_actual_size();
         while (!quit_)
         {
             dispatch_global_menu_actions(global_menu, shell);
 
             if (quit_)
                 break;
+            apply_window_mode(global_menu, shell);
 
             if (options.smoke_test)
                 inject_smoke_events(shell);
@@ -204,6 +372,7 @@ private:
                 dispatch_global_menu_actions(global_menu, shell);
             if (quit_)
                 break;
+            apply_window_mode(global_menu, shell);
 
             consume_dialog();
             viewer_->pump();
@@ -212,6 +381,7 @@ private:
                 continue;
 
             update_visual_style();
+            update_window_shape();
             synchronize_menu(global_menu);
             render_frame(options, shell, global_menu.active());
         }
@@ -249,7 +419,27 @@ private:
         switch (action)
         {
         case MenuAction::quit:
+        case MenuAction::close_window:
             request_quit(timing);
+            break;
+        case MenuAction::disable_rounding:
+            break;
+        case MenuAction::system_titlebar:
+            // Window transparency is a creation-time property. Commit the mode
+            // change at the next frame boundary, never inside an ImGui frame.
+            break;
+        case MenuAction::minimize:
+            if (!SDL_MinimizeWindow(window_))
+                spdlog::warn("Cannot minimize window: {}", SDL_GetError());
+            break;
+        case MenuAction::maximize_restore:
+            if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) != 0)
+            {
+                if (!SDL_RestoreWindow(window_))
+                    spdlog::warn("Cannot restore window: {}", SDL_GetError());
+            }
+            else if (!SDL_MaximizeWindow(window_))
+                spdlog::warn("Cannot maximize window: {}", SDL_GetError());
             break;
         case MenuAction::fullscreen:
             toggle_fullscreen();
@@ -483,6 +673,75 @@ private:
         }
     }
 
+    WindowChromeState current_chrome_state() const
+    {
+        WindowChromeState state;
+        const auto flags      = SDL_GetWindowFlags(window_);
+        state.system_titlebar = settings_.system_titlebar;
+        state.rounded         = !settings_.disable_rounding;
+        state.fullscreen      = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+        state.maximized       = (flags & SDL_WINDOW_MAXIMIZED) != 0;
+        state.blocked         = dialog_ != nullptr ||
+            (imgui_ready_ && ImGui::GetCurrentContext() && ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId));
+        state.dark        = applied_dark_;
+        state.scale       = std::max(applied_scale_, 1.0f);
+        state.line_height = ImGui::GetStyle().FontSizeBase * state.scale;
+        return state;
+    }
+
+    static SDL_HitTestResult SDLCALL window_hit_test(SDL_Window *window, const SDL_Point *point, void *data)
+    {
+        const auto &app = *static_cast<Application *>(data);
+        if (app.quit_)
+            return SDL_HITTEST_NORMAL;
+        int width = 0, height = 0;
+        if (!SDL_GetWindowSize(window, &width, &height))
+            return SDL_HITTEST_NORMAL;
+        const auto chrome =
+            window_chrome_metrics({static_cast<float>(width), static_cast<float>(height)}, app.current_chrome_state());
+        switch (window_chrome_hit(chrome, {static_cast<float>(point->x), static_cast<float>(point->y)}))
+        {
+        case WindowHit::drag:
+            return SDL_HITTEST_DRAGGABLE;
+        case WindowHit::top_left:
+            return SDL_HITTEST_RESIZE_TOPLEFT;
+        case WindowHit::top:
+            return SDL_HITTEST_RESIZE_TOP;
+        case WindowHit::top_right:
+            return SDL_HITTEST_RESIZE_TOPRIGHT;
+        case WindowHit::right:
+            return SDL_HITTEST_RESIZE_RIGHT;
+        case WindowHit::bottom_right:
+            return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+        case WindowHit::bottom:
+            return SDL_HITTEST_RESIZE_BOTTOM;
+        case WindowHit::bottom_left:
+            return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+        case WindowHit::left:
+            return SDL_HITTEST_RESIZE_LEFT;
+        default:
+            return SDL_HITTEST_NORMAL;
+        }
+    }
+
+    void update_window_shape()
+    {
+        int width = 0, height = 0;
+        if (!SDL_GetWindowSize(window_, &width, &height))
+            return;
+        const float density = SDL_GetWindowPixelDensity(window_);
+        const float radius =
+            window_chrome_metrics({static_cast<float>(width), static_cast<float>(height)}, current_chrome_state()).radius;
+        if (shape_width_ == width && shape_height_ == height && shape_radius_ == radius && shape_density_ == density)
+            return;
+        if (!window_shape_->apply(window_, radius, settings_.system_titlebar))
+            spdlog::warn("Cannot update rounded window input shape: {}", SDL_GetError());
+        shape_width_   = width;
+        shape_height_  = height;
+        shape_radius_  = radius;
+        shape_density_ = density;
+    }
+
     MenuItem current_menu() const
     {
         return build_menu(settings_, resolve_language(settings_.language, locale_, chinese_font_), chinese_font_, is_fullscreen(),
@@ -493,15 +752,18 @@ private:
     void synchronize_menu(GlobalMenu &global_menu)
     {
         if (menu_preference_ == settings_.language && menu_theme_ == settings_.theme && menu_fullscreen_ == is_fullscreen() &&
-            menu_has_image_ == viewer_->has_image() && menu_can_actual_size_ == viewer_->can_actual_size())
+            menu_has_image_ == viewer_->has_image() && menu_can_actual_size_ == viewer_->can_actual_size() &&
+            menu_system_titlebar_ == settings_.system_titlebar && menu_disable_rounding_ == settings_.disable_rounding)
             return;
         menu_ = current_menu();
         global_menu.update(menu_);
-        menu_preference_      = settings_.language;
-        menu_theme_           = settings_.theme;
-        menu_fullscreen_      = is_fullscreen();
-        menu_has_image_       = viewer_->has_image();
-        menu_can_actual_size_ = viewer_->can_actual_size();
+        menu_preference_       = settings_.language;
+        menu_theme_            = settings_.theme;
+        menu_fullscreen_       = is_fullscreen();
+        menu_system_titlebar_  = settings_.system_titlebar;
+        menu_disable_rounding_ = settings_.disable_rounding;
+        menu_has_image_        = viewer_->has_image();
+        menu_can_actual_size_  = viewer_->can_actual_size();
     }
 
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu)
@@ -510,13 +772,17 @@ private:
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
-        const auto action   = shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_);
+        const auto action   = shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_, current_chrome_state());
         auto &context       = *ImGui::GetCurrentContext();
-        const auto timing   = action == MenuAction::quit ? close_inputs_.activation(context) : CloseTiming{};
+        auto timing = (action == MenuAction::quit || action == MenuAction::close_window) ? close_inputs_.activation(context) :
+                                                                                           CloseTiming{};
+        if (action == MenuAction::close_window)
+            timing.source = "titlebar_button";
         close_inputs_.discard_processed(context);
         dispatch_menu_action(action, shell, timing);
-        if (quit_)
+        if (quit_ || action == MenuAction::system_titlebar || action == MenuAction::disable_rounding)
         {
+            // 关闭 / 切换装饰后不提交旧布局，下一帧使用新的标题栏状态。
             // 菜单退出不再提交最后一帧，避免等待 present/VSync。
             ImGui::EndFrame();
             return;
@@ -531,6 +797,19 @@ private:
         renderer_->render_frame(ImGui::GetDrawData());
         capture_smoke_frame(options);
         renderer_->present();
+        if (pending_window_position_)
+        {
+            // The first buffer can finalize WM frame/shadow extents. Position
+            // after that buffer, not against a still-changing unmapped frame.
+            const auto target = *pending_window_position_;
+            pending_window_position_.reset();
+            SDL_SyncWindow(window_);
+            SDL_PumpEvents();
+            position_window_client(window_, target.x, target.y);
+            int actual_x = 0, actual_y = 0;
+            if (query_window_position(window_, actual_x, actual_y))
+                spdlog::debug("Window placement: requested=({}, {}), actual=({}, {})", target.x, target.y, actual_x, actual_y);
+        }
     }
 
     // 测试动作通过真实 SDL 事件路径执行，避免另写一套退出和弹窗处理逻辑。
@@ -627,7 +906,7 @@ private:
             spdlog::warn("Cannot save application settings: {}", error.message());
     }
 
-    void create_icon()
+    void create_window_icon()
     {
         auto *surface = SDL_CreateSurfaceFrom(resources::icon_size, resources::icon_size, SDL_PIXELFORMAT_RGBA32,
                                               const_cast<unsigned char *>(resources::icon_rgba.data()), resources::icon_size * 4);
@@ -637,6 +916,11 @@ private:
                 spdlog::debug("Window icon: {}", SDL_GetError());
             SDL_DestroySurface(surface);
         }
+    }
+
+    void create_icon()
+    {
+        create_window_icon();
         const render::Size size{resources::icon_size, resources::icon_size};
         icon_ = renderer_->create_image({size, true});
         renderer_->update_image(icon_, {0, 0, size.width, size.height},
@@ -651,17 +935,34 @@ private:
         output.write(reinterpret_cast<const char *>(pixels.rgb.data()), static_cast<std::streamsize>(pixels.rgb.size()));
         if (!output)
             throw std::runtime_error("Cannot save screenshot: " + filename);
+        if (!pixels.alpha.empty())
+        {
+            const auto image      = utf8_path(filename);
+            const auto alpha_path = image.parent_path() / (image.stem().string() + "-alpha.pgm");
+            std::ofstream alpha(alpha_path, std::ios::binary);
+            alpha << "P5\n" << pixels.size.width << ' ' << pixels.size.height << "\n255\n";
+            alpha.write(reinterpret_cast<const char *>(pixels.alpha.data()), static_cast<std::streamsize>(pixels.alpha.size()));
+            if (!alpha)
+                throw std::runtime_error("Cannot save screenshot alpha plane");
+        }
     }
 
     // 应用状态只在主线程读写；GlobalMenu 在 run() 内先销毁，再回收这些图形资源。
     Settings settings_;
+    std::optional<SDL_Point> pending_window_position_;
     UiCloseTiming close_inputs_;
     MenuItem menu_;
     std::string locale_;
-    Language menu_preference_  = Language::system;
-    Theme menu_theme_          = Theme::system;
-    Theme system_theme_        = Theme::system;
-    bool menu_fullscreen_      = false;
+    Language menu_preference_     = Language::system;
+    Theme menu_theme_             = Theme::system;
+    Theme system_theme_           = Theme::system;
+    bool menu_fullscreen_         = false;
+    bool menu_system_titlebar_    = false;
+    bool applied_system_titlebar_ = false;
+    bool menu_disable_rounding_   = false;
+    int shape_width_ = 0, shape_height_ = 0;
+    float shape_radius_ = -1, shape_density_ = 0;
+    std::unique_ptr<WindowShape> window_shape_;
     bool menu_has_image_       = false;
     bool menu_can_actual_size_ = false;
     bool chinese_font_         = false;

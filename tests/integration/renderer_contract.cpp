@@ -236,6 +236,53 @@ void verify_magnification(liltview::render::Renderer &renderer)
     renderer.destroy_image(image);
 }
 
+void verify_window_rebind(liltview::render::Renderer &renderer, SDL_Window *&window)
+{
+    using namespace liltview::render;
+    const auto base = renderer.capabilities().image_bytes;
+    std::array<std::uint8_t, 16> pixels{230, 30, 40, 255, 230, 30, 40, 255, 230, 30, 40, 255, 230, 30, 40, 255};
+    auto image           = renderer.create_uploaded_image({{2, 2}, false}, {pixels.data(), pixels.size(), 8, {2, 2}});
+    const auto accounted = renderer.capabilities().image_bytes;
+    const auto flags     = liltview::prepare_render_window();
+    for (const bool transparent : {true, false, true, false})
+    {
+        auto *replacement =
+            SDL_CreateWindow("Renderer replacement", 160, 140,
+                             flags | SDL_WINDOW_HIDDEN | (transparent ? SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS : 0));
+        check(replacement != nullptr, SDL_GetError());
+        renderer.retire_surface();
+        const auto retired = renderer.readback();
+        if ((SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) != 0)
+            check(!retired.alpha.empty() &&
+                      std::all_of(retired.alpha.begin(), retired.alpha.end(), [](std::uint8_t value) { return value == 0; }),
+                  "Retired surface kept a stale visible snapshot");
+        renderer.rebind_surface(replacement);
+        ImGui_ImplSDL3_Shutdown();
+        check(liltview::initialize_imgui_platform(replacement), "Replacement platform backend");
+        SDL_DestroyWindow(window);
+        window = replacement;
+        check(renderer.capabilities().image_bytes == accounted, "Window switch lost or duplicated GPU images");
+        renderer.begin_frame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        renderer.add_image(ImGui::GetBackgroundDrawList(), image, {0, 0}, {160, 140});
+        ImGui::GetForegroundDrawList()->AddText({8, 8}, IM_COL32_WHITE, "Shared font texture");
+        ImGui::Render();
+        renderer.render_frame(ImGui::GetDrawData());
+        const auto frame = renderer.readback();
+        check(frame.size.width == 160 && frame.size.height == 140, "Renderer kept the old drawable size");
+        const auto offset = (static_cast<std::size_t>(70) * frame.size.width + 80) * 3;
+        check(frame.rgb[offset] == 230 && frame.rgb[offset + 1] == 30 && frame.rgb[offset + 2] == 40,
+              "Preserved image handle did not render after changing window visual");
+        check(transparent ? !frame.alpha.empty() : frame.alpha.empty(), "Opaque native mode still uses transparent drawable");
+        renderer.present(); // X11 visual mismatches can surface at swap, not MakeCurrent.
+        renderer.update_image(image, {0, 0, 2, 2}, {pixels.data(), pixels.size(), 8, {2, 2}});
+    }
+    renderer.destroy_image(image);
+    check(renderer.capabilities().image_bytes == base, "Rebound images leaked GPU storage");
+    std::puts("PASS opaque/transparent window rebinding preserves handles, pixels, font textures and accounting");
+}
+
 } // namespace
 int main(int argc, char **)
 {
@@ -257,6 +304,7 @@ int main(int argc, char **)
         verify_populated_creation(*renderer);
         verify_magnification(*renderer);
         verify_staging(*renderer, argc == 1);
+        verify_window_rebind(*renderer, window);
         renderer.reset();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();

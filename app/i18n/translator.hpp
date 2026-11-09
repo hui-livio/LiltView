@@ -63,6 +63,11 @@ enum class Text
     image_memory,
     image_changed,
     image_error,
+    system_titlebar,
+    disable_rounding,
+    minimize,
+    maximize,
+    restore,
     count
 };
 

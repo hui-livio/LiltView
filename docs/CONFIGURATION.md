@@ -15,7 +15,7 @@ liltview --help
 | `--language system\|en-US\|zh-CN` | 覆盖保存的语言，正常退出后随设置保存 |
 | `--config-dir PATH` | 将 settings.yaml 放在指定目录 |
 | `--smoke-test` | 隐藏窗口执行冒烟流程并退出，不保存设置 |
-| `--screenshot PATH` | 需同时提供 --smoke-test，输出 PPM 截图 |
+| `--screenshot PATH` | 需同时提供 --smoke-test，输出 PPM 截图；透明窗口另输出同名 `-alpha.pgm` 透明度诊断图 |
 | `--help` / `-h`、`--version` | 显示 CLI11 帮助 / 应用版本，退出前不初始化窗口 |
 | 一个位置参数 | 打开的图片路径；以 `-` 开头的文件名用 `--` 分隔 |
 
@@ -32,10 +32,14 @@ maximized: false
 theme: system
 language: system
 log_level: warn
+system_titlebar: false
+disable_rounding: false
 ```
 
 - width 为 640..8192，height 为 480..8192；越界字段回退各自默认值。
 - maximized 使用 true / false。
+- system_titlebar 默认 false，使用自绘无边框标题栏；true 恢复系统标题栏和边框。在“设置 → 外观 → 启用系统标题栏”即时切换，退出保存。
+- disable_rounding 默认 false，无边框窗口使用透明圆角；true 使用直角。在“设置 → 外观 → 关闭圆角”切换。原生标题栏下该项禁用但保留选择，最大化 / 全屏自动直角。
 - theme 使用 system / dark / light，language 使用 system / en-US / zh-CN；不认识的值回退 system。
 - log_level 使用 trace / debug / info / warn / error / critical / off；有效配置优先于构建默认值。Debug 开发构建默认 debug，Release / RelWithDebInfo / MinSizeRel 发布构建默认 warn；缺失或值无效时使用该构建默认值。上例显式选择 warn。
 - 设置读取完成后、创建工作线程前，将 log_level 应用到 spdlog。启动期间读取配置前先使用构建默认值；运行中不监控文件变化，修改后需重启。保存时记录实际使用的等级，因此已有有效配置在更换构建类型后仍然优先。
