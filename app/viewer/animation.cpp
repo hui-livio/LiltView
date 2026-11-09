@@ -45,7 +45,9 @@ void Viewer::upload(const lv_region_info &region)
     const auto &pixels = *lv_pixels_get_view(region.pixels);
     renderer_.update_image(pending_, {region.rect.x, region.rect.y, region.rect.width, region.rect.height},
                            {pixels.data, pixels.byte_count, pixels.stride_bytes, {pixels.size.width, pixels.size.height}});
-    pending_content_ = true;
+    pending_pixel_format_ = pixels.format;
+    pending_color_space_  = pixels.color_space;
+    pending_content_      = true;
 }
 
 void Viewer::consume_animation(const lv_event_view &view)
@@ -75,6 +77,8 @@ void Viewer::consume_animation(const lv_event_view &view)
     else if (view.type == LV_EVENT_ANIMATION_END)
     {
         animation_info_ = view.as.animation_end.final_info;
+        if (displayed_animation_ && displayed_animation_->info.animation_id == animation_info_.animation_id)
+            displayed_animation_->info = animation_info_;
         ++completed_plays_;
         if (animation_info_.total_plays == 0 || completed_plays_ < animation_info_.total_plays)
             reset_animation_ = true;
@@ -121,7 +125,11 @@ void Viewer::advance_animation()
             preview_anchor_ = nullptr;
         }
         std::swap(display_, pending_);
-        info_ = pending_info_;
+        info_                = pending_info_;
+        displayed_path_      = selected_path_;
+        pixel_format_        = pending_pixel_format_;
+        color_space_         = pending_color_space_;
+        displayed_animation_ = AnimationDetails{animation_info_, incoming_frame_};
         playback_.presented(now);
         loading_ = false;
         error_   = 0;

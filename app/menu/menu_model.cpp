@@ -47,7 +47,8 @@ MenuItem view_control(Language language, std::int32_t id, Text text, MenuAction 
     return result;
 }
 
-MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_actual_size, bool can_previous, bool can_next)
+MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_actual_size, bool can_previous, bool can_next,
+                   bool image_info_open, bool has_image_info)
 {
     auto view                = item(language, 2, Text::view);
     auto fullscreen_item     = toggle(language, 20, Text::fullscreen, MenuAction::fullscreen, fullscreen);
@@ -81,20 +82,12 @@ MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_
     MenuItem pan_separator;
     pan_separator.id        = 56;
     pan_separator.separator = true;
-    view.children           = {previous,
-                               next,
-                               navigation_separator,
-                               fit,
-                               actual_size,
-                               zoom_in,
-                               zoom_out,
-                               pan_separator,
-                               pan_left,
-                               pan_right,
-                               pan_up,
-                               pan_down,
-                               zoom_separator,
-                               fullscreen_item};
+    auto information        = toggle(language, 57, Text::image_info, MenuAction::image_info, image_info_open);
+    information.shortcut    = {"i"};
+    information.enabled     = has_image || has_image_info;
+    view.children           = {previous, next,     navigation_separator, fit,         actual_size,
+                               zoom_in,  zoom_out, pan_separator,        pan_left,    pan_right,
+                               pan_up,   pan_down, zoom_separator,       information, fullscreen_item};
     return view;
 }
 
@@ -133,7 +126,7 @@ MenuItem appearance_menu(const Settings &settings, Language language)
 } // namespace
 
 MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen, bool has_image,
-                    bool can_actual_size, bool can_previous, bool can_next)
+                    bool can_actual_size, bool can_previous, bool can_next, bool image_info_open, bool has_image_info)
 {
     // 稳定 ID 属于菜单模型，翻译和平台渲染都不改变它们。
     auto preferences     = item(language, 3, Text::settings);
@@ -141,8 +134,10 @@ MenuItem build_menu(const Settings &settings, Language language, bool chinese_fo
     auto help            = item(language, 4, Text::help);
     help.children        = {item(language, 40, Text::about, MenuAction::about)};
     MenuItem root;
-    root.children = {file_menu(language), view_menu(language, fullscreen, has_image, can_actual_size, can_previous, can_next),
-                     preferences, help};
+    root.children = {
+        file_menu(language),
+        view_menu(language, fullscreen, has_image, can_actual_size, can_previous, can_next, image_info_open, has_image_info),
+        preferences, help};
     return root;
 }
 
@@ -171,6 +166,22 @@ MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std:
             return action;
     }
     return MenuAction::none;
+}
+
+MenuAction menu_action_for_input(const MenuItem &menu, const std::vector<std::string> &shortcut, bool repeat,
+                                 const ShortcutContext &context)
+{
+    if (context.blocked)
+        return MenuAction::none;
+    if (shortcut == std::vector<std::string>{"Escape"})
+    {
+        if (repeat)
+            return MenuAction::none;
+        if (context.image_info_open)
+            return MenuAction::image_info;
+        return context.fullscreen ? MenuAction::fullscreen : MenuAction::none;
+    }
+    return menu_action_for_shortcut(menu, shortcut, repeat);
 }
 
 void apply_menu_setting(MenuAction action, Settings &settings)

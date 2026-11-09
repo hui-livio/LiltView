@@ -244,12 +244,15 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
     };
     ImGui::SetCursorPosX(chrome.border);
     const float canvas_height = std::max(1.0f, ImGui::GetWindowPos().y + chrome.status_top() - ImGui::GetCursorScreenPos().y);
-    ImGui::BeginChild("canvas", {std::max(1.0f, chrome.width - 2 * chrome.border), canvas_height}, ImGuiChildFlags_None,
+    const auto scale          = ImGui::GetStyle().FontScaleDpi;
+    const auto body_min       = ImGui::GetCursorScreenPos();
+    const ImVec2 body_max{body_min.x + std::max(1.0f, chrome.width - 2 * chrome.border), body_min.y + canvas_height};
+    const auto information = image_information_layout(body_min, body_max, scale, image_info_open_);
+    ImGui::BeginChild("canvas", {std::max(1.0f, information.canvas_max.x - body_min.x), canvas_height}, ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     const auto available = ImGui::GetContentRegionAvail();
     const auto position  = ImGui::GetCursorScreenPos();
     const ImVec2 end{position.x + available.x, position.y + available.y};
-    const auto scale   = ImGui::GetStyle().FontScaleDpi;
     const auto buttons = navigation_button_layout(position, end, scale);
     const auto state   = navigation_button_state(
         viewer.navigation(), ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
@@ -260,6 +263,9 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
     {
         const auto selected = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
         ImGui::EndChild();
+        if (information.visible &&
+            draw_image_information(language, viewer.image_details(), information.panel_min, information.panel_max))
+            image_info_open_ = false;
         return selected;
     };
     if (viewer.has_visible_image())

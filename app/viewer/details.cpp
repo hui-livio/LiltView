@@ -1,6 +1,24 @@
 #include "viewer.hpp"
 namespace liltview
 {
+std::optional<ImageDetails> Viewer::image_details() const
+{
+    if (closing_ || !has_visible_image())
+        return std::nullopt;
+    const bool reveal = work_ == Work::static_image && loading_ && !pending_scene_.empty();
+    ImageDetails details;
+    details.path                = reveal ? selected_path_ : displayed_path_;
+    details.image               = reveal ? pending_info_ : info_;
+    details.pixel_format        = reveal ? pending_pixel_format_ : pixel_format_;
+    details.color_space         = reveal ? pending_color_space_ : color_space_;
+    details.partial             = reveal;
+    details.loading_replacement = loading_ && !reveal;
+    details.scale               = !display_ || reveal || !scene_.empty() ? presented_viewport_.scale() : viewport_.scale();
+    if (!reveal)
+        details.animation = displayed_animation_;
+    return details;
+}
+
 void Viewer::retry_restore()
 {
     if (failed_restore_)

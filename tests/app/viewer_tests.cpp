@@ -2,11 +2,14 @@
 #include "viewer/viewer.hpp"
 
 #include <SDL3/SDL.h>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <imgui.h>
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -37,6 +40,12 @@ public:
     unsigned creates           = 0;
     std::uint64_t image_budget = 16 * 1024 * 1024;
     std::uint32_t max_edge     = 4096;
+    bool allow_upload          = true;
+
+    bool upload_ready() override
+    {
+        return allow_upload;
+    }
 
     liltview::render::Capabilities capabilities() const override
     {
@@ -568,4 +577,245 @@ TEST_CASE("native row bands are visible before the complete image finishes decod
     CHECK(viewer.detail_ready());
     viewer.shutdown();
     std::filesystem::remove_all(folder);
+}
+
+namespace
+{
+struct DetailsDirectory
+{
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("liltview-information-" + std::to_string(SDL_GetPerformanceCounter()));
+    DetailsDirectory()
+    {
+        std::filesystem::create_directories(path);
+    }
+    ~DetailsDirectory()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+};
+
+struct InformationGui
+{
+    InformationGui()
+    {
+        ImGui::CreateContext();
+        auto &io       = ImGui::GetIO();
+        io.DisplaySize = {800, 600};
+        io.DeltaTime   = 1.0f / 60;
+        io.IniFilename = io.LogFilename = nullptr;
+        io.Fonts->AddFontDefault();
+        unsigned char *pixels = nullptr;
+        int width = 0, height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        io.Fonts->SetTexID(1);
+    }
+    ~InformationGui()
+    {
+        ImGui::DestroyContext();
+    }
+    void frame(liltview::Viewer &viewer, float density)
+    {
+        ImGui::GetIO().DisplayFramebufferScale = {density, density};
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos({0, 0});
+        ImGui::SetNextWindowSize({800, 600});
+        ImGui::Begin("information_camera", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
+        viewer.draw({0, 0}, {320, 240}, density, false);
+        ImGui::End();
+        ImGui::Render();
+    }
+};
+} // namespace
+
+TEST_CASE("image details follow visible row bands and retain the prior source after replacement failure",
+          "[viewer][image_details]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    TestRenderer renderer;
+    const auto first  = directory.path / "原图-%s-100%.png";
+    const auto second = directory.path / "stream.png";
+    const auto third  = directory.path / "last.png";
+    liltview::test::checkerboard(first, 17, 13, 1);
+    liltview::test::checkerboard(second, 1024, 4096, 7);
+    liltview::test::checkerboard(third, 31, 29, 1);
+    liltview::Viewer viewer(renderer);
+    CHECK_FALSE(viewer.image_details());
+    viewer.open(first);
+    loop.settle(viewer);
+    auto details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == first);
+    CHECK(details->image.file_bytes == std::filesystem::file_size(first));
+    CHECK(details->image.flags & LV_INFO_FILE_BYTES_KNOWN);
+    CHECK(details->pixel_format == LV_PIXEL_RGBA8);
+    CHECK(details->color_space == LV_COLOR_UNKNOWN);
+    CHECK_FALSE(details->animation);
+
+    renderer.upload_delay_ms = 5; // One upload exhausts the UI pump's 4 ms window.
+    viewer.open(second);
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == first);
+    CHECK(details->loading_replacement);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!viewer.image_details()->partial)
+    {
+        viewer.pump();
+        REQUIRE_FALSE(viewer.failed());
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Delay(1);
+    }
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == second);
+    CHECK(details->image.source_size.width == 1024);
+    CHECK(details->image.source_size.height == 4096);
+    CHECK(details->pixel_format == LV_PIXEL_RGBA8);
+    CHECK(details->partial);
+    renderer.fail_upload = true;
+    loop.settle(viewer);
+    REQUIRE(viewer.failed());
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == first);
+    CHECK(details->image.source_size.width == 17);
+    CHECK(details->image.source_size.height == 13);
+    CHECK_FALSE(details->partial);
+
+    renderer.upload_delay_ms = 0;
+    viewer.open(second);
+    loop.settle(viewer);
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == second);
+    CHECK_FALSE(details->partial);
+    viewer.open(first);
+    viewer.pump();
+    viewer.open(second);
+    viewer.open(third);
+    loop.settle(viewer);
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == third);
+    CHECK(details->image.source_size.width == 31);
+    CHECK(details->image.source_size.height == 29);
+    const auto uploads = renderer.uploads;
+    std::filesystem::remove(third);
+    for (unsigned count = 0; count < 20; ++count)
+    {
+        const auto snapshot = viewer.image_details();
+        REQUIRE(snapshot);
+        CHECK(snapshot->path == third);
+        CHECK(snapshot->image.file_bytes == details->image.file_bytes);
+    }
+    CHECK(renderer.uploads == uploads);
+    CHECK_FALSE(viewer.failed());
+    viewer.shutdown();
+    CHECK_FALSE(viewer.image_details());
+}
+
+TEST_CASE("image details remain empty after an initial failed open", "[viewer][image_details]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    viewer.open(directory.path / "missing.png");
+    loop.settle(viewer);
+    CHECK(viewer.failed());
+    CHECK_FALSE(viewer.image_details());
+}
+
+TEST_CASE("image details report physical displayed zoom while a cold target is still restoring",
+          "[viewer][image_details][camera]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    TestRenderer renderer;
+    renderer.image_budget = 8 * 1024 * 1024;
+    const auto file       = directory.path / "large.png";
+    liltview::test::checkerboard(file, 2048, 2048, 31);
+    liltview::Viewer viewer(renderer);
+    viewer.open(file);
+    loop.settle(viewer);
+    InformationGui gui;
+    gui.frame(viewer, 2);
+    viewer.actual_size();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do
+    {
+        viewer.pump();
+        gui.frame(viewer, 2);
+        REQUIRE_FALSE(viewer.failed());
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Delay(1);
+    } while (viewer.detail_loading());
+    auto details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->scale == Catch::Approx(1)); // Density 2 is already included in Viewport.scale().
+    renderer.allow_upload = false;
+    viewer.zoom(-3);
+    gui.frame(viewer, 2);
+    REQUIRE(viewer.detail_loading());
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->scale == viewer.presented_view().scale());
+    CHECK(details->scale > 0.512);
+    renderer.allow_upload = true;
+}
+
+TEST_CASE("image details preserve final GIF counts and the displayed frame after the session closes",
+          "[viewer][image_details][animation]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    const auto source = std::filesystem::path(LILTVIEW_IMAGE_FIXTURES) / "red-blue-loop.gif";
+    std::ifstream input(source, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const auto loop_extension = bytes.find("NETSCAPE2.0");
+    REQUIRE(loop_extension != std::string::npos);
+    REQUIRE(loop_extension >= 3);
+    bytes.erase(loop_extension - 3, 19); // No loop extension means one finite pass.
+    const auto file = directory.path / "finite.gif";
+    {
+        std::ofstream output(file, std::ios::binary);
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    viewer.open(file);
+    loop.settle(viewer);
+    auto details = viewer.image_details();
+    REQUIRE(details);
+    REQUIRE(details->animation);
+    CHECK(details->path == file);
+    CHECK(details->image.format == LV_FORMAT_GIF);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (viewer.animating())
+    {
+        viewer.pump();
+        REQUIRE_FALSE(viewer.failed());
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Delay(1);
+    }
+    details = viewer.image_details();
+    REQUIRE(details);
+    REQUIRE(details->animation);
+    CHECK(details->animation->info.flags & LV_ANIMATION_FRAME_COUNT_KNOWN);
+    CHECK(details->animation->info.flags & LV_ANIMATION_DURATION_KNOWN);
+    CHECK(details->animation->info.flags & LV_ANIMATION_PLAY_COUNT_KNOWN);
+    CHECK(details->animation->info.frame_count == 2);
+    CHECK(details->animation->info.total_plays == 1);
+    CHECK(details->animation->frame.key.frame_index == 1);
+    CHECK(details->pixel_format == LV_PIXEL_RGBA8);
+    viewer.open(directory.path / "missing.png");
+    loop.settle(viewer);
+    details = viewer.image_details();
+    REQUIRE(details);
+    CHECK(details->path == file);
+    REQUIRE(details->animation);
+    CHECK(details->animation->info.total_plays == 1);
 }

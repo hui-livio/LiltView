@@ -36,7 +36,8 @@ enum class MenuAction
     disable_rounding,
     minimize,
     maximize_restore,
-    close_window
+    close_window,
+    image_info
 };
 
 struct MenuItem
@@ -54,9 +55,16 @@ struct MenuItem
 };
 
 MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen, bool has_image = false,
-                    bool can_actual_size = false, bool can_previous = false, bool can_next = false);
+                    bool can_actual_size = false, bool can_previous = false, bool can_next = false, bool image_info_open = false,
+                    bool has_image_info = false);
 const MenuItem *find_menu_item(const MenuItem &root, std::int32_t id);
 MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std::string> &shortcut, bool repeat = false);
+struct ShortcutContext
+{
+    bool blocked = false, fullscreen = false, image_info_open = false;
+};
+MenuAction menu_action_for_input(const MenuItem &, const std::vector<std::string> &shortcut, bool repeat,
+                                 const ShortcutContext &);
 void apply_menu_setting(MenuAction action, Settings &settings);
 } // namespace liltview
 

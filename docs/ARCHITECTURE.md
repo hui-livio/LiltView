@@ -33,7 +33,7 @@ flowchart TD
 | --- | --- |
 | `app/main.cpp`、`app/cli/` | 参数、帮助、版本、启动配置；CLI 可独立于图形栈校验 |
 | `app/application.cpp` | 窗口、平台后端、ImGui、事件循环、资源创建及退出编排 |
-| `app/ui/`、`app/menu/` | 画布、窗口装饰、弹窗；系统菜单与窗口菜单共用模型 |
+| `app/ui/`、`app/menu/` | 画布、窗口装饰、信息面板与弹窗；系统菜单与窗口菜单共用模型 |
 | `app/settings/`、`app/i18n/`、`app/logging/` | YAML 持久化、中英翻译、spdlog 与 C 回调适配 |
 | `app/platform/` | SDL render host、字体、全局菜单、Wayland / X11 窗口形状 |
 | `app/viewer/viewer.*`、`animation.cpp`、`navigation.*` | Core 请求/事件所有者、切图、错误恢复、动画帧上传、后台目录枚举与自然排序 |
@@ -45,6 +45,8 @@ flowchart TD
 | `core/src/codecs/`、`platform/` | 内容探测、各格式解码/栅格化、文件版本与单调时钟 |
 
 Renderer 不依赖 Core、Viewer、设置或菜单；Core 不包含应用层和图形库类型。Viewer 负责把 Core 像素转换为 renderer 上传描述。公共声明分别以 [core.h](../core/include/liltview/core.h) 和 [renderer.hpp](../app/renderer/renderer.hpp) 为准。
+
+`Viewer::image_details()` 返回与可见场景同源的 owned 值快照，不做文件 I/O。请求目标与已显示路径分别保存，原始行带揭示、失败回退、已呈现相机和 GIF END 元数据都按对应身份更新。`image_information` 只格式化 / 绘制，未知颜色和 KNOWN 标记不被猜测补齐。输入由 `ShortcutContext` 统一屏蔽文本、popup 和原生文件选择，Esc 先关闭面板再退出全屏。
 
 `core/src/engine/cache.c` 提供完整静态结果的可选内存 LRU，按文件版本和 target 匹配，复用不可变像素引用。缓存命中仍核验已打开文件 / 路径，取消与成功提交共用终结锁；未完成捕获不入缓存。PREFETCH 在同一个 worker 低优先级真实解码，只发布 INFO 和终结；前景受理后协作取消活动预读。缓存预算不足时 DISPLAY 旁路，预读明确失败，详见 [Core 契约](CORE_CONTRACTS.md)。
 
@@ -168,6 +170,7 @@ ctest --preset dev -L large
 | 七类格式、四类静态区域 codec、NATIVE 行带 | 已实现（格式子集） | 扫描中 refinement、更多格式与高位深输出 |
 | GIF 会话、双纹理与时钟播放 | 已实现（普通尺寸） | APNG / 动画 WebP、seek 及播放控制 |
 | 后台目录导航、边缘按钮、序号 | 已实现 | 仅当前支持后缀及显式目标；首尾不循环，重新打开刷新目录 |
+| 图片信息面板、可见场景值快照 | 已实现 | 尚无相机 EXIF / ICC 元数据解析；已提供文件 / 输出 / 方向 / 动画与实时缩放信息 |
 | 应用 tile/LOD、后台缓存恢复、GPU LRU/PBO | 已实现 | 首次生成后台化、冷 LOD 批处理、统一资源总账 |
 | Core 内容缓存、PREFETCH | 已实现（静态完整结果） | 应用相邻预读接入另行验收；磁盘内容缓存、动画会话缓存未实现 |
 | 诊断与真实图基准 | 部分实现 | 全链路统一分段、可重复冷/热基线、持续回归 |

@@ -152,10 +152,11 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
     completed_plays_ = 0;
     visible_pending_ = false;
     viewport_.reset();
-    pending_path_ = absolute;
-    filename_     = absolute.filename().string();
-    error_        = 0;
-    loading_      = true;
+    pending_path_  = absolute;
+    selected_path_ = absolute;
+    filename_      = absolute.filename().string();
+    error_         = 0;
+    loading_       = true;
 }
 
 void Viewer::discard_pending()
@@ -163,6 +164,8 @@ void Viewer::discard_pending()
     renderer_.destroy_image(pending_);
     pending_      = {};
     pending_info_ = {};
+    pending_pixel_format_.reset();
+    pending_color_space_ = LV_COLOR_UNKNOWN;
     lv_event_release(pending_anchor_);
     pending_anchor_  = nullptr;
     pending_content_ = false;
@@ -227,6 +230,10 @@ void Viewer::accept_completed()
     scene_id_         = pending_scene_id_;
     pending_scene_id_ = 0;
     info_             = pending_info_;
+    displayed_path_   = selected_path_;
+    pixel_format_     = pending_pixel_format_;
+    color_space_      = pending_color_space_;
+    displayed_animation_.reset();
     lv_event_release(preview_anchor_);
     preview_anchor_ = pending_anchor_;
     pending_anchor_ = nullptr;
@@ -257,8 +264,11 @@ void Viewer::consume(const lv_event_view &view)
     }
     if (current && view.type == LV_EVENT_REGION_READY)
     {
+        const auto &pixels = *lv_pixels_get_view(view.as.region.pixels);
         pending_scene_.upload(view.as.region);
-        pending_content_ = true;
+        pending_pixel_format_ = pixels.format;
+        pending_color_space_  = pixels.color_space;
+        pending_content_      = true;
     }
     if (view.type == LV_EVENT_COMPLETE || view.type == LV_EVENT_ERROR || view.type == LV_EVENT_CANCELLED)
     {

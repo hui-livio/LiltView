@@ -34,7 +34,7 @@ add_library(liltview_viewer STATIC viewer/viewer.cpp viewer/navigation.cpp viewe
 target_include_directories(liltview_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog ZLIB::ZLIB Threads::Threads)
 liltview_configure_cxx_target(liltview_viewer)
-add_library(liltview_ui STATIC ui/shell.cpp ui/close_timing.cpp ui/window_chrome.cpp ui/navigation_buttons.cpp)
+add_library(liltview_ui STATIC ui/shell.cpp ui/image_information.cpp ui/close_timing.cpp ui/window_chrome.cpp ui/navigation_buttons.cpp)
 add_library(LiltView::ui ALIAS liltview_ui)
 target_include_directories(liltview_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
     PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")

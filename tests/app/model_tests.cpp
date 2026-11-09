@@ -188,6 +188,34 @@ TEST_CASE("Shift arrows pan and Control up down zoom with key repeat", "[menu][s
         }
 }
 
+TEST_CASE("application shortcut routing gives blocked input and information Escape precedence over fullscreen",
+          "[menu][shortcut][image_details]")
+{
+    const auto menu = build_menu(Settings{}, Language::english, true, true, true, true, true, true, true, true);
+    for (const bool blocked : {false, true})
+        for (const bool fullscreen : {false, true})
+            for (const bool info : {false, true})
+            {
+                const ShortcutContext context{blocked, fullscreen, info};
+                CHECK(menu_action_for_input(menu, {"i"}, false, context) ==
+                      (blocked ? MenuAction::none : MenuAction::image_info));
+                CHECK(menu_action_for_input(menu, {"i"}, true, context) == MenuAction::none);
+                const auto escape = blocked ? MenuAction::none :
+                    info                    ? MenuAction::image_info :
+                    fullscreen              ? MenuAction::fullscreen :
+                                              MenuAction::none;
+                CHECK(menu_action_for_input(menu, {"Escape"}, false, context) == escape);
+                CHECK(menu_action_for_input(menu, {"Escape"}, true, context) == MenuAction::none);
+                CHECK(menu_action_for_input(menu, {"Control", "Escape"}, false, context) == MenuAction::none);
+                CHECK(menu_action_for_input(menu, {"Left"}, false, context) ==
+                      (blocked ? MenuAction::none : MenuAction::previous));
+            }
+    const auto empty = build_menu(Settings{}, Language::english, true, true);
+    CHECK(menu_action_for_input(empty, {"i"}, false, {}) == MenuAction::none);
+    CHECK(menu_action_for_input(empty, {"Escape"}, false, {false, true, true}) == MenuAction::image_info);
+    CHECK(menu_action_for_input(empty, {"Escape"}, false, {false, true, false}) == MenuAction::fullscreen);
+}
+
 TEST_CASE("key repeat does not reopen dialogs toggle fullscreen or quit", "[menu][shortcut]")
 {
     const auto menu = build_menu(Settings{}, Language::english, true, false, true, true);
@@ -214,6 +242,26 @@ TEST_CASE("directory navigation menus and shortcuts track both boundaries indepe
                 CHECK(menu_action_for_shortcut(menu, {"Control", "Left"}) == MenuAction::none);
                 CHECK(menu_action_for_shortcut(menu, {"Control", "Right"}) == MenuAction::none);
                 CHECK(menu_action_for_shortcut(menu, {"Shift", "Right"}) == MenuAction::none);
+            }
+}
+
+TEST_CASE("image information menu shares checked state and a nonrepeating I shortcut", "[menu][image_details]")
+{
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool visible : {false, true})
+            for (const bool open : {false, true})
+            {
+                const auto menu  = build_menu(Settings{}, language, true, false, false, false, false, false, open, visible);
+                const auto *item = find_menu_item(menu, 57);
+                REQUIRE(item != nullptr);
+                CHECK(item->checkable);
+                CHECK(item->checked == open);
+                CHECK(item->enabled == visible);
+                CHECK_FALSE(item->repeatable);
+                CHECK(item->shortcut == std::vector<std::string>{"i"});
+                CHECK(menu_action_for_shortcut(menu, {"i"}) == (visible ? MenuAction::image_info : MenuAction::none));
+                CHECK(menu_action_for_shortcut(menu, {"i"}, true) == MenuAction::none);
+                CHECK(menu_action_for_shortcut(menu, {"Control", "i"}) == MenuAction::none);
             }
 }
 

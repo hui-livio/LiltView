@@ -96,7 +96,7 @@ public:
     {
         initialize(options);
         Shell shell;
-        menu_ = current_menu();
+        menu_ = current_menu(shell.image_info_open());
         GlobalMenu global_menu(window_, menu_);
         run_event_loop(options, shell, global_menu);
         stop_image_work();
@@ -309,7 +309,7 @@ private:
 
             update_visual_style();
             update_window_shape();
-            synchronize_menu(global_menu);
+            synchronize_menu(global_menu, shell);
             render_frame(options, shell, global_menu.active());
         }
     }
@@ -373,6 +373,13 @@ private:
             break;
         case MenuAction::about:
             shell.show_about();
+            break;
+        case MenuAction::image_info:
+            if (viewer_->has_visible_image() || shell.image_info_open())
+            {
+                shell.toggle_image_info();
+                spdlog::debug("Image information panel: open={}", shell.image_info_open());
+            }
             break;
         case MenuAction::open:
             open_dialog();
@@ -493,13 +500,9 @@ private:
     void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell, const CloseTiming &timing)
     {
         // 文本输入和弹窗优先处理按键，避免应用快捷键抢走编辑操作。
-        if (ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
-            return;
-        if (!key.repeat && key.key == SDLK_ESCAPE && is_fullscreen())
-        {
-            dispatch_menu_action(MenuAction::fullscreen, shell);
-            return;
-        }
+        const ShortcutContext context{dialog_ || ImGui::GetIO().WantTextInput ||
+                                          ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
+                                      is_fullscreen(), shell.image_info_open()};
         // 使用菜单模型中的同一份快捷键定义；禁用菜单项不会响应按键。
         std::vector<std::string> shortcut;
         if ((key.mod & SDL_KMOD_CTRL) != 0)
@@ -514,7 +517,8 @@ private:
             shortcut.emplace_back(1, static_cast<char>('a' + key.key - SDLK_A));
         else
             shortcut.emplace_back(SDL_GetKeyName(key.key));
-        dispatch_menu_action(menu_action_for_shortcut(current_menu(), shortcut, key.repeat), shell, timing);
+        dispatch_menu_action(menu_action_for_input(current_menu(shell.image_info_open()), shortcut, key.repeat, context), shell,
+                             timing);
     }
 
     static void SDLCALL dialog_callback(void *data, const char *const *files, int)
@@ -684,22 +688,23 @@ private:
         shape_density_ = density;
     }
 
-    MenuItem current_menu() const
+    MenuItem current_menu(bool image_info_open) const
     {
         return build_menu(settings_, resolve_language(settings_.language, locale_, chinese_font_), chinese_font_, is_fullscreen(),
                           viewer_->has_image(), viewer_->can_actual_size(), viewer_->navigation().can_previous,
-                          viewer_->navigation().can_next);
+                          viewer_->navigation().can_next, image_info_open, viewer_->has_visible_image());
     }
 
     // 语言、主题、全屏或图片可用状态变化时，同步系统顶栏和窗口回退菜单。
-    void synchronize_menu(GlobalMenu &global_menu)
+    void synchronize_menu(GlobalMenu &global_menu, const Shell &shell)
     {
         if (menu_preference_ == settings_.language && menu_theme_ == settings_.theme && menu_fullscreen_ == is_fullscreen() &&
             menu_has_image_ == viewer_->has_image() && menu_can_actual_size_ == viewer_->can_actual_size() &&
             menu_can_previous_ == viewer_->navigation().can_previous && menu_can_next_ == viewer_->navigation().can_next &&
+            menu_image_info_open_ == shell.image_info_open() && menu_has_image_info_ == viewer_->has_visible_image() &&
             menu_system_titlebar_ == settings_.system_titlebar && menu_disable_rounding_ == settings_.disable_rounding)
             return;
-        menu_ = current_menu();
+        menu_ = current_menu(shell.image_info_open());
         global_menu.update(menu_);
         menu_preference_       = settings_.language;
         menu_theme_            = settings_.theme;
@@ -710,6 +715,8 @@ private:
         menu_can_actual_size_  = viewer_->can_actual_size();
         menu_can_previous_     = viewer_->navigation().can_previous;
         menu_can_next_         = viewer_->navigation().can_next;
+        menu_image_info_open_  = shell.image_info_open();
+        menu_has_image_info_   = viewer_->has_visible_image();
     }
 
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu)
@@ -899,6 +906,8 @@ private:
     bool menu_can_actual_size_ = false;
     bool menu_can_previous_    = false;
     bool menu_can_next_        = false;
+    bool menu_image_info_open_ = false;
+    bool menu_has_image_info_  = false;
     bool chinese_font_         = false;
     bool quit_                 = false;
     bool applied_dark_         = true;

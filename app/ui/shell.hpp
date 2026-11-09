@@ -1,6 +1,7 @@
 #ifndef LILTVIEW_SHELL_HPP
 #define LILTVIEW_SHELL_HPP
 
+#include "image_information.hpp"
 #include "menu/menu_model.hpp"
 #include "navigation_buttons.hpp"
 #include "renderer/renderer.hpp"
@@ -18,6 +19,20 @@ public:
     MenuAction draw(Language language, const MenuItem &menu, bool system_menu, render::Renderer &renderer, render::Image icon,
                     Viewer &viewer, const WindowChromeState &chrome);
     void dismiss_transient_menus();
+    bool image_info_open() const noexcept
+    {
+        return image_info_open_;
+    }
+    void toggle_image_info() noexcept
+    {
+        image_info_open_ = !image_info_open_;
+    }
+    bool dismiss_image_info() noexcept
+    {
+        const bool dismissed = image_info_open_;
+        image_info_open_     = false;
+        return dismissed;
+    }
     void show_about()
     {
         open_about_ = true;
@@ -33,7 +48,8 @@ private:
     void draw_about_licenses(Language language);
     void draw_about_author(Language language);
 
-    bool open_about_ = false;
+    bool open_about_      = false;
+    bool image_info_open_ = false;
     NavigationButtonGesture navigation_gesture_;
     float about_dim_ratio_ = 0;
 };

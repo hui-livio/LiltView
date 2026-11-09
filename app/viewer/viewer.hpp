@@ -5,6 +5,7 @@
 #include <liltview/core.h>
 #include <optional>
 #include <string>
+#include "image_details.hpp"
 #include "navigation.hpp"
 #include "playback.hpp"
 #include "renderer/renderer.hpp"
@@ -87,6 +88,7 @@ public:
             (display_ && info_.canvas.width == info_.source_size.width && info_.canvas.height == info_.source_size.height);
     }
     bool has_visible_image() const;
+    std::optional<ImageDetails> image_details() const;
     bool settled() const
     {
         return !loading_ && !visible_pending_ && pending_path_.empty() && (playback_.started() || request_ == 0);
@@ -156,9 +158,13 @@ private:
     lv_request_id request_    = 0;
     std::uint64_t generation_ = 0, submitted_generation_ = 0;
     std::filesystem::path pending_path_;
+    std::filesystem::path selected_path_, displayed_path_;
     std::string filename_;
     render::Image display_, pending_;
     lv_image_info info_{}, pending_info_{};
+    std::optional<lv_pixel_format> pixel_format_, pending_pixel_format_;
+    lv_color_space color_space_ = LV_COLOR_UNKNOWN, pending_color_space_ = LV_COLOR_UNKNOWN;
+    std::optional<AnimationDetails> displayed_animation_;
     bool loading_         = false;
     bool pending_content_ = false;
     bool closing_         = false;
