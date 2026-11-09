@@ -62,14 +62,24 @@ Text image_error_text(lv_error_code code)
     }
 }
 
+float status_bar_height()
+{
+    // 状态栏只容纳一行文字及上下各 4px 留白，不沿用按钮的 FramePadding。
+    return ImGui::GetTextLineHeight() + 8.0f * ImGui::GetStyle().FontScaleDpi;
+}
+
 void begin_main_window(bool system_menu)
 {
     const auto *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
+    // 原生窗口边框内铺满矩形内容，避免自绘圆角外露出清屏底色；仅影响主窗口。
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0f, 0.0f});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::Begin("LiltView###main", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus | (system_menu ? 0 : ImGuiWindowFlags_MenuBar));
+    ImGui::PopStyleVar(2);
 }
 
 MenuAction draw_menu(const MenuItem &root)
@@ -171,6 +181,8 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
 {
     if (!ImGui::BeginMenuBar())
         return MenuAction::none;
+    // 画布贴边不影响菜单文字原有的水平缩进。
+    ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);
     const auto selected = draw_menu(menu);
     ImGui::EndMenuBar();
     return selected;
@@ -178,13 +190,13 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
 
 void Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer)
 {
-    // 为状态栏预留空间；空状态内容以后可替换为图片视图。
+    // 画布填满无内边距的主窗口，仅为底部状态栏预留高度。
     const auto t = [language](Text text)
     {
         return translate(language, text);
     };
-    const float status_height = ImGui::GetFrameHeightWithSpacing();
-    ImGui::BeginChild("canvas", {0.0f, -status_height}, ImGuiChildFlags_None,
+    const float canvas_height = std::max(1.0f, ImGui::GetContentRegionAvail().y - status_bar_height());
+    ImGui::BeginChild("canvas", {0.0f, canvas_height}, ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     const auto available = ImGui::GetContentRegionAvail();
     if (viewer.has_visible_image())
@@ -231,23 +243,34 @@ void Shell::draw_status(Language language, const Viewer &viewer)
     {
         return translate(language, text);
     };
-    const float scale = ImGui::GetStyle().FontScaleDpi;
-    Text status       = Text::ready;
+    Text status = Text::ready;
     if (viewer.loading())
         status = viewer.native_loading() ? Text::loading_native : Text::loading;
     else if (viewer.detail_loading())
         status = Text::loading_detail;
     if (viewer.failed())
         status = image_error_text(viewer.error());
+    std::string text = t(status);
     if (viewer.filename().empty())
-        ImGui::TextDisabled("%s  /  %s", t(status), t(Text::no_image));
+        text += std::string("  /  ") + t(Text::no_image);
     else
-        ImGui::TextDisabled("%s  |  %s  %u x %u", t(status), viewer.filename().c_str(), viewer.source_size().width,
-                            viewer.source_size().height);
+        text += "  |  " + viewer.filename() + "  " + std::to_string(viewer.source_size().width) + " x " +
+            std::to_string(viewer.source_size().height);
     const char *language_name = language == Language::chinese ? "简体中文" : "English";
-    ImGui::SameLine(
-        std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::CalcTextSize(language_name).x - 22.0f * scale));
-    ImGui::TextDisabled("%s", language_name);
+    const auto origin         = ImGui::GetWindowPos();
+    const auto size           = ImGui::GetWindowSize();
+    const auto &style         = ImGui::GetStyle();
+    const float top           = origin.y + size.y - status_bar_height();
+    const float text_y        = top + (status_bar_height() - ImGui::GetTextLineHeight()) * 0.5f;
+    const float left          = origin.x + style.WindowPadding.x;
+    const float right         = origin.x + size.x - style.WindowPadding.x - ImGui::CalcTextSize(language_name).x;
+    const auto color          = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    auto *list                = ImGui::GetWindowDrawList();
+    // 两侧共用居中的文字基线；长文件名裁切在语言标签之前，不撑高或覆盖状态栏。
+    list->PushClipRect({left, top}, {std::max(left, right - style.ItemSpacing.x), origin.y + size.y}, true);
+    list->AddText({left, text_y}, color, text.c_str());
+    list->PopClipRect();
+    list->AddText({right, text_y}, color, language_name);
 }
 
 void Shell::draw_about(Language language, render::Renderer &renderer, render::Image icon)

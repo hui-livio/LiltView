@@ -116,7 +116,7 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.renderer_direct COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_renderer_contract> --direct)
     set_tests_properties(desktop.renderer_direct PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg formats animation_app settings logging)
+    foreach(case menu font save jpeg formats animation_app settings logging status)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"
