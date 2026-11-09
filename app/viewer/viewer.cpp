@@ -49,9 +49,10 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
 {
     lv_core_config config;
     lv_core_config_init(&config);
-    config.cpu_budget_bytes  = 384ULL * 1024 * 1024;
-    config.queue_pixel_bytes = 4ULL * 1024 * 1024;
-    config.prefetch_workers  = 0;
+    config.cpu_budget_bytes   = 384ULL * 1024 * 1024;
+    config.queue_pixel_bytes  = 4ULL * 1024 * 1024;
+    config.cache_budget_bytes = 64ULL * 1024 * 1024;
+    config.prefetch_workers   = 1;
     // 256px native tiles caused hundreds/thousands of GL images and draws at
     // intermediate zoom on real 12K–18K scenes. 512px keeps restore/draw work
     // bounded more usefully while preserving progressive row bands. Respect
@@ -67,6 +68,20 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
     try
     {
         navigation_ = std::make_unique<DirectoryNavigation>(image_extensions(core_), [] { wake_core(nullptr); });
+        prefetch_   = std::make_unique<PrefetchController>(
+            [this](const std::filesystem::path &path, std::uint64_t tag, lv_request_id &id)
+            {
+                lv_request_desc request;
+                lv_request_desc_init(&request);
+                const auto &bytes   = path.native();
+                request.path        = {LV_PATH_POSIX_BYTES, bytes.data(), bytes.size()};
+                request.kind        = LV_REQUEST_PREFETCH;
+                request.priority    = LV_PRIORITY_PREFETCH;
+                request.target.kind = LV_TARGET_NATIVE;
+                request.user_tag    = tag;
+                return lv_core_submit(core_, &request, &id);
+            },
+            [this](lv_request_id id) { lv_core_cancel(core_, id); });
     } catch (...)
     {
         lv_core_begin_shutdown(core_);
@@ -87,6 +102,7 @@ void Viewer::begin_shutdown()
     if (!core_ || closing_)
         return;
     closing_ = true;
+    prefetch_->begin_shutdown();
     lv_core_begin_shutdown(core_);
     navigation_->shutdown();
 }
@@ -104,6 +120,7 @@ void Viewer::shutdown()
     while (lv_core_join(core_, 10) == LV_TIMEOUT)
     {
     }
+    prefetch_.reset();
     discard_pending();
     scene_.clear();
     pending_scene_.clear();
@@ -141,6 +158,8 @@ void Viewer::navigate(int direction)
 void Viewer::open_selected(const std::filesystem::path &absolute)
 {
     ++generation_;
+    prefetch_->update(generation_, navigation_->snapshot());
+    prefetch_->pump(false);
     close_animation();
     if (request_)
         lv_core_cancel(core_, request_);
@@ -213,6 +232,8 @@ void Viewer::submit_pending()
     if (!try_animation_)
         pending_path_.clear();
     submitted_generation_ = generation_;
+    if (status == LV_OK)
+        prefetch_->pump(false);
     if (status != LV_OK)
     {
         pending_path_.clear();
@@ -239,8 +260,8 @@ void Viewer::accept_completed()
     pending_anchor_ = nullptr;
     loading_        = false;
     error_          = 0;
-    spdlog::info("Image displayed: {}, {}x{}, orientation={}", filename_, info_.source_size.width, info_.source_size.height,
-                 info_.orientation);
+    spdlog::info("Image displayed: {}, {}x{}, orientation={}, static_source_bytes_read={}", filename_, info_.source_size.width,
+                 info_.source_size.height, info_.orientation, last_source_bytes_read_);
 }
 
 void Viewer::consume(const lv_event_view &view)
@@ -275,7 +296,10 @@ void Viewer::consume(const lv_event_view &view)
         if (current)
         {
             if (view.type == LV_EVENT_COMPLETE && !pending_scene_.empty())
+            {
+                last_source_bytes_read_ = view.as.completion.source_bytes_read;
                 accept_completed();
+            }
             else
             {
                 error_   = view.type == LV_EVENT_ERROR ? view.as.error.code : 0;
@@ -299,7 +323,16 @@ void Viewer::pump()
     {
         consumed = true;
         std::unique_ptr<lv_event, decltype(&lv_event_release)> event(raw, lv_event_release);
-        const auto &view    = *lv_event_get_view(event.get());
+        const auto &view = *lv_event_get_view(event.get());
+        if (prefetch_->consume(view))
+        {
+            if (view.type == LV_EVENT_COMPLETE)
+                spdlog::debug("Neighbor prefetch completed: request={}, source_bytes_read={}", view.request_id,
+                              view.as.completion.source_bytes_read);
+            else if (view.type == LV_EVENT_ERROR)
+                spdlog::debug("Neighbor prefetch failed: request={}, error={}", view.request_id, view.as.error.code);
+            continue; // RAII returns background metadata and terminals without touching the image.
+        }
         const bool terminal = view.request_id == request_ &&
             (view.type == LV_EVENT_COMPLETE || view.type == LV_EVENT_ERROR || view.type == LV_EVENT_CANCELLED);
         try
@@ -328,6 +361,14 @@ void Viewer::pump()
         wake_core(nullptr); // Continue draining next frame even without another queue edge.
     submit_pending();
     advance_animation();
+    prefetch_->update(generation_, navigation_->snapshot());
+    prefetch_->pump(!request_ && !loading_ && !visible_pending_ && !failed_restore_ && has_visible_image());
+}
+
+std::uint64_t Viewer::content_cache_bytes() const
+{
+    lv_core_stats stats{};
+    return core_ && lv_core_get_stats(core_, &stats) == LV_OK ? stats.cache_bytes : 0;
 }
 
 void Viewer::draw(render::Point min, render::Point max, float density, bool interactive)

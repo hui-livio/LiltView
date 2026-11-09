@@ -161,6 +161,40 @@ def test_navigation(executable, folder):
                 app.wait(timeout=5)
 
 
+def test_prefetch(executable, folder):
+    sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
+    for name in ("1.bmp", "2.bmp", "3.bmp"):
+        shutil.copy2(sample, folder / name)
+    (folder / "settings.yaml").write_text("language: en-US\nlog_level: debug\n")
+    log = folder / "prefetch.log"
+    with log.open("w") as output:
+        app = subprocess.Popen([str(executable), "--config-dir", str(folder), str(folder / "2.bmp")],
+                               stdout=output, stderr=subprocess.STDOUT)
+        try:
+            service = find_service(app.pid)
+
+            def wait_for(predicate):
+                deadline = time.monotonic() + 10
+                while not predicate():
+                    assert app.poll() is None, log.read_text()
+                    assert time.monotonic() < deadline, log.read_text()
+                    time.sleep(0.02)
+
+            wait_for(lambda: log.read_text().count("Neighbor prefetch completed:") >= 2)
+            bus_call(service, "Event", "22", "clicked", "<0>", "0")
+            wait_for(lambda: re.search(r"Image displayed: 3\.bmp, .*static_source_bytes_read=0", log.read_text()))
+            bus_call(service, "Event", "21", "clicked", "<0>", "0")
+            bus_call(service, "Event", "21", "clicked", "<0>", "0")
+            wait_for(lambda: re.search(r"Image displayed: 1\.bmp, .*static_source_bytes_read=0", log.read_text()))
+            bus_call(service, "Event", "12", "clicked", "<0>", "0")
+            assert app.wait(timeout=10) == 0, log.read_text()
+            assert "[critical]" not in log.read_text() and "[error]" not in log.read_text(), log.read_text()
+        finally:
+            if app.poll() is None:
+                app.terminate()
+                app.wait(timeout=5)
+
+
 def test_info(executable, folder):
     sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
     first = folder / ("1-中文-%s-" + "x" * 100 + ".bmp")
@@ -596,7 +630,7 @@ def main():
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
          "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
          "animation_app": test_animation_app, "status": test_status, "close": test_close, "chrome": test_chrome,
-         "navigation": test_navigation, "info": test_info}[case](executable, Path(temporary))
+         "navigation": test_navigation, "info": test_info, "prefetch": test_prefetch}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 

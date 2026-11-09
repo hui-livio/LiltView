@@ -8,6 +8,7 @@
 #include "image_details.hpp"
 #include "navigation.hpp"
 #include "playback.hpp"
+#include "prefetch.hpp"
 #include "renderer/renderer.hpp"
 #include "tiles.hpp"
 
@@ -89,6 +90,20 @@ public:
     }
     bool has_visible_image() const;
     std::optional<ImageDetails> image_details() const;
+    bool prefetch_pending() const
+    {
+        return prefetch_ && prefetch_->pending();
+    }
+    PrefetchController::Stats prefetch_stats() const
+    {
+        return prefetch_ ? prefetch_->stats() : PrefetchController::Stats{};
+    }
+    // Last successful static DISPLAY only; opening also probes for GIF by content.
+    std::uint64_t last_source_bytes_read() const
+    {
+        return last_source_bytes_read_;
+    }
+    std::uint64_t content_cache_bytes() const;
     bool settled() const
     {
         return !loading_ && !visible_pending_ && pending_path_.empty() && (playback_.started() || request_ == 0);
@@ -155,7 +170,9 @@ private:
 
     lv_core *core_ = nullptr;
     std::unique_ptr<DirectoryNavigation> navigation_;
-    lv_request_id request_    = 0;
+    std::unique_ptr<PrefetchController> prefetch_;
+    std::uint64_t last_source_bytes_read_ = 0;
+    lv_request_id request_                = 0;
     std::uint64_t generation_ = 0, submitted_generation_ = 0;
     std::filesystem::path pending_path_;
     std::filesystem::path selected_path_, displayed_path_;

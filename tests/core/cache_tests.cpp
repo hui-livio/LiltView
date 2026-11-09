@@ -16,6 +16,7 @@
 
 #include <array>
 #include <map>
+#include <memory>
 #include <set>
 #include "region_support.hpp"
 
@@ -299,6 +300,66 @@ TEST_CASE("cache validates modified replaced deleted and aliased source versions
     CHECK(missing.terminal == LV_EVENT_ERROR);
     CHECK(missing.error.code == LV_ERROR_IO);
     CHECK(missing.coverage.empty());
+}
+
+TEST_CASE("fresh publication rechecks source after queue backpressure before committing content", "[cache][source][publish]")
+{
+    for (const bool vector : {false, true})
+    {
+        Files files;
+        const auto path =
+            vector ? files.write("publishing.svg", std::vector<unsigned char>{}) : image(files, "publishing.bmp", 96, 80);
+        if (vector)
+        {
+            std::ofstream file(path);
+            file << "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='80'>"
+                    "<rect width='96' height='80' fill='red'/></svg>";
+        }
+        CachedEngine engine;
+        auto desc                 = engine.descriptor(path);
+        desc.target.kind          = LV_TARGET_FIT;
+        desc.target.as.fit_bounds = {96, 80};
+        const auto id             = engine.request(desc);
+        std::unique_ptr<lv_pixels, decltype(&lv_pixels_release)> held(nullptr, lv_pixels_release);
+        std::vector<std::uint8_t> original;
+        {
+            Event info(engine.next());
+            REQUIRE(info.view().type == LV_EVENT_IMAGE_INFO);
+            Event tile(engine.next());
+            REQUIRE(tile.view().type == LV_EVENT_REGION_READY);
+            const auto *pixels = lv_pixels_get_view(tile.view().as.region.pixels);
+            const auto alpha   = pixels->data[3];
+            lv_pixels_retain(tile.view().as.region.pixels);
+            held.reset(tile.view().as.region.pixels);
+            original.assign(pixels->data, pixels->data + pixels->byte_count);
+            {
+                // Decode and the original version check have finished. The
+                // remaining tiles cannot all fit in this one-tile queue.
+                std::ofstream changed(path, std::ios::binary | std::ios::app);
+                changed << '\n';
+                REQUIRE(changed.good());
+            }
+            const auto changed = receive(engine, id);
+            CHECK(changed.terminal == LV_EVENT_ERROR);
+            CHECK(changed.error.code == LV_ERROR_SOURCE_CHANGED);
+            CHECK(changed.error.has_partial_output == 1);
+            CHECK(engine.stats().cache_bytes == 0);
+            CHECK(pixels->data[3] == alpha);
+        }
+        lv_event *extra = nullptr;
+        CHECK(lv_core_poll_event(engine.core, &extra) == LV_EMPTY);
+        CHECK(extra == nullptr);
+        if (vector)
+            std::ofstream(path) << "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='80'>"
+                                   "<rect width='96' height='80' fill='blue'/></svg>";
+        else
+            checkerboard(path, 96, 80, 3);
+        const auto retried = receive(engine, engine.request(desc));
+        REQUIRE(retried.terminal == LV_EVENT_COMPLETE);
+        CHECK(retried.completion.source_bytes_read > 0);
+        const auto *pixels = lv_pixels_get_view(held.get());
+        CHECK(std::vector<std::uint8_t>(pixels->data, pixels->data + pixels->byte_count) == original);
+    }
 }
 
 TEST_CASE("content LRU accounts real allocations and evicts the least recently used result", "[cache][budget]")

@@ -326,19 +326,30 @@ bool lv_frame_finish(lv_frame *f, lv_error_info *error)
     f->request->reservation  = f->tile_reserve;
     mtx_unlock(&f->core->mutex);
     if (!f->tiles)
-        return publish_slices(f, error);
-    for (size_t i = f->next_publish; i < f->tile_count; ++i)
     {
-        lv_frame_tile *tile = &f->tiles[i];
-        // Success moves the sole reference into the event. Never write it again.
-        // Failure leaves ownership here for lv_frame_release, including cancel.
-        if (!lv_publish_tile(f->core, f->request, tile->pixels, tile->rect, tile->id))
-        {
-            if (!lv_stopped(f->core, f->request))
-                error->code = LV_ERROR_OUT_OF_MEMORY;
+        if (!publish_slices(f, error))
             return false;
+    }
+    else
+        for (size_t i = f->next_publish; i < f->tile_count; ++i)
+        {
+            lv_frame_tile *tile = &f->tiles[i];
+            // Success moves the sole reference into the event. Never write it again.
+            // Failure leaves ownership here for lv_frame_release, including cancel.
+            if (!lv_publish_tile(f->core, f->request, tile->pixels, tile->rect, tile->id))
+            {
+                if (!lv_stopped(f->core, f->request))
+                    error->code = LV_ERROR_OUT_OF_MEMORY;
+                return false;
+            }
+            tile->pixels = nullptr;
         }
-        tile->pixels = nullptr;
+    // Queue backpressure can outlive the initial version check. Never commit
+    // cached content or a complete animation candidate from a changed source.
+    if (!lv_file_unchanged(f->input->file, f->request->path, &f->input->version))
+    {
+        error->code = LV_ERROR_SOURCE_CHANGED;
+        return false;
     }
     return true;
 }

@@ -37,6 +37,7 @@ flowchart TD
 | `app/settings/`、`app/i18n/`、`app/logging/` | YAML 持久化、中英翻译、spdlog 与 C 回调适配 |
 | `app/platform/` | SDL render host、字体、全局菜单、Wayland / X11 窗口形状 |
 | `app/viewer/viewer.*`、`animation.cpp`、`navigation.*` | Core 请求/事件所有者、切图、错误恢复、动画帧上传、后台目录枚举与自然排序 |
+| `app/viewer/prefetch.*` | 两邻居低优先级调度、取消后退休 ID、忙闲边沿有界重试、后台事件隔离 |
 | `app/viewer/viewport.*`、`playback.*` | 坐标与 EXIF 变换、缩放平移、单调时钟播放策略 |
 | `app/viewer/tiles.*`、`tile_reader.*` | 原始场景、一次生成 LOD、匿名压缩缓存、RAM/GPU 驻留与恢复 |
 | `app/renderer/` / `LiltView::renderer` | 后端无关纹理句柄、上传、能力/预算、帧提交与 present |
@@ -119,6 +120,7 @@ Renderer 公共接口只接受单平面 RGBA8、straight alpha、局部左上原
 | 资源域 | 当前应用默认 / 限额 | 含义与缺口 |
 | --- | --- | --- |
 | Core CPU | 384 MiB | 像素、请求、事件、可追踪工作集；第三方 allowance 不构成 RSS 硬限制 |
+| Core 内容缓存 | 64 MiB，包含在 CPU 总额内 | 按源版本 / target 保存完整静态结果；过大旁路，不与场景磁盘缓存混淆 |
 | Core 像素队列 | 4 MiB，包含在 CPU 总额内 | poll 归还队列额度；外部保留引用继续占实际分配 |
 | Core tile | 应用 512px；公共默认 256px | 按设备最大纹理边长向下收缩 |
 | Renderer images | 128 MiB | 包含场景/动画图片纹理；不等于系统显存硬上限 |
@@ -172,7 +174,7 @@ ctest --preset dev -L large
 | 后台目录导航、边缘按钮、序号 | 已实现 | 仅当前支持后缀及显式目标；首尾不循环，重新打开刷新目录 |
 | 图片信息面板、可见场景值快照 | 已实现 | 尚无相机 EXIF / ICC 元数据解析；已提供文件 / 输出 / 方向 / 动画与实时缩放信息 |
 | 应用 tile/LOD、后台缓存恢复、GPU LRU/PBO | 已实现 | 首次生成后台化、冷 LOD 批处理、统一资源总账 |
-| Core 内容缓存、PREFETCH | 已实现（静态完整结果） | 应用相邻预读接入另行验收；磁盘内容缓存、动画会话缓存未实现 |
+| Core 内容缓存、PREFETCH 与静态邻居接入 | 已实现（静态完整结果） | GIF 会话预热另行验证；磁盘内容缓存、通用动画内容缓存未实现 |
 | 诊断与真实图基准 | 部分实现 | 全链路统一分段、可重复冷/热基线、持续回归 |
 | 原始 RGB/YUV/Bayer、高精度/HDR、多图选择 | 待实现 | 输入/输出/颜色/身份契约及预算扩展 |
 | Windows / D3D11 | 待实现 | 平台文件/线程、Win32 窗口与渲染后端及实机验收 |

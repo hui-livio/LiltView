@@ -128,6 +128,7 @@ Core 先预留可推进工作集，再实际分配；共享 backing 只计一次
 流式 NATIVE 的 canvas 可超过完整 RGBA 256 MiB：区域 codec 只保留活动行带，但索引和实际工作集仍须准入。FIT / REGION 单次输出不超过 `min(large_pixel_bytes, 256 MiB)`；progressive JPEG / Adam7 PNG 仍受系数 / 合并工作集限制，其他格式限制见 [格式表](IMAGE_FORMATS.md)。
 
 内容 key 为已打开文件的可观测版本与 target 有效成员，排除 request kind / priority / user_tag 和 union 填充字节。命中仍打开文件并在背压后核验 fd / path 版本，以新的请求身份重放；`source_bytes_read=0` 表示未读取解码源字节，不代表没有 open / stat。
+首次解码也在所有 tile 发布结束后重新核验版本，覆盖 tiled 与共享 backing 输出；队列背压期间发生变更不能以 COMPLETE 提交缓存或动画候选，已借像素继续有效。
 
 缓存仅在 COMPLETE 与 cancel 同锁裁决后提交完整结果；取消、解码错误或源变更丢弃未完成捕获。LRU 最多 64 条，源身份槽不足先驱逐；准入先清理可回收缓存与空闲池。DISPLAY 过大或流式捕获挤占工作集时旁路 / 放弃捕获，PREFETCH 则明确失败，不能让唯一 worker 等待自身引用。重放条目暂时 pin，外借像素在条目淘汰或关闭后仍有效。
 

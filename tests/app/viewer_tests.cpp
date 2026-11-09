@@ -31,6 +31,7 @@ public:
         Size size;
         std::uint64_t bytes;
         liltview::render::ImageDesc::Magnification magnification;
+        std::array<std::uint8_t, 4> first_pixel{};
     };
     std::unordered_map<std::uint32_t, Texture> textures;
     std::uint32_t next         = 1;
@@ -78,6 +79,8 @@ public:
             throw liltview::render::Error(liltview::render::ErrorCode::backend_failure, "Injected upload failure");
         }
         liltview::render::validate_upload(textures.at(image.slot).size, rect, pixels);
+        if (rect.x == 0 && rect.y == 0)
+            std::copy_n(pixels.data, 4, textures.at(image.slot).first_pixel.begin());
         ++uploads;
         if (upload_delay_ms)
             SDL_Delay(upload_delay_ms);
@@ -132,10 +135,268 @@ struct EventLoop
             SDL_WaitEventTimeout(&event, 10);
         } while (true);
     }
+    void settle_prefetch(liltview::Viewer &viewer)
+    {
+        settle(viewer);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do
+        {
+            viewer.pump();
+            if (!viewer.navigation().scanning && !viewer.prefetch_pending())
+                return;
+            if (std::chrono::steady_clock::now() >= deadline)
+                throw std::runtime_error("Viewer neighbor prefetch did not settle");
+            SDL_Event event;
+            SDL_WaitEventTimeout(&event, 10);
+        } while (true);
+    }
 };
 
 const std::filesystem::path sample = std::filesystem::path(LILTVIEW_JPEG_FIXTURES) / "testorig.jpg";
 } // namespace
+
+TEST_CASE("viewer prefetches both neighbors without GPU uploads and navigation reuses core content", "[viewer][prefetch]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-prefetch-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    for (const auto *name : {"1.png", "2.png", "3.png"})
+        liltview::test::checkerboard(folder / name, 31, 23, 7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "2.png");
+    loop.settle(viewer);
+    const auto uploads  = renderer.uploads;
+    const auto creates  = renderer.creates;
+    const auto textures = renderer.textures.size();
+    loop.settle_prefetch(viewer);
+    CHECK(viewer.prefetch_stats().submitted == 2);
+    CHECK(viewer.prefetch_stats().completed == 2);
+    CHECK(viewer.prefetch_stats().active == 0);
+    CHECK(renderer.uploads == uploads);
+    CHECK(renderer.creates == creates);
+    CHECK(renderer.textures.size() == textures);
+    CHECK(viewer.content_cache_bytes() > 0);
+    CHECK(viewer.content_cache_bytes() <= 64 * 1024 * 1024);
+    for (unsigned i = 0; i < 10; ++i)
+        viewer.pump();
+    CHECK(viewer.prefetch_stats().submitted == 2);
+    viewer.navigate(1);
+    loop.settle(viewer);
+    CHECK(viewer.filename() == "3.png");
+    CHECK(viewer.last_source_bytes_read() == 0);
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == folder / "3.png");
+    viewer.navigate(-1);
+    viewer.navigate(-1);
+    loop.settle(viewer);
+    CHECK(viewer.filename() == "1.png");
+    CHECK(viewer.last_source_bytes_read() == 0);
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("viewer can shut down accepted neighbor prefetch without polling its terminal", "[viewer][prefetch][shutdown]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-prefetch-close-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    liltview::test::checkerboard(folder / "1.png", 31, 23, 7);
+    liltview::test::checkerboard(folder / "2.png", 4096, 2048, 7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "1.png");
+    loop.settle(viewer);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!viewer.prefetch_stats().active)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        viewer.pump();
+        SDL_Delay(1);
+    }
+    viewer.begin_shutdown();
+    REQUIRE(viewer.join_shutdown(5000));
+    viewer.shutdown();
+    CHECK_FALSE(viewer.prefetch_pending());
+    CHECK(viewer.prefetch_stats().active == 0);
+    CHECK(viewer.content_cache_bytes() == 0);
+    CHECK(renderer.textures.empty());
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("cross directory generation churn isolates retired neighbor results from the final image", "[viewer][prefetch]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-prefetch-generations-" + std::to_string(SDL_GetPerformanceCounter()));
+    for (const auto *name : {"A", "B", "C"})
+    {
+        std::filesystem::create_directories(folder / name);
+        liltview::test::checkerboard(folder / name / "1.png", 31, 23, 7);
+        liltview::test::checkerboard(folder / name / "2.png", 1024, 1024, 7);
+    }
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "A" / "1.png");
+    loop.settle(viewer);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!viewer.prefetch_stats().active)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        viewer.pump();
+        SDL_Delay(1);
+    }
+    const auto old_submitted = viewer.prefetch_stats().submitted;
+    REQUIRE(old_submitted > 0);
+    viewer.open(folder / "B" / "1.png");
+    viewer.pump();
+    viewer.open(folder / "C" / "1.png");
+    loop.settle_prefetch(viewer);
+    CHECK_FALSE(viewer.failed());
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == folder / "C" / "1.png");
+    CHECK(viewer.navigation().selected_path == folder / "C" / "1.png");
+    CHECK(viewer.prefetch_stats().active <= 2);
+    CHECK(viewer.prefetch_stats().submitted > old_submitted);
+    viewer.navigate(1);
+    loop.settle(viewer);
+    CHECK(viewer.last_source_bytes_read() == 0);
+    CHECK(viewer.image_details()->path == folder / "C" / "2.png");
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("same size neighbor rewrites display new pixels instead of cached content", "[viewer][prefetch][source]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-prefetch-pixels-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    liltview::test::checkerboard(folder / "1.bmp", 31, 23, 7);
+    liltview::test::checkerboard(folder / "2.bmp", 31, 23, 7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "1.bmp");
+    loop.settle_prefetch(viewer);
+    REQUIRE(renderer.textures.size() == 1);
+    CHECK(renderer.textures.begin()->second.first_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+    {
+        // The 8-bit fixture's first palette entry is BGRA at byte 54. Keep dimensions/file length.
+        std::fstream file(folder / "2.bmp", std::ios::in | std::ios::out | std::ios::binary);
+        REQUIRE(file.good());
+        file.seekp(54);
+        const std::array<char, 4> blue{static_cast<char>(255), 0, 0, 0};
+        file.write(blue.data(), static_cast<std::streamsize>(blue.size()));
+        file.flush();
+        REQUIRE(file.good());
+    }
+    viewer.navigate(1);
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    CHECK(viewer.last_source_bytes_read() > 0);
+    REQUIRE(renderer.textures.size() == 1);
+    CHECK(renderer.textures.begin()->second.first_pixel == std::array<std::uint8_t, 4>{0, 0, 255, 255});
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("viewer neighbor boundaries and failed background reads preserve the current image", "[viewer][prefetch]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-prefetch-errors-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    liltview::test::checkerboard(folder / "1.png", 31, 23, 7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "1.png");
+    loop.settle_prefetch(viewer);
+    CHECK(viewer.prefetch_stats().submitted == 0);
+    std::ofstream(folder / "2.png") << "not an encoded image";
+    viewer.open(folder / "1.png");
+    loop.settle_prefetch(viewer);
+    CHECK(viewer.prefetch_stats().submitted == 1);
+    CHECK(viewer.prefetch_stats().failed == 1);
+    CHECK_FALSE(viewer.failed());
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == folder / "1.png");
+    for (unsigned i = 0; i < 10; ++i)
+        viewer.pump();
+    CHECK(viewer.prefetch_stats().submitted == 1);
+    CHECK(viewer.prefetch_stats().failed == 1);
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("viewer revalidates a prefetched neighbor before displaying changed or deleted source", "[viewer][prefetch][source]")
+{
+    EventLoop loop;
+    for (const bool erase : {false, true})
+    {
+        TestRenderer renderer;
+        const auto folder =
+            std::filesystem::temp_directory_path() / ("liltview-prefetch-changed-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::create_directories(folder);
+        liltview::test::checkerboard(folder / "1.png", 31, 23, 7);
+        liltview::test::checkerboard(folder / "2.png", 31, 23, 7);
+        liltview::Viewer viewer(renderer);
+        viewer.open(folder / "1.png");
+        loop.settle_prefetch(viewer);
+        REQUIRE(viewer.prefetch_stats().completed == 1);
+        if (erase)
+            std::filesystem::remove(folder / "2.png");
+        else
+            liltview::test::checkerboard(folder / "2.png", 61, 47, 7);
+        viewer.navigate(1);
+        loop.settle(viewer);
+        if (erase)
+        {
+            CHECK(viewer.error() == LV_ERROR_IO);
+            CHECK(viewer.image_details()->path == folder / "1.png");
+        }
+        else
+        {
+            CHECK_FALSE(viewer.failed());
+            CHECK(viewer.last_source_bytes_read() > 0);
+            CHECK(viewer.source_size().width == 61);
+            CHECK(viewer.source_size().height == 47);
+        }
+        viewer.shutdown();
+        std::filesystem::remove_all(folder);
+    }
+}
+
+TEST_CASE("background neighbor events never replace GIF frame identity or foreground errors", "[viewer][prefetch][animation]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-prefetch-gif-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    std::filesystem::copy_file(std::filesystem::path(LILTVIEW_IMAGE_FIXTURES) / "red-blue-loop.gif", folder / "1.gif");
+    std::ofstream(folder / "2.png") << "not an encoded image";
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "1.gif");
+    loop.settle(viewer);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool later_frame    = false;
+    while (!later_frame || !viewer.prefetch_stats().failed)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        viewer.pump();
+        later_frame = later_frame || viewer.displayed_frame_index() == 1;
+        CHECK_FALSE(viewer.failed());
+        REQUIRE(viewer.image_details());
+        CHECK(viewer.image_details()->image.format == LV_FORMAT_GIF);
+        CHECK(viewer.image_details()->path == folder / "1.gif");
+        SDL_Delay(1);
+    }
+    CHECK(viewer.prefetch_stats().submitted == 1);
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
 
 TEST_CASE("viewer browses a naturally sorted directory and can leave a deleted or failed target", "[viewer][navigation]")
 {

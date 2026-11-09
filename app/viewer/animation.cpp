@@ -154,8 +154,9 @@ void Viewer::advance_animation()
         return;
     }
     submitted_generation_ = generation_;
-    work_                 = reset_animation_ ? Work::animation_reset : Work::animation_next;
-    reset_animation_      = false;
+    prefetch_->pump(false);
+    work_            = reset_animation_ ? Work::animation_reset : Work::animation_next;
+    reset_animation_ = false;
 }
 
 void Viewer::suspend_animation(bool suspended)

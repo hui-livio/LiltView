@@ -54,7 +54,7 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
         catch_discover_tests(liltview_app_tests TEST_PREFIX "app." PROPERTIES TIMEOUT 30)
-        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/navigation_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
+        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/navigation_tests.cpp app/prefetch_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
         target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff Catch2::Catch2WithMain)
         target_compile_definitions(liltview_viewer_tests PRIVATE
             LILTVIEW_IMAGE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures"
@@ -116,7 +116,7 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.renderer_direct COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_renderer_contract> --direct)
     set_tests_properties(desktop.renderer_direct PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg formats animation_app settings logging status close chrome navigation info)
+    foreach(case menu font save jpeg formats animation_app settings logging status close chrome navigation info prefetch)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"
