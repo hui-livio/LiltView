@@ -48,6 +48,9 @@ liltview_configure_cxx_target(liltview_logging)
 
 add_library(liltview_fonts STATIC platform/fonts.cpp)
 target_include_directories(liltview_fonts PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+file(RELATIVE_PATH liltview_installed_font_dir "${CMAKE_INSTALL_FULL_BINDIR}"
+    "${CMAKE_INSTALL_FULL_DATADIR}/liltview/fonts")
+target_compile_definitions(liltview_fonts PRIVATE LILTVIEW_INSTALLED_FONT_DIR="${liltview_installed_font_dir}")
 target_link_libraries(liltview_fonts PUBLIC LiltView::imgui PRIVATE SDL3::SDL3-static)
 liltview_configure_cxx_target(liltview_fonts)
 add_executable(liltview main.cpp application.cpp)
@@ -89,8 +92,8 @@ else()
 endif()
 liltview_configure_cxx_target(liltview)
 
-# Ship the original font and its license alongside the executable; no subset or
-# build-time font conversion. Resolve it relative to SDL_GetBasePath at runtime.
+# Build-tree resources stay beside the executable. Installed architecture-neutral
+# resources live in share/liltview; both paths resolve relative to the executable.
 set(font_dir "${PROJECT_SOURCE_DIR}/assets/fonts")
 add_custom_command(TARGET liltview POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:liltview>/assets/fonts"
@@ -105,7 +108,7 @@ set_property(TARGET liltview APPEND PROPERTY LINK_DEPENDS
 
 install(TARGETS liltview RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf" "${font_dir}/LICENSE.HarmonyOS-Sans.txt" "${font_dir}/source.json"
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/assets/fonts")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/liltview/fonts")
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/NOTICE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/SDL/LICENSE.txt"

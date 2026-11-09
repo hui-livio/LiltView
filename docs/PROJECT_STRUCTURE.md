@@ -49,7 +49,7 @@ LiltView/
 │   ├── contract/                 # 无第三方依赖的语言 / ABI 检查
 │   └── core/config_tests.cpp     # Catch2 配置重置与初始化测试
 ├── benchmarks/README.md          # 后续性能测量
-├── packaging/README.md           # 后续 Arch / Windows 打包
+├── packaging/README.md           # Arch 打包部署；Windows 安装器待实现
 ├── assets/icons/                 # 已选定的彩色图标
 ├── assets/fonts/                 # 原始鸿蒙字体、许可及来源校验
 ├── docs/                         # 产品、接口和工程设计
@@ -207,7 +207,7 @@ cmake --build --preset dev
 
 在 KDE Plasma 上优先导出到系统顶栏，其他桌面回退到窗口内部，窗口标题栏仍由桌面管理。打开：CLI 文件参数、菜单、Ctrl+O 或拖放七类已支持图片。快捷键：F11 切换全屏，Esc 退出全屏 / 关闭关于，Ctrl+Q 退出。静止窗口通过 SDL 事件等待降低重绘频率。配置为 SDL 用户目录中的 `settings.yaml`，可用 --config-dir 隔离；不读取或迁移 INI。[命令行及配置契约](CONFIGURATION.md)。
 
-默认字体为原始 HarmonyOS Sans SC Regular，位于 `assets/fonts/`，构建时复制到可执行文件相邻资源目录。详情与独立许可见 [字体说明](../assets/fonts/README.md)。“关于”提供字体署名。缺失随包字体时尝试系统字体，无中文字体时使用英文。
+默认字体为原始 HarmonyOS Sans SC Regular，位于 `assets/fonts/`，构建时复制到可执行文件相邻资源目录，安装到 `<prefix>/share/liltview/fonts/`，按相对布局支持移动安装前缀。详情与独立许可见 [字体说明](../assets/fonts/README.md)。“关于”提供字体署名。缺失随包字体时尝试系统字体，无中文字体时使用英文。
 
 ```bash
 cmake --preset app-release
@@ -255,3 +255,5 @@ python3 scripts/register_desktop.py
 函数职责已集中审查，UI 区域、D-Bus 方法和生命周期、平台字体、菜单构造、参数解析和维护脚本均作了拆分；详见 [可读性审查记录](CODE_REVIEW-2026-11-07.md)。About 新增作者 hui-livio、邮箱 yuanfeng1897@gmail.com 和可点击的项目地址。
 
 大图模块包括 `core/src/codecs/raster.c`（行采样）、`app/viewer/viewport.*`（双精度相机）、`tiles.*`（局部纹理所有权）、`details.cpp`（区域请求与版本验证）。`liltview_pixel_ownership` 比较真实指针及引用寿命；`liltview_make_checkerboard` 有界生成样本；可选的 `LILTVIEW_BUILD_LARGE_IMAGE_TESTS=ON` 增加 16K / 32K 验收，详见[实现与复现](LARGE_IMAGES.md)。
+
+Arch 打包使用 `scripts/package_arch.py` 和 `packaging/arch/PKGBUILD.in`，从工作区生成带真实 SHA-256 的完整源码包与 `.SRCINFO`，支持 makepkg / pacman 或 paru 本地构建安装，详见[部署说明](../packaging/arch/README.md)。

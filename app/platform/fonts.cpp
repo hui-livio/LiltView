@@ -54,15 +54,19 @@ SystemFont bundled_font()
         const std::string_view base_utf8(base);
         const auto directory =
             std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(base_utf8.data()), base_utf8.size()));
-        const auto font = directory / "assets/fonts/HarmonyOS_Sans_SC_Regular.ttf";
-        std::error_code error;
-        if (std::filesystem::is_regular_file(font, error))
+        const std::array directories{directory / "assets/fonts", directory / LILTVIEW_INSTALLED_FONT_DIR};
+        for (const auto &candidate : directories)
         {
-            const auto utf8 = font.u8string();
-            result.path.assign(reinterpret_cast<const char *>(utf8.data()), utf8.size());
-            result.chinese = true;
-            result.bundled = true;
-            return result;
+            const auto font = candidate / "HarmonyOS_Sans_SC_Regular.ttf";
+            std::error_code error;
+            if (std::filesystem::is_regular_file(font, error))
+            {
+                const auto utf8 = font.u8string();
+                result.path.assign(reinterpret_cast<const char *>(utf8.data()), utf8.size());
+                result.chinese = true;
+                result.bundled = true;
+                return result;
+            }
         }
     }
     return result;

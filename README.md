@@ -46,7 +46,7 @@ python3 scripts/register_desktop.py
 
 主题在“设置 → 外观”选择，默认跟随系统并响应系统主题变化；手动选择深色或浅色后保存到 YAML。
 
-`app-release` preset 构建优化的主程序；安装、冒烟测试和完整参数见[目录与构建说明](docs/PROJECT_STRUCTURE.md)。
+`app-release` preset 构建优化的主程序；安装、冒烟测试和完整参数见[目录与构建说明](docs/PROJECT_STRUCTURE.md)。Arch Linux 可用 `python3 scripts/package_arch.py build --syncdeps` 生成 pacman 软件包，或用 `install --manager paru` 从本地源码安装，详见[Arch 打包部署](packaging/arch/README.md)。
 
 ## 设计方向
 
@@ -73,6 +73,7 @@ python3 scripts/register_desktop.py
 - [Core API 设计](docs/CORE_API-v0.1.md) · [调用时序与生命周期契约](docs/CORE_RUNTIME-v0.1.md) · [公共 C 头文件](core/include/liltview/core.h)
 - [Core 接口兼容性 Review](docs/CORE_INTERFACE_REVIEW-2026-11-08.md) · [格式兼容接口扩展方案（待开发）](docs/CORE_FORMAT_EXTENSION_PLAN.md)
 - [项目目录与 CMake 构建](docs/PROJECT_STRUCTURE.md)
+- [Arch Linux 打包与 pacman / paru 部署](packaging/arch/README.md)
 - [第三方源码与 submodule 管理](third_party/README.md)
 - [默认鸿蒙字体与授权来源](assets/fonts/README.md)
 - [项目审查与逐项需求验收](docs/PROJECT_REVIEW-2026-11-07.md)
