@@ -60,7 +60,9 @@ constexpr Dictionary english{"File",
                              "Disable rounded corners",
                              "Minimize",
                              "Maximize",
-                             "Restore"};
+                             "Restore",
+                             "Scanning folder...",
+                             "Cannot list this folder."};
 
 constexpr Dictionary chinese{"文件",
                              "打开图片…",
@@ -114,7 +116,9 @@ constexpr Dictionary chinese{"文件",
                              "关闭圆角",
                              "最小化",
                              "最大化",
-                             "恢复"};
+                             "恢复",
+                             "正在扫描目录…",
+                             "无法列出此目录。"};
 
 constexpr bool complete(const Dictionary &dictionary)
 {

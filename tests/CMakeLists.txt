@@ -46,21 +46,21 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
     target_link_libraries(liltview_make_checkerboard PRIVATE liltview_jpeg png_static TIFF::tiff)
     liltview_configure_cxx_target(liltview_make_checkerboard)
     include("${LILTVIEW_CATCH_SCRIPT}")
-    catch_discover_tests(liltview_core_tests TEST_PREFIX "core.")
+    catch_discover_tests(liltview_core_tests TEST_PREFIX "core." PROPERTIES TIMEOUT 30)
     if(TARGET LiltView::app_model)
-        add_executable(liltview_app_tests app/window_chrome_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
+        add_executable(liltview_app_tests app/window_chrome_tests.cpp app/navigation_button_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
         target_link_libraries(liltview_app_tests PRIVATE liltview_cli LiltView::logging spdlog::spdlog LiltView::app_model
             liltview_fonts LiltView::renderer LiltView::ui Catch2::Catch2WithMain)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
-        catch_discover_tests(liltview_app_tests TEST_PREFIX "app.")
-        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
+        catch_discover_tests(liltview_app_tests TEST_PREFIX "app." PROPERTIES TIMEOUT 30)
+        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/navigation_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
         target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff Catch2::Catch2WithMain)
         target_compile_definitions(liltview_viewer_tests PRIVATE
             LILTVIEW_IMAGE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures"
             LILTVIEW_JPEG_FIXTURES="${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/testimages")
         liltview_configure_cxx_target(liltview_viewer_tests)
-        catch_discover_tests(liltview_viewer_tests TEST_PREFIX "viewer.")
+        catch_discover_tests(liltview_viewer_tests TEST_PREFIX "viewer." PROPERTIES TIMEOUT 30)
     endif()
 endif()
 
@@ -116,7 +116,7 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.renderer_direct COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_renderer_contract> --direct)
     set_tests_properties(desktop.renderer_direct PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg formats animation_app settings logging status close chrome)
+    foreach(case menu font save jpeg formats animation_app settings logging status close chrome navigation)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"

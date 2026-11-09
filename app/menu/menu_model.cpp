@@ -47,18 +47,19 @@ MenuItem view_control(Language language, std::int32_t id, Text text, MenuAction 
     return result;
 }
 
-MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_actual_size)
+MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_actual_size, bool can_previous, bool can_next)
 {
     auto view                = item(language, 2, Text::view);
     auto fullscreen_item     = toggle(language, 20, Text::fullscreen, MenuAction::fullscreen, fullscreen);
     fullscreen_item.shortcut = {"F11"};
     auto previous            = item(language, 21, Text::previous, MenuAction::previous);
     previous.shortcut        = {"Left"};
-    previous.enabled         = false;
+    previous.enabled         = can_previous;
+    previous.repeatable      = true;
     auto next                = item(language, 22, Text::next, MenuAction::next);
     next.shortcut            = {"Right"};
-    next.enabled             = false;
-    // 目录切图尚未实现，保留原工具栏中这两个操作的禁用状态。
+    next.enabled             = can_next;
+    next.repeatable          = true;
     MenuItem navigation_separator;
     navigation_separator.id        = 23;
     navigation_separator.separator = true;
@@ -132,7 +133,7 @@ MenuItem appearance_menu(const Settings &settings, Language language)
 } // namespace
 
 MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen, bool has_image,
-                    bool can_actual_size)
+                    bool can_actual_size, bool can_previous, bool can_next)
 {
     // 稳定 ID 属于菜单模型，翻译和平台渲染都不改变它们。
     auto preferences     = item(language, 3, Text::settings);
@@ -140,7 +141,8 @@ MenuItem build_menu(const Settings &settings, Language language, bool chinese_fo
     auto help            = item(language, 4, Text::help);
     help.children        = {item(language, 40, Text::about, MenuAction::about)};
     MenuItem root;
-    root.children = {file_menu(language), view_menu(language, fullscreen, has_image, can_actual_size), preferences, help};
+    root.children = {file_menu(language), view_menu(language, fullscreen, has_image, can_actual_size, can_previous, can_next),
+                     preferences, help};
     return root;
 }
 

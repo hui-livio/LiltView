@@ -377,6 +377,12 @@ private:
         case MenuAction::open:
             open_dialog();
             break;
+        case MenuAction::previous:
+            viewer_->navigate(-1);
+            break;
+        case MenuAction::next:
+            viewer_->navigate(1);
+            break;
         case MenuAction::fit:
             if (viewer_->has_image())
                 viewer_->fit();
@@ -681,7 +687,8 @@ private:
     MenuItem current_menu() const
     {
         return build_menu(settings_, resolve_language(settings_.language, locale_, chinese_font_), chinese_font_, is_fullscreen(),
-                          viewer_->has_image(), viewer_->can_actual_size());
+                          viewer_->has_image(), viewer_->can_actual_size(), viewer_->navigation().can_previous,
+                          viewer_->navigation().can_next);
     }
 
     // 语言、主题、全屏或图片可用状态变化时，同步系统顶栏和窗口回退菜单。
@@ -689,6 +696,7 @@ private:
     {
         if (menu_preference_ == settings_.language && menu_theme_ == settings_.theme && menu_fullscreen_ == is_fullscreen() &&
             menu_has_image_ == viewer_->has_image() && menu_can_actual_size_ == viewer_->can_actual_size() &&
+            menu_can_previous_ == viewer_->navigation().can_previous && menu_can_next_ == viewer_->navigation().can_next &&
             menu_system_titlebar_ == settings_.system_titlebar && menu_disable_rounding_ == settings_.disable_rounding)
             return;
         menu_ = current_menu();
@@ -700,6 +708,8 @@ private:
         menu_disable_rounding_ = settings_.disable_rounding;
         menu_has_image_        = viewer_->has_image();
         menu_can_actual_size_  = viewer_->can_actual_size();
+        menu_can_previous_     = viewer_->navigation().can_previous;
+        menu_can_next_         = viewer_->navigation().can_next;
     }
 
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu)
@@ -887,6 +897,8 @@ private:
     std::unique_ptr<WindowShape> window_shape_;
     bool menu_has_image_       = false;
     bool menu_can_actual_size_ = false;
+    bool menu_can_previous_    = false;
+    bool menu_can_next_        = false;
     bool chinese_font_         = false;
     bool quit_                 = false;
     bool applied_dark_         = true;

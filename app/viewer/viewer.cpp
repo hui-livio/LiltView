@@ -19,6 +19,26 @@ void LV_CALL wake_core(void *)
     event.type = SDL_EVENT_USER;
     SDL_PushEvent(&event);
 }
+
+std::vector<std::string> image_extensions(lv_core *core)
+{
+    struct FormatExtensions
+    {
+        lv_format format;
+        std::vector<std::string> suffixes;
+    };
+    const FormatExtensions formats[]{{LV_FORMAT_JPEG, {".jpg", ".jpeg"}}, {LV_FORMAT_PNG, {".png"}}, {LV_FORMAT_SVG, {".svg"}},
+                                     {LV_FORMAT_WEBP, {".webp"}},         {LV_FORMAT_BMP, {".bmp"}}, {LV_FORMAT_GIF, {".gif"}},
+                                     {LV_FORMAT_TIFF, {".tif", ".tiff"}}};
+    std::vector<std::string> extensions;
+    for (const auto &format : formats)
+    {
+        lv_format_support support{};
+        if (lv_core_query_format(core, format.format, &support) == LV_OK && support.available)
+            extensions.insert(extensions.end(), format.suffixes.begin(), format.suffixes.end());
+    }
+    return extensions;
+}
 } // namespace
 
 Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
@@ -44,6 +64,18 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
     const auto result = lv_core_create(&config, &core_);
     if (result != LV_OK)
         throw std::runtime_error("Cannot initialize image core: " + std::to_string(result));
+    try
+    {
+        navigation_ = std::make_unique<DirectoryNavigation>(image_extensions(core_), [] { wake_core(nullptr); });
+    } catch (...)
+    {
+        lv_core_begin_shutdown(core_);
+        while (lv_core_join(core_, 10) == LV_TIMEOUT)
+        {
+        }
+        lv_core_destroy(&core_);
+        throw;
+    }
 }
 Viewer::~Viewer()
 {
@@ -56,6 +88,7 @@ void Viewer::begin_shutdown()
         return;
     closing_ = true;
     lv_core_begin_shutdown(core_);
+    navigation_->shutdown();
 }
 bool Viewer::join_shutdown(std::uint32_t timeout_ms)
 {
@@ -84,6 +117,8 @@ void Viewer::shutdown()
 
 void Viewer::open(const std::filesystem::path &path)
 {
+    if (closing_)
+        return;
     std::error_code ec;
     const auto absolute = std::filesystem::absolute(path, ec);
     if (ec)
@@ -91,6 +126,20 @@ void Viewer::open(const std::filesystem::path &path)
         error_ = LV_ERROR_IO;
         return;
     }
+    // Preserve OS path resolution: folding "symlink/.." could open another file.
+    navigation_->select(absolute);
+    open_selected(absolute);
+}
+
+void Viewer::navigate(int direction)
+{
+    if (!closing_)
+        if (auto path = navigation_->step(direction))
+            open_selected(*path);
+}
+
+void Viewer::open_selected(const std::filesystem::path &absolute)
+{
     ++generation_;
     close_animation();
     if (request_)
@@ -230,6 +279,9 @@ void Viewer::consume(const lv_event_view &view)
 
 void Viewer::pump()
 {
+    if (closing_)
+        return;
+    navigation_->pump();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(4);
     lv_event *raw       = nullptr;
     bool consumed       = false;
@@ -268,7 +320,7 @@ void Viewer::pump()
     advance_animation();
 }
 
-void Viewer::draw(render::Point min, render::Point max, float density)
+void Viewer::draw(render::Point min, render::Point max, float density, bool interactive)
 {
     // Align the canvas clipping rectangle with physical pixels too. Image
     // vertices were aligned already; fractional clip edges otherwise make
@@ -284,7 +336,7 @@ void Viewer::draw(render::Point min, render::Point max, float density)
     if (scene.empty() && !image)
         return;
     viewport_.update(min, max, density, image_info.source_size, image_info.orientation);
-    if (!playback_.started() && ImGui::IsWindowHovered())
+    if (interactive && !playback_.started() && ImGui::IsWindowHovered())
     {
         const auto &io = ImGui::GetIO();
         if (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y)

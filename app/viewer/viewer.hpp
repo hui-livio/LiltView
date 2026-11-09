@@ -5,6 +5,7 @@
 #include <liltview/core.h>
 #include <optional>
 #include <string>
+#include "navigation.hpp"
 #include "playback.hpp"
 #include "renderer/renderer.hpp"
 #include "tiles.hpp"
@@ -25,6 +26,11 @@ public:
     Viewer(const Viewer &)            = delete;
     Viewer &operator=(const Viewer &) = delete;
     void open(const std::filesystem::path &);
+    void navigate(int direction);
+    const DirectoryNavigation::Snapshot &navigation() const
+    {
+        return navigation_->snapshot();
+    }
     void pump();
     void suspend_animation(bool suspended);
     int wait_timeout_ms(int maximum) const;
@@ -36,7 +42,7 @@ public:
     {
         return playback_.frame_index();
     }
-    void draw(render::Point min, render::Point max, float density);
+    void draw(render::Point min, render::Point max, float density, bool interactive = true);
     void fit();
     void actual_size();
     void set_viewport(render::Point min, render::Point max, float density = 1);
@@ -108,6 +114,7 @@ public:
     bool join_shutdown(std::uint32_t timeout_ms = 0);
 
 private:
+    void open_selected(const std::filesystem::path &);
     void submit_pending();
     void consume(const lv_event_view &);
     void discard_pending();
@@ -144,7 +151,8 @@ private:
     bool visible_pending_     = false;
     lv_event *preview_anchor_ = nullptr, *pending_anchor_ = nullptr;
 
-    lv_core *core_            = nullptr;
+    lv_core *core_ = nullptr;
+    std::unique_ptr<DirectoryNavigation> navigation_;
     lv_request_id request_    = 0;
     std::uint64_t generation_ = 0, submitted_generation_ = 0;
     std::filesystem::path pending_path_;

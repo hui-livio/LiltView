@@ -36,7 +36,7 @@ flowchart TD
 | `app/ui/`、`app/menu/` | 画布、窗口装饰、弹窗；系统菜单与窗口菜单共用模型 |
 | `app/settings/`、`app/i18n/`、`app/logging/` | YAML 持久化、中英翻译、spdlog 与 C 回调适配 |
 | `app/platform/` | SDL render host、字体、全局菜单、Wayland / X11 窗口形状 |
-| `app/viewer/viewer.*`、`animation.cpp` | Core 请求/事件所有者、切图、错误恢复、动画帧上传 |
+| `app/viewer/viewer.*`、`animation.cpp`、`navigation.*` | Core 请求/事件所有者、切图、错误恢复、动画帧上传、后台目录枚举与自然排序 |
 | `app/viewer/viewport.*`、`playback.*` | 坐标与 EXIF 变换、缩放平移、单调时钟播放策略 |
 | `app/viewer/tiles.*`、`tile_reader.*` | 原始场景、一次生成 LOD、匿名压缩缓存、RAM/GPU 驻留与恢复 |
 | `app/renderer/` / `LiltView::renderer` | 后端无关纹理句柄、上传、能力/预算、帧提交与 present |
@@ -89,6 +89,7 @@ open_animation → ANIMATION_INFO / COMPLETE → NEXT → ANIMATION_FRAME_INFO /
 | UI / render thread | 控制 Core、poll、场景管理、GL 上传与绘制 | 同一控制线程串行调用；所有图形 API 留在此线程 |
 | Core worker | 探测、解码、动画合成、队列发布 | 当前只有一个解码 worker；取消为协作式 |
 | TileReader worker | 已生成 tile/LOD 的读取、解压与 RAM LRU | 不访问源 codec、GL 或 Viewer 状态 |
+| DirectoryNavigation worker | 枚举目录、自然排序、解析真实父目录 | 最新扫描替换旧任务；最多 100000 条 / 32 MiB 路径，不在 UI 做目录 I/O |
 | 日志/唤醒回调 | 日志适配、投递 SDL 通知 | 可由后台调用，不重入 Core 或直接修改 UI；C++ 异常不得越过 C 边界 |
 
 关键契约：
@@ -164,6 +165,7 @@ ctest --preset dev -L large
 | C ABI 2、单 worker、有界事件/引用、取消/关闭 | 已实现 | 多 worker、公平调度与通用预读 |
 | 七类格式、四类静态区域 codec、NATIVE 行带 | 已实现（格式子集） | 扫描中 refinement、更多格式与高位深输出 |
 | GIF 会话、双纹理与时钟播放 | 已实现（普通尺寸） | APNG / 动画 WebP、seek 及播放控制 |
+| 后台目录导航、边缘按钮、序号 | 已实现 | 仅当前支持后缀及显式目标；首尾不循环，重新打开刷新目录 |
 | 应用 tile/LOD、后台缓存恢复、GPU LRU/PBO | 已实现 | 首次生成后台化、冷 LOD 批处理、统一资源总账 |
 | Core 内容缓存/磁盘缓存、PREFETCH | 待实现 | 当前非零缓存配置/预读请求明确 UNSUPPORTED |
 | 诊断与真实图基准 | 部分实现 | 全链路统一分段、可重复冷/热基线、持续回归 |

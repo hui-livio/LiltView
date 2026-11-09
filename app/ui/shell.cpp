@@ -213,7 +213,9 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
         return action;
     }
 
-    draw_canvas(language, renderer, icon, viewer, metrics);
+    const auto canvas_action = draw_canvas(language, renderer, icon, viewer, metrics);
+    if (canvas_action != MenuAction::none)
+        action = canvas_action;
     draw_status(language, viewer, metrics);
     draw_window_border(metrics, chrome.dark);
     draw_about(language, renderer, icon, metrics.radius);
@@ -232,8 +234,8 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
     return selected;
 }
 
-void Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer,
-                        const WindowChromeMetrics &chrome)
+MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer,
+                              const WindowChromeMetrics &chrome)
 {
     // 画布填满无内边距的主窗口，仅为底部状态栏预留高度。
     const auto t = [language](Text text)
@@ -245,19 +247,31 @@ void Shell::draw_canvas(Language language, render::Renderer &renderer, render::I
     ImGui::BeginChild("canvas", {std::max(1.0f, chrome.width - 2 * chrome.border), canvas_height}, ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     const auto available = ImGui::GetContentRegionAvail();
+    const auto position  = ImGui::GetCursorScreenPos();
+    const ImVec2 end{position.x + available.x, position.y + available.y};
+    const auto scale   = ImGui::GetStyle().FontScaleDpi;
+    const auto buttons = navigation_button_layout(position, end, scale);
+    const auto state   = navigation_button_state(
+        viewer.navigation(), ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
+    const bool blocked =
+        navigation_gesture_.blocks(buttons, state, ImGui::GetIO().MousePos, ImGui::IsMouseClicked(ImGuiMouseButton_Left),
+                                   ImGui::IsMouseDown(ImGuiMouseButton_Left));
+    const auto finish = [&]
+    {
+        const auto selected = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        ImGui::EndChild();
+        return selected;
+    };
     if (viewer.has_visible_image())
     {
-        const auto position = ImGui::GetCursorScreenPos();
         viewer.draw({position.x, position.y}, {position.x + available.x, position.y + available.y},
-                    ImGui::GetIO().DisplayFramebufferScale.x);
-        ImGui::EndChild();
-        return;
+                    ImGui::GetIO().DisplayFramebufferScale.x, !blocked);
+        return finish();
     }
     if (viewer.loading())
     {
         centered_text(translate(language, Text::loading), ImGui::GetWindowWidth(), true);
-        ImGui::EndChild();
-        return;
+        return finish();
     }
     if (viewer.failed())
     {
@@ -265,10 +279,8 @@ void Shell::draw_canvas(Language language, render::Renderer &renderer, render::I
         ImGui::PushTextWrapPos();
         ImGui::TextWrapped("%s", translate(language, message));
         ImGui::PopTextWrapPos();
-        ImGui::EndChild();
-        return;
+        return finish();
     }
-    const float scale      = ImGui::GetStyle().FontScaleDpi;
     const float image_size = 82.0f * scale;
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), (available.y - 200.0f * scale) * 0.5f));
     ImGui::SetCursorPosX((ImGui::GetWindowWidth() - image_size) * 0.5f);
@@ -280,7 +292,7 @@ void Shell::draw_canvas(Language language, render::Renderer &renderer, render::I
     centered_text(t(Text::tagline), ImGui::GetWindowWidth(), true);
     ImGui::Dummy({0.0f, 15.0f * scale});
     centered_text(t(Text::empty_hint), ImGui::GetWindowWidth(), true);
-    ImGui::EndChild();
+    return finish();
 }
 
 void Shell::draw_status(Language language, const Viewer &viewer, const WindowChromeMetrics &chrome)
@@ -302,6 +314,13 @@ void Shell::draw_status(Language language, const Viewer &viewer, const WindowChr
     else
         text += "  |  " + viewer.filename() + "  " + std::to_string(viewer.source_size().width) + " x " +
             std::to_string(viewer.source_size().height);
+    const auto &navigation = viewer.navigation();
+    if (navigation.total)
+        text += "  |  " + std::to_string(navigation.current) + " / " + std::to_string(navigation.total);
+    if (navigation.scanning)
+        text += std::string("  |  ") + t(Text::scanning_directory);
+    else if (navigation.error)
+        text += std::string("  |  ") + t(Text::directory_error);
     const char *language_name = language == Language::chinese ? "简体中文" : "English";
     const auto origin         = ImGui::GetWindowPos();
     const auto size           = ImGui::GetWindowSize();

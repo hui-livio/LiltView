@@ -68,6 +68,8 @@ enum class Text
     minimize,
     maximize,
     restore,
+    scanning_directory,
+    directory_error,
     count
 };
 

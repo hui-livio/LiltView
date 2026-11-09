@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
+#include <imgui.h>
 
 #include <chrono>
 #include <filesystem>
@@ -126,6 +127,154 @@ struct EventLoop
 
 const std::filesystem::path sample = std::filesystem::path(LILTVIEW_JPEG_FIXTURES) / "testorig.jpg";
 } // namespace
+
+TEST_CASE("viewer browses a naturally sorted directory and can leave a deleted or failed target", "[viewer][navigation]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-navigation-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    for (const auto *name : {"image1.png", "image2.PNG", "image10.png"})
+    {
+        const auto generated = folder / "generated.png";
+        liltview::test::checkerboard(generated, 17, 13, 1);
+        std::filesystem::rename(generated, folder / name);
+    }
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "image1.png");
+    loop.settle(viewer);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (viewer.navigation().scanning)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        viewer.pump();
+        SDL_Delay(1);
+    }
+    REQUIRE(viewer.navigation().total == 3);
+    CHECK(viewer.navigation().current == 1);
+    CHECK_FALSE(viewer.navigation().can_previous);
+    REQUIRE(viewer.navigation().can_next);
+    viewer.navigate(1);
+    CHECK(viewer.navigation().current == 2);
+    viewer.navigate(1);
+    viewer.navigate(-1);
+    loop.settle(viewer);
+    CHECK(viewer.filename() == "image2.PNG");
+    CHECK_FALSE(viewer.failed());
+    std::filesystem::remove(folder / "image10.png");
+    viewer.navigate(1);
+    loop.settle(viewer);
+    CHECK(viewer.error() == LV_ERROR_IO);
+    CHECK(viewer.navigation().current == 3);
+    CHECK_FALSE(viewer.navigation().can_next);
+    viewer.navigate(1);
+    CHECK(viewer.navigation().current == 3);
+    viewer.navigate(-1);
+    loop.settle(viewer);
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.filename() == "image2.PNG");
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("viewer preserves filesystem meaning of a parent symlink followed by dot dot", "[viewer][navigation][path]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-navigation-symlink-" + std::to_string(SDL_GetPerformanceCounter()));
+    const auto remote = folder / "remote";
+    std::filesystem::create_directories(remote / "child");
+    liltview::test::checkerboard(folder / "photo.png", 17, 13, 1);
+    liltview::test::checkerboard(remote / "photo.png", 23, 19, 1);
+    std::filesystem::create_directory_symlink(remote / "child", folder / "link");
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "link" / ".." / "photo.png");
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    CHECK(viewer.source_size().width == 23);
+    CHECK(viewer.source_size().height == 19);
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("canvas navigation interaction blocks real image wheel and drag without disabling normal input",
+          "[viewer][navigation_buttons]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    renderer.image_budget = 128 * 1024 * 1024; // Keep this input-control test fully resident.
+    const auto folder =
+        std::filesystem::temp_directory_path() / ("liltview-navigation-input-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    liltview::test::checkerboard(folder / "board.png", 1024, 1024, 17);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "board.png");
+    loop.settle(viewer);
+    struct Gui
+    {
+        Gui()
+        {
+            ImGui::CreateContext();
+            auto &io       = ImGui::GetIO();
+            io.DisplaySize = {320, 240};
+            io.DeltaTime   = 1.0f / 60;
+            io.IniFilename = io.LogFilename = nullptr;
+            io.Fonts->AddFontDefault();
+            unsigned char *pixels = nullptr;
+            int width = 0, height = 0;
+            io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+            io.Fonts->SetTexID(1);
+        }
+        ~Gui()
+        {
+            ImGui::DestroyContext();
+        }
+    } gui;
+    const auto frame = [&](bool interactive)
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos({0, 0});
+        ImGui::SetNextWindowSize({320, 240});
+        ImGui::Begin("navigation_image_input", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        viewer.draw({0, 0}, {128, 96}, 1, interactive);
+        ImGui::End();
+        ImGui::Render();
+    };
+    viewer.set_viewport({0, 0}, {128, 96});
+    viewer.actual_size();
+    auto &io = ImGui::GetIO();
+    io.AddMousePosEvent(64, 48);
+    frame(true);
+    frame(true);
+    const auto original = viewer.presented_view();
+    io.AddMouseWheelEvent(0, 1);
+    frame(false);
+    CHECK(viewer.presented_view().same_view(original));
+    io.AddMouseButtonEvent(0, true);
+    frame(false);
+    io.AddMousePosEvent(90, 70);
+    frame(false);
+    CHECK(viewer.presented_view().same_view(original));
+    io.AddMouseButtonEvent(0, false);
+    frame(false);
+    CHECK(viewer.presented_view().same_view(original));
+    io.AddMouseWheelEvent(0, 1);
+    frame(true);
+    CHECK_FALSE(viewer.presented_view().same_view(original));
+    const auto zoomed = viewer.presented_view();
+    io.AddMouseButtonEvent(0, true);
+    frame(true);
+    io.AddMousePosEvent(110, 85);
+    frame(true);
+    CHECK_FALSE(viewer.presented_view().same_view(zoomed));
+    io.AddMouseButtonEvent(0, false);
+    frame(true);
+    viewer.shutdown();
+    std::filesystem::remove_all(folder);
+}
 
 TEST_CASE("viewer replaces in-flight requests and releases every renderer image", "[viewer]")
 {

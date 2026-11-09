@@ -199,6 +199,24 @@ TEST_CASE("key repeat does not reopen dialogs toggle fullscreen or quit", "[menu
     }
 }
 
+TEST_CASE("directory navigation menus and shortcuts track both boundaries independently", "[menu][navigation]")
+{
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool previous : {false, true})
+            for (const bool next : {false, true})
+            {
+                // A failed/in-flight image still has a directory cursor: allow browsing away.
+                const auto menu = build_menu(Settings{}, language, true, false, false, false, previous, next);
+                CHECK(find_menu_item(menu, 21)->enabled == previous);
+                CHECK(find_menu_item(menu, 22)->enabled == next);
+                CHECK(menu_action_for_shortcut(menu, {"Left"}) == (previous ? MenuAction::previous : MenuAction::none));
+                CHECK(menu_action_for_shortcut(menu, {"Right"}, true) == (next ? MenuAction::next : MenuAction::none));
+                CHECK(menu_action_for_shortcut(menu, {"Control", "Left"}) == MenuAction::none);
+                CHECK(menu_action_for_shortcut(menu, {"Control", "Right"}) == MenuAction::none);
+                CHECK(menu_action_for_shortcut(menu, {"Shift", "Right"}) == MenuAction::none);
+            }
+}
+
 TEST_CASE("menu state reflects settings and unavailable Chinese font", "[menu]")
 {
     Settings settings;

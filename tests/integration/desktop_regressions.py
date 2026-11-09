@@ -116,6 +116,51 @@ def test_menu(executable, folder):
                 app.wait(timeout=5)
 
 
+def test_navigation(executable, folder):
+    # Exercise exported actions all the way through Viewer and actual OpenGL display.
+    sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
+    for name in ("image1.bmp", "image2.BMP", "image10.bmp"):
+        shutil.copy2(sample, folder / name)
+    (folder / "settings.yaml").write_text("language: en-US\nlog_level: debug\n")
+    log = folder / "navigation.log"
+    with log.open("w") as output:
+        app = subprocess.Popen([str(executable), "--config-dir", str(folder), str(folder / "image1.bmp")],
+                               stdout=output, stderr=subprocess.STDOUT)
+        try:
+            service = find_service(app.pid)
+
+            def wait_for(predicate):
+                deadline = time.monotonic() + 10
+                while not predicate():
+                    assert app.poll() is None, log.read_text()
+                    assert time.monotonic() < deadline, log.read_text()
+                    time.sleep(0.02)
+
+            def enabled(item, value):
+                return str(value).lower() in bus_call(service, "GetProperty", str(item), "enabled").stdout
+
+            wait_for(lambda: "Image displayed: image1.bmp" in log.read_text() and enabled(22, True))
+            assert enabled(21, False)
+            bus_call(service, "Event", "22", "clicked", "<0>", "0")
+            wait_for(lambda: "Image displayed: image2.BMP" in log.read_text() and enabled(21, True))
+            # A target removed after enumeration fails normally; its cursor still permits returning.
+            (folder / "image10.bmp").unlink()
+            bus_call(service, "Event", "22", "clicked", "<0>", "0")
+            wait_for(lambda: enabled(22, False))
+            assert enabled(21, True)
+            bus_call(service, "Event", "21", "clicked", "<0>", "0")
+            wait_for(lambda: log.read_text().count("Image displayed: image2.BMP") == 2)
+            bus_call(service, "Event", "21", "clicked", "<0>", "0")
+            wait_for(lambda: log.read_text().count("Image displayed: image1.bmp") == 2 and enabled(21, False))
+            assert enabled(22, True)
+            bus_call(service, "Event", "12", "clicked", "<0>", "0")
+            assert app.wait(timeout=10) == 0, log.read_text()
+        finally:
+            if app.poll() is None:
+                app.terminate()
+                app.wait(timeout=5)
+
+
 def test_status(executable, folder):
     # Cover square native-window corners, edge-to-edge canvas layout, font scripts/themes, and a long filename.
     sample = folder / ("long-image-" + "x" * 180 + ".bmp")
@@ -500,7 +545,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
          "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
-         "animation_app": test_animation_app, "status": test_status, "close": test_close, "chrome": test_chrome}[case](executable, Path(temporary))
+         "animation_app": test_animation_app, "status": test_status, "close": test_close, "chrome": test_chrome,
+         "navigation": test_navigation}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 
