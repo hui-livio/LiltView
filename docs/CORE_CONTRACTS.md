@@ -1,6 +1,6 @@
 # Core 接口与生命周期契约
 
-更新：2026-11-09。本文合并原 API、Runtime 与动画契约，按当前工作区源码静态核对；不表示本次重新执行全部测试。正式声明以 [core.h](../core/include/liltview/core.h) 为准，模块关系见 [架构文档](ARCHITECTURE.md)，显示与缓存见 [渲染说明](RENDERING.md)。
+更新：2026-11-10。正式声明以 [core.h](../core/include/liltview/core.h) 为准，模块关系见 [架构文档](ARCHITECTURE.md)，显示与缓存见 [渲染说明](RENDERING.md)，本轮验证见[开发计划](DEVELOPMENT_PLAN.md)。
 
 ## 1. 当前能力与 ABI
 
@@ -110,6 +110,8 @@ wakeup 是“可能有事件或资源可用”，允许随后 poll=EMPTY。控�
 ## 5. 预算、背压与取消
 
 Core 先预留可推进工作集，再实际分配；共享 backing 只计一次。CPU 账本包含受追踪的对象、路径、像素、元数据和空闲池，预约不计入 accounted_cpu_bytes。第三方内部内存按保守 allowance 准入，线程栈 / 系统分配等另测，**不是进程 RSS 硬上限**。
+
+NEXT / RESET 借用会话路径且使用预分配控制记录，零新增路径需求不清空像素池；后续正数工作集预约仍按压力回收，shutdown 显式清池。空闲池有界且计 CPU，借出的旧帧不进入池，不会被后续帧覆盖。
 
 | 统计 / 限制 | 口径 |
 | --- | --- |

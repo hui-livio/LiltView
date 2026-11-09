@@ -1,6 +1,6 @@
 # 图片格式兼容表
 
-更新：2026-11-09，按当前源码静态核对。本文只列实际兼容子集，新增格式见[开发计划](DEVELOPMENT_PLAN.md)；后台加载和渲染链路见[架构](ARCHITECTURE.md)与[渲染说明](RENDERING.md)。
+更新：2026-11-10，按当前源码核对。本文只列实际兼容子集，新增格式见[开发计划](DEVELOPMENT_PLAN.md)；后台加载和渲染链路见[架构](ARCHITECTURE.md)与[渲染说明](RENDERING.md)。
 
 ## 1. 已支持格式
 
@@ -11,10 +11,10 @@
 | WebP / libwebp decoder | 静态有损 / 无损、alpha、FIT 缩放 | 动画拒绝；不应用 ICC / EXIF 方向 |
 | BMP / 项目 C23 decoder | 1 / 4 / 8 位调色板、16 / 24 / 32 位真彩、上下行序、bitfields、RLE4 / RLE8 | 无内嵌 JPEG / PNG、OS/2 扩展压缩或色彩配置转换；RLE 不支持 top-down / REGION |
 | SVG / PlutoSVG + PlutoVG | 受限静态 profile，路径 / 几何 / 渐变 / viewBox；按目标栅格化，可放大 | 不是完整浏览器 SVG，具体拒绝项见下文 |
-| GIF / giflib | GIF87a / GIF89a，普通尺寸自动播放，透明 / 交错 / 局部调色板、disposal 0..3、源时长和循环 | 顺序 NEXT / RESET，无 seek / 超大动图；静态 API 可仅读首帧；UserInputFlag 拒绝 |
+| GIF / giflib | GIF87a / GIF89a，普通尺寸自动播放，透明 / 交错 / 局部调色板、disposal 0..3、源时长和循环；应用已接入邻居会话 / 首帧预热 | 顺序 NEXT / RESET，无 seek / 超大动图；静态 API 可仅读首帧；UserInputFlag 拒绝 |
 | TIFF / LibTIFF | Classic / BigTIFF 首页，大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 无页面切换、浮点 / CMYK；调色板 16 位等未支持组合明确拒绝 |
 
-具体依赖提交与版本以 [dependencies.json](../third_party/dependencies.json) 及 gitlink 为准，不在多份文档重复维护版本号。窗口入口支持命令行、菜单 / Ctrl+O 和单文件拖放；不扫描目录。
+具体依赖提交与版本以 [dependencies.json](../third_party/dependencies.json) 及 gitlink 为准，不在多份文档重复维护版本号。窗口入口支持命令行、菜单 / Ctrl+O 和单文件拖放，随后后台枚举同目录的支持后缀供导航；解码器仍按文件内容选择。
 
 BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头；位域掩码须连续、不重叠且在位深范围内。BI_RGB 32 位第四字节视为保留位，只有显式 alpha mask 才使用 alpha。RLE 跳过区域填调色板第零项，并检查 run、delta、绝对块、padding 和结束标记。
 
@@ -32,6 +32,8 @@ BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头；位域掩码须连续�
 
 静态 app 使用单次 NATIVE，随后缩放 / 平移从当前场景的原始 tile 与预生成 LOD 绘制或恢复，不再重新请求 REGION。core FIT / REGION 继续可用；流式行带是最终像素提前交付，**不是解码扫描中的多轮 refinement**。
 
+GIF 邻居由应用按内容识别，预热有界 FIT 会话 / 首帧，后台不上传 GPU。切换时先用 NEXT 重验源并取得真实后续帧或 END，再安装预热首帧一次，后续帧 / 循环沿用源时长和总轮数；版本、FIT 尺寸或资源不符则普通重开。它不等于 Core 完整动画内容缓存；第五轮最终验证记录见[开发计划](DEVELOPMENT_PLAN.md)。
+
 构建查询返回格式能力上限；具体文件 INFO 收窄，例如 RLE BMP 不报告 REGION。JPEG / WebP 可报告 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 报 ANIMATION；JPEG / PNG / BMP / TIFF 具有区域能力。当前不报告 INCREMENTAL / REFINEMENT，load_mode 只是大小分档，不能当作已实现扫描细化的证据。
 
 ## 3. 输出、资源与失败
@@ -42,7 +44,7 @@ BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头；位域掩码须连续�
 - FIT / REGION 单次输出不超过 `min(large_pixel_bytes, 256 MiB)`；WebP、静态 GIF、RLE BMP 等保留 64 MiB 文件与既有原图 RGBA 限制。SVG 最多 1 MiB、8192 元素、128 层，并受输出预算限制。
 - 内容探测、解码及版本核验使用同一个已打开文件；流式块发布前检查版本，读取结束再检查。检测到源变化即报 SOURCE_CHANGED，不能把部分输出与新版本拼接；不承诺文件快照。
 - 最终像素以引用移交或共享 backing 视图发布，不为排队深拷贝。第三方工作集按保守 allowance 准入，不保证整个进程 RSS 硬上限；所有权与关闭见 [Core 契约](CORE_CONTRACTS.md)。
-- 七类静态结果均可参加可选 Core 内存内容缓存 / PREFETCH，按完整目标和源版本复用，过大结果不无限常驻；GIF 此处仅指静态首帧，不表示动画会话已缓存。
+- 七类静态结果均可参加可选 Core 内存内容缓存 / PREFETCH，按完整目标和源版本复用，过大结果不无限常驻；GIF 此处仅指静态首帧，应用会话预热是独立路径。Core 磁盘内容缓存和通用完整动画缓存仍未实现。
 - 文件读取、行 / pass / run、转换和队列等待有取消点；PlutoSVG 单次 parse / render、WebP 单次 decode 不能中途强杀。取消后阻止新像素发布，不保证固定关闭延迟。
 
 ## 4. SVG 静态 profile

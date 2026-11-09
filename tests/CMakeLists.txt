@@ -54,8 +54,8 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
         catch_discover_tests(liltview_app_tests TEST_PREFIX "app." PROPERTIES TIMEOUT 30)
-        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/navigation_tests.cpp app/prefetch_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
-        target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff Catch2::Catch2WithMain)
+        add_executable(liltview_viewer_tests app/viewer_tests.cpp app/navigation_tests.cpp app/prefetch_tests.cpp app/animation_warmup_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
+        target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff liltview_gif_encoder Catch2::Catch2WithMain)
         target_compile_definitions(liltview_viewer_tests PRIVATE
             LILTVIEW_IMAGE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures"
             LILTVIEW_JPEG_FIXTURES="${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/testimages")
@@ -111,6 +111,9 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.animation COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_animation_render> "${PROJECT_SOURCE_DIR}/tests/fixtures/red-first-frame.gif")
     set_tests_properties(desktop.animation PROPERTIES TIMEOUT 15)
+    add_test(NAME desktop.animation_warm COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_animation_render> "${PROJECT_SOURCE_DIR}/tests/fixtures/red-first-frame.gif" --warm)
+    set_tests_properties(desktop.animation_warm PROPERTIES TIMEOUT 30)
     add_test(NAME desktop.renderer COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen $<TARGET_FILE:liltview_renderer_contract>)
     set_tests_properties(desktop.renderer PROPERTIES TIMEOUT 30)
     add_test(NAME desktop.renderer_direct COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen

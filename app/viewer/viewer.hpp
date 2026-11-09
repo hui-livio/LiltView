@@ -5,6 +5,7 @@
 #include <liltview/core.h>
 #include <optional>
 #include <string>
+#include "animation_warmup.hpp"
 #include "image_details.hpp"
 #include "navigation.hpp"
 #include "playback.hpp"
@@ -92,7 +93,7 @@ public:
     std::optional<ImageDetails> image_details() const;
     bool prefetch_pending() const
     {
-        return prefetch_ && prefetch_->pending();
+        return (prefetch_ && prefetch_->pending()) || (animation_warmup_ && animation_warmup_->pending());
     }
     PrefetchController::Stats prefetch_stats() const
     {
@@ -104,6 +105,18 @@ public:
         return last_source_bytes_read_;
     }
     std::uint64_t content_cache_bytes() const;
+    AnimationWarmup::Stats animation_warmup_stats() const
+    {
+        return animation_warmup_ ? animation_warmup_->stats() : AnimationWarmup::Stats{};
+    }
+    std::uint64_t warmed_first_frames_presented() const
+    {
+        return warmed_first_frames_presented_;
+    }
+    std::uint64_t animation_frames_presented() const
+    {
+        return animation_frames_presented_;
+    }
     bool settled() const
     {
         return !loading_ && !visible_pending_ && pending_path_.empty() && (playback_.started() || request_ == 0);
@@ -140,6 +153,11 @@ private:
     void upload(const lv_region_info &);
     void consume_animation(const lv_event_view &);
     void advance_animation();
+    void present_animation_frame(Playback::Time);
+    void install_prepared_animation();
+    void fallback_warm_animation();
+    lv_size_u32 animation_bounds() const;
+    void pump_neighbors();
     void close_animation();
     void retry_restore();
 
@@ -171,6 +189,11 @@ private:
     lv_core *core_ = nullptr;
     std::unique_ptr<DirectoryNavigation> navigation_;
     std::unique_ptr<PrefetchController> prefetch_;
+    std::unique_ptr<AnimationWarmup> animation_warmup_;
+    std::optional<PreparedAnimation> prepared_animation_;
+    lv_size_u32 prepared_animation_bounds_{};
+    bool adopting_animation_                     = false;
+    std::uint64_t warmed_first_frames_presented_ = 0, animation_frames_presented_ = 0;
     std::uint64_t last_source_bytes_read_ = 0;
     lv_request_id request_                = 0;
     std::uint64_t generation_ = 0, submitted_generation_ = 0;

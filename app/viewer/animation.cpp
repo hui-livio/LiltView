@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <spdlog/spdlog.h>
+#include <utility>
 #include "viewer.hpp"
 
 namespace liltview
@@ -111,26 +112,30 @@ void Viewer::consume_animation(const lv_event_view &view)
         fail(0);
 }
 
-void Viewer::advance_animation()
+void Viewer::present_animation_frame(Playback::Time now)
 {
-    const auto now = Playback::Clock::now();
     if (playback_.due(now))
     {
+        auto displayed_path = selected_path_; // Allocate before changing the visible image/identity.
         if (!playback_.started())
         {
             renderer_.destroy_image(display_);
             display_ = {};
             scene_.clear();
+            failed_restore_.reset();
+            visible_pending_    = false;
+            presented_scene_id_ = 0;
             lv_event_release(preview_anchor_);
             preview_anchor_ = nullptr;
         }
         std::swap(display_, pending_);
         info_                = pending_info_;
-        displayed_path_      = selected_path_;
+        displayed_path_      = std::move(displayed_path);
         pixel_format_        = pending_pixel_format_;
         color_space_         = pending_color_space_;
         displayed_animation_ = AnimationDetails{animation_info_, incoming_frame_};
         playback_.presented(now);
+        ++animation_frames_presented_;
         loading_ = false;
         error_   = 0;
         spdlog::debug("Animation frame displayed: {}, epoch={}, frame={}", filename_, incoming_frame_.key.epoch,
@@ -138,6 +143,17 @@ void Viewer::advance_animation()
         if (playback_.frame_index() == 0)
             spdlog::info("Image displayed: {}, {}x{}, animation", filename_, info_.source_size.width, info_.source_size.height);
     }
+}
+
+void Viewer::advance_animation()
+{
+    if (prepared_animation_ && !suspended_)
+    {
+        install_prepared_animation();
+        return; // Give the UI a frame to draw first before considering its successor.
+    }
+    const auto now = Playback::Clock::now();
+    present_animation_frame(now);
     if (!animation_id_ || request_ || playback_.ready() || suspended_ || closing_)
         return;
     lv_animation_request_desc next;
@@ -145,6 +161,7 @@ void Viewer::advance_animation()
     next.animation_id = animation_id_;
     next.user_tag     = generation_;
     next.action       = reset_animation_ ? LV_ANIMATION_RESET : LV_ANIMATION_NEXT;
+    animation_warmup_->interrupt_background();
     const auto status = lv_core_submit_animation(core_, &next, &request_);
     if (status == LV_BUSY)
         return;

@@ -128,6 +128,7 @@ void lv_decode_gif(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
     uint8_t *image     = nullptr;
     GifPixelType *row  = nullptr;
     size_t image_bytes = 0, row_bytes = 0;
+    bool finished = false;
     if (!gif)
         goto done;
     const lv_size_u32 size = {(uint32_t)gif->SWidth, (uint32_t)gif->SHeight};
@@ -165,15 +166,15 @@ void lv_decode_gif(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
         lv_workspace_release(core, r, image, image_bytes);
     image = nullptr;
     lv_workspace_release(core, r, row, row_bytes);
-    row = nullptr;
-    lv_frame_finish(&f, error);
+    row      = nullptr;
+    finished = lv_frame_finish(&f, error);
 done:
     if (gif)
     {
         code = gif->Error;
         DGifCloseFile(gif, nullptr);
     }
-    if (!error->code && !r->final_tiles && !lv_stopped(core, r))
+    if (!error->code && !finished && !lv_stopped(core, r))
         error->code = source.io_error        ? LV_ERROR_IO :
             code == D_GIF_ERR_NOT_ENOUGH_MEM ? LV_ERROR_OUT_OF_MEMORY :
                                                LV_ERROR_CORRUPT_DATA;

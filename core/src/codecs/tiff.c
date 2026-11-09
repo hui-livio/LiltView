@@ -314,6 +314,7 @@ void lv_decode_tiff(lv_core *core, lv_request *r, lv_input *input, lv_error_info
     uint32_t *raster   = nullptr;
     uint8_t *raw       = nullptr;
     size_t block_bytes = 0, raw_bytes = 0;
+    bool finished = false;
     if (!tif || source.failure)
         goto done;
     lv_size_u32 size     = {0}, canvas;
@@ -374,13 +375,13 @@ void lv_decode_tiff(lv_core *core, lv_request *r, lv_input *input, lv_error_info
         lv_workspace_release(core, r, raster, block_bytes);
         raster = nullptr;
         lv_workspace_release(core, r, raw, raw_bytes);
-        raw = nullptr;
-        lv_frame_finish(&frame, error);
+        raw      = nullptr;
+        finished = lv_frame_finish(&frame, error);
     }
 done:
     if (tif)
         TIFFClose(tif);
-    if (!error->code && !r->final_tiles && !lv_stopped(core, r))
+    if (!error->code && !finished && !lv_stopped(core, r))
         error->code = source.failure ? source.failure : LV_ERROR_CORRUPT_DATA;
     lv_workspace_release(core, r, raster, block_bytes);
     lv_workspace_release(core, r, raw, raw_bytes);

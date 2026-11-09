@@ -49,10 +49,11 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
 {
     lv_core_config config;
     lv_core_config_init(&config);
-    config.cpu_budget_bytes   = 384ULL * 1024 * 1024;
-    config.queue_pixel_bytes  = 4ULL * 1024 * 1024;
-    config.cache_budget_bytes = 64ULL * 1024 * 1024;
-    config.prefetch_workers   = 1;
+    config.cpu_budget_bytes       = 384ULL * 1024 * 1024;
+    config.queue_pixel_bytes      = 4ULL * 1024 * 1024;
+    config.cache_budget_bytes     = 64ULL * 1024 * 1024;
+    config.prefetch_workers       = 1;
+    config.animation.max_sessions = 3; // Foreground plus the two desired neighbors.
     // 256px native tiles caused hundreds/thousands of GL images and draws at
     // intermediate zoom on real 12K–18K scenes. 512px keeps restore/draw work
     // bounded more usefully while preserving progressive row bands. Respect
@@ -71,6 +72,11 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
         prefetch_   = std::make_unique<PrefetchController>(
             [this](const std::filesystem::path &path, std::uint64_t tag, lv_request_id &id)
             {
+                if (animation_warmup_->stats().outstanding_requests + prefetch_->stats().active >= 2)
+                {
+                    id = 0;
+                    return static_cast<lv_status>(LV_BUSY);
+                }
                 lv_request_desc request;
                 lv_request_desc_init(&request);
                 const auto &bytes   = path.native();
@@ -82,6 +88,7 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
                 return lv_core_submit(core_, &request, &id);
             },
             [this](lv_request_id id) { lv_core_cancel(core_, id); });
+        animation_warmup_ = std::make_unique<AnimationWarmup>(core_);
     } catch (...)
     {
         lv_core_begin_shutdown(core_);
@@ -102,6 +109,8 @@ void Viewer::begin_shutdown()
     if (!core_ || closing_)
         return;
     closing_ = true;
+    prepared_animation_.reset();
+    animation_warmup_->begin_shutdown();
     prefetch_->begin_shutdown();
     lv_core_begin_shutdown(core_);
     navigation_->shutdown();
@@ -121,6 +130,7 @@ void Viewer::shutdown()
     {
     }
     prefetch_.reset();
+    animation_warmup_.reset();
     discard_pending();
     scene_.clear();
     pending_scene_.clear();
@@ -158,6 +168,13 @@ void Viewer::navigate(int direction)
 void Viewer::open_selected(const std::filesystem::path &absolute)
 {
     ++generation_;
+    prepared_animation_.reset();
+    adopting_animation_ = animation_warmup_->request_adoption(absolute, animation_bounds(), generation_);
+    if (adopting_animation_)
+        work_ = Work::animation_open;
+    // Retire other READY canvases before foreground resource admission.
+    animation_warmup_->update(generation_, {}, animation_bounds());
+    animation_warmup_->interrupt_background();
     prefetch_->update(generation_, navigation_->snapshot());
     prefetch_->pump(false);
     close_animation();
@@ -171,7 +188,7 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
     completed_plays_ = 0;
     visible_pending_ = false;
     viewport_.reset();
-    pending_path_  = absolute;
+    pending_path_  = adopting_animation_ ? std::filesystem::path{} : absolute;
     selected_path_ = absolute;
     filename_      = absolute.filename().string();
     error_         = 0;
@@ -205,15 +222,14 @@ void Viewer::submit_pending()
     // decoded exactly once at native resolution, independent of the viewport.
     if (try_animation_)
     {
-        const auto bounds            = renderer_.framebuffer_size();
-        const auto edge              = std::max(1u, renderer_.capabilities().max_texture_edge);
-        request.target.as.fit_bounds = {std::clamp(bounds.width, 1u, edge), std::clamp(bounds.height, 1u, edge)};
+        request.target.as.fit_bounds = animation_bounds();
     }
     else
         request.target.kind = LV_TARGET_NATIVE;
     lv_status status;
     if (try_animation_)
     {
+        animation_warmup_->interrupt_background();
         lv_animation_open_desc open;
         lv_animation_open_desc_init(&open);
         open.path     = request.path;
@@ -243,6 +259,7 @@ void Viewer::submit_pending()
 
 void Viewer::accept_completed()
 {
+    auto displayed_path = selected_path_;
     renderer_.destroy_image(display_);
     display_ = pending_;
     pending_ = {};
@@ -251,7 +268,7 @@ void Viewer::accept_completed()
     scene_id_         = pending_scene_id_;
     pending_scene_id_ = 0;
     info_             = pending_info_;
-    displayed_path_   = selected_path_;
+    displayed_path_   = std::move(displayed_path);
     pixel_format_     = pending_pixel_format_;
     color_space_      = pending_color_space_;
     displayed_animation_.reset();
@@ -324,6 +341,8 @@ void Viewer::pump()
         consumed = true;
         std::unique_ptr<lv_event, decltype(&lv_event_release)> event(raw, lv_event_release);
         const auto &view = *lv_event_get_view(event.get());
+        if (animation_warmup_->consume(view))
+            continue;
         if (prefetch_->consume(view))
         {
             if (view.type == LV_EVENT_COMPLETE)
@@ -361,8 +380,9 @@ void Viewer::pump()
         wake_core(nullptr); // Continue draining next frame even without another queue edge.
     submit_pending();
     advance_animation();
-    prefetch_->update(generation_, navigation_->snapshot());
-    prefetch_->pump(!request_ && !loading_ && !visible_pending_ && !failed_restore_ && has_visible_image());
+    pump_neighbors();
+    if (prepared_animation_)
+        advance_animation();
 }
 
 std::uint64_t Viewer::content_cache_bytes() const

@@ -215,7 +215,8 @@ lv_status lv_accept_locked(lv_core *core, const lv_request_desc *desc, lv_animat
     {
         return LV_LIMIT_REACHED;
     }
-    lv_cache_trim_locked(core, nullptr, length);
+    if (length)
+        lv_cache_trim_locked(core, nullptr, length);
     if ((uint64_t)length > core->config.cpu_budget_bytes - core->used - core->reserved)
     {
         return LV_BUSY;

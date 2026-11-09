@@ -1,6 +1,6 @@
 # 开发架构
 
-状态基线：2026-11-09 工作区源码静态核对。本文说明当前模块、运行链路与开发入口；“已实现”不代表本次重新完成运行验收，历史测试数量不作为本次验证结果。
+状态基线：2026-11-10。本文说明当前模块、运行链路与开发入口；本轮验证与分次提交记录见[开发计划](DEVELOPMENT_PLAN.md)。
 
 ## 1. 技术边界
 
@@ -38,6 +38,7 @@ flowchart TD
 | `app/platform/` | SDL render host、字体、全局菜单、Wayland / X11 窗口形状 |
 | `app/viewer/viewer.*`、`animation.cpp`、`navigation.*` | Core 请求/事件所有者、切图、错误恢复、动画帧上传、后台目录枚举与自然排序 |
 | `app/viewer/prefetch.*` | 两邻居低优先级调度、取消后退休 ID、忙闲边沿有界重试、后台事件隔离 |
+| `app/viewer/animation_warmup.*`、`neighbors.cpp`、`animation_prepared.cpp` | 邻居静态 / GIF 调度、首帧与会话保留、前景版本验证、完整候选上传与接管 |
 | `app/viewer/viewport.*`、`playback.*` | 坐标与 EXIF 变换、缩放平移、单调时钟播放策略 |
 | `app/viewer/tiles.*`、`tile_reader.*` | 原始场景、一次生成 LOD、匿名压缩缓存、RAM/GPU 驻留与恢复 |
 | `app/renderer/` / `LiltView::renderer` | 后端无关纹理句柄、上传、能力/预算、帧提交与 present |
@@ -87,6 +88,10 @@ open_animation → ANIMATION_INFO / COMPLETE → NEXT → ANIMATION_FRAME_INFO /
 
 帧块不直接修改正在显示的纹理；动画不采用静态行带揭示，避免混帧。两张纹理均计 GPU 图片预算，准入失败保留当前完整帧并报告错误。隐藏/最小化暂停与循环时钟由应用管理，Core 不驱动播放时钟。当前没有 seek、用户播放控制或超大动图支持。
 
+相邻 GIF 在前景空闲时通过 Core `OPEN → NEXT` 预热；格式由内容识别，预读 INFO 只是提示。首帧覆盖完整且终结事件归还后才进入 READY，后台只保留 CPU 引用与会话。切入时先用前景 NEXT 重验源版本，得到同 epoch 的真实 frame 1 或单帧 END，再移交 frame 0 与会话；不 RESET、不重标帧身份。两张局部候选纹理均上传成功后才提交首帧并开始时钟，该次 pump 保留首帧供 UI 绘制。版本 / 尺寸 / 上传失败回退普通打开，暂停时延后呈现。
+
+应用最多三个会话（前景与两邻居）；静态预读和 GIF 预热合计最多两个未终结后台 ID，已取消退休任务仍占名额。每次普通前景 OPEN / NEXT / RESET 前中断未完成预热，切图保留被接管者并退休其他 READY。静态缓存与 GIF 预热是两条独立路径，不构成 Core 通用完整动画内容缓存。
+
 ## 5. 线程、所有权与关闭
 
 | 执行者 | 当前职责 | 约束 |
@@ -107,7 +112,7 @@ open_animation → ANIMATION_INFO / COMPLETE → NEXT → ANIMATION_FRAME_INFO /
 - cancel 与终结提交竞争：取消先胜出则禁止新像素并丢弃尚未 poll 的像素；终结先提交则保留已排队结果。UI 始终再核对请求/generation。
 - `source_revision` 是同一 Core 内受生命周期约束的版本记录，不是文件内容哈希或快照。保留 INFO 可维持版本锚点；源变化不得混合到同一场景。
 
-关闭顺序为 `begin_shutdown → join → 归还事件/像素并结束所有外部访问 → destroy`。join 超时不强杀线程；不可中断 codec 调用可延迟退出。应用保持 SDL 通知目标有效直至后台结束，清理 TileReader/场景和图片资源后关闭 renderer，再销毁 ImGui/窗口。完整边界见 [Core 契约](CORE_CONTRACTS.md)。
+关闭顺序为 `begin_shutdown → join → 归还事件/像素并结束所有外部访问 → destroy`。Viewer 先归还 GIF Prepared / 预热引用并关闭其会话，再关闭 / join Core，最后销毁 helper 与 Core；helper 的 pending 状态不能代替 join。join 超时不强杀线程；不可中断 codec 调用可延迟退出。应用保持 SDL 通知目标有效直至后台结束，清理 TileReader/场景和图片资源后关闭 renderer，再销毁 ImGui/窗口。完整边界见 [Core 契约](CORE_CONTRACTS.md)。
 
 ## 6. 渲染与资源账本
 
@@ -121,6 +126,7 @@ Renderer 公共接口只接受单平面 RGBA8、straight alpha、局部左上原
 | --- | --- | --- |
 | Core CPU | 384 MiB | 像素、请求、事件、可追踪工作集；第三方 allowance 不构成 RSS 硬限制 |
 | Core 内容缓存 | 64 MiB，包含在 CPU 总额内 | 按源版本 / target 保存完整静态结果；过大旁路，不与场景磁盘缓存混淆 |
+| GIF 预热保留 | 64 MiB reservation，实际像素计 Core CPU | 保守覆盖共享 backing 的最多 25% 池超配及描述符；不是精确分配 / RSS，采用后的当前帧由 Viewer 持有 |
 | Core 像素队列 | 4 MiB，包含在 CPU 总额内 | poll 归还队列额度；外部保留引用继续占实际分配 |
 | Core tile | 应用 512px；公共默认 256px | 按设备最大纹理边长向下收缩 |
 | Renderer images | 128 MiB | 包含场景/动画图片纹理；不等于系统显存硬上限 |
@@ -168,15 +174,15 @@ ctest --preset dev -L large
 
 | 能力 | 状态 | 尚缺内容 |
 | --- | --- | --- |
-| C ABI 2、单 worker、有界事件/引用、取消/关闭 | 已实现 | 多 worker、公平调度与通用预读 |
+| C ABI 2、单 worker、有界事件/引用、取消/关闭 | 已实现 | 多 worker 与更细公平调度 |
 | 七类格式、四类静态区域 codec、NATIVE 行带 | 已实现（格式子集） | 扫描中 refinement、更多格式与高位深输出 |
 | GIF 会话、双纹理与时钟播放 | 已实现（普通尺寸） | APNG / 动画 WebP、seek 及播放控制 |
 | 后台目录导航、边缘按钮、序号 | 已实现 | 仅当前支持后缀及显式目标；首尾不循环，重新打开刷新目录 |
 | 图片信息面板、可见场景值快照 | 已实现 | 尚无相机 EXIF / ICC 元数据解析；已提供文件 / 输出 / 方向 / 动画与实时缩放信息 |
 | 应用 tile/LOD、后台缓存恢复、GPU LRU/PBO | 已实现 | 首次生成后台化、冷 LOD 批处理、统一资源总账 |
-| Core 内容缓存、PREFETCH 与静态邻居接入 | 已实现（静态完整结果） | GIF 会话预热另行验证；磁盘内容缓存、通用动画内容缓存未实现 |
+| Core 内容缓存、PREFETCH 与相邻图片预读 | 已实现（静态完整结果、应用 GIF 首帧 / 会话预热） | Core 磁盘内容缓存、通用完整动画内容缓存未实现 |
 | 诊断与真实图基准 | 部分实现 | 全链路统一分段、可重复冷/热基线、持续回归 |
 | 原始 RGB/YUV/Bayer、高精度/HDR、多图选择 | 待实现 | 输入/输出/颜色/身份契约及预算扩展 |
 | Windows / D3D11 | 待实现 | 平台文件/线程、Win32 窗口与渲染后端及实机验收 |
 
-建议先补首次缓存生成后台化、真实图分段测量和总预算，再推进目录导航/预读与格式扩展。新增输入布局、选择器、颜色及诊断先确定兼容契约，随后接 codec 和 UI；避免由既有枚举或草案推导支持状态。具体排期与验收维护于 [开发计划](DEVELOPMENT_PLAN.md)，格式细节维护于 [格式兼容表](IMAGE_FORMATS.md)，CLI/YAML 维护于 [配置说明](CONFIGURATION.md)。
+建议先补首次缓存生成后台化、真实图分段测量和总预算，再推进格式扩展。新增输入布局、选择器、颜色及诊断先确定兼容契约，随后接 codec 和 UI；避免由既有枚举或草案推导支持状态。具体排期与验收维护于 [开发计划](DEVELOPMENT_PLAN.md)，格式细节维护于 [格式兼容表](IMAGE_FORMATS.md)，CLI/YAML 维护于 [配置说明](CONFIGURATION.md)。

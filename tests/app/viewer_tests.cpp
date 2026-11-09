@@ -1,15 +1,29 @@
+// GIF warm-adoption integration UT scenarios reviewed before implementation:
+// 1. Content-classified .png GIF warms from static A without GPU changes, then draws red 0 exactly once and blue 1.
+// 2. Same-length palette mutation/deletion after READY rejects stale frame 0 and reopens new content or preserves A on I/O.
+// 3. Different framebuffer FIT bounds bypass incompatible READY pixels and use ordinary playback at the new size.
+// 4. Warm single-frame GIFs preserve total plays 1/3/infinite, real epoch transitions, and exactly one warmed first frame.
+// 5. A verified adoption paused before presentation can be replaced or shut down without leaking its session/pixels.
+// 6. Current GIF playback progresses while neighbor warm/error work stays within the global two-request quota.
+// 7. Two large READY resident canvases are released before an unrelated larger foreground GIF is admitted.
+// 8. Uploads slower than frame duration cannot skip the first actual red draw or present two frames in one installation.
+// 9. Failure of only the second candidate upload falls back before commit, with one ordinary first presentation.
+// 10. A genuine old static cold-restore failure must not suppress neighbor prefetch after new GIF presentation.
+
 #include "../fixtures/checkerboard.hpp"
 #include "viewer/viewer.hpp"
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <gif_lib.h>
 #include <imgui.h>
 
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -34,14 +48,21 @@ public:
         std::array<std::uint8_t, 4> first_pixel{};
     };
     std::unordered_map<std::uint32_t, Texture> textures;
-    std::uint32_t next         = 1;
-    bool fail_upload           = false;
-    unsigned uploads           = 0;
-    unsigned upload_delay_ms   = 0;
-    unsigned creates           = 0;
-    std::uint64_t image_budget = 16 * 1024 * 1024;
-    std::uint32_t max_edge     = 4096;
-    bool allow_upload          = true;
+    std::uint32_t next = 1;
+    bool fail_upload   = false;
+    std::optional<unsigned> fail_upload_at;
+    unsigned uploads                  = 0;
+    unsigned upload_delay_ms          = 0;
+    unsigned creates                  = 0;
+    std::uint64_t image_budget        = 16 * 1024 * 1024;
+    std::uint32_t max_edge            = 4096;
+    bool allow_upload                 = true;
+    bool strict_image_budget          = false;
+    unsigned budget_rejections        = 0;
+    std::uint64_t rejected_live_bytes = 0, rejected_request_bytes = 0;
+    Size frame_size{128, 96};
+    std::optional<std::array<std::uint8_t, 4>> last_drawn_pixel;
+    std::vector<std::array<std::uint8_t, 4>> uploaded_first_pixels;
 
     bool upload_ready() override
     {
@@ -60,12 +81,24 @@ public:
     }
     Size framebuffer_size() const override
     {
-        return {128, 96};
+        return frame_size;
     }
     Image create_image(liltview::render::ImageDesc desc) override
     {
         REQUIRE(desc.size.width <= max_edge);
         REQUIRE(desc.size.height <= max_edge);
+        if (strict_image_budget)
+        {
+            const auto used  = capabilities().image_bytes;
+            const auto bytes = liltview::render::image_storage_bytes(desc);
+            if (used > image_budget || bytes > image_budget - used)
+            {
+                ++budget_rejections;
+                rejected_live_bytes    = used;
+                rejected_request_bytes = bytes;
+                throw liltview::render::Error(liltview::render::ErrorCode::memory_budget, "Strict test GPU image budget");
+            }
+        }
         ++creates;
         const auto slot = next++;
         textures.emplace(slot, Texture{desc.size, liltview::render::image_storage_bytes(desc), desc.magnification});
@@ -73,14 +106,18 @@ public:
     }
     void update_image(Image image, Rect rect, Pixels pixels) override
     {
-        if (fail_upload)
+        if (fail_upload || (fail_upload_at && uploads + 1 == *fail_upload_at))
         {
             fail_upload = false;
+            fail_upload_at.reset();
             throw liltview::render::Error(liltview::render::ErrorCode::backend_failure, "Injected upload failure");
         }
         liltview::render::validate_upload(textures.at(image.slot).size, rect, pixels);
         if (rect.x == 0 && rect.y == 0)
+        {
             std::copy_n(pixels.data, 4, textures.at(image.slot).first_pixel.begin());
+            uploaded_first_pixels.push_back(textures.at(image.slot).first_pixel);
+        }
         ++uploads;
         if (upload_delay_ms)
             SDL_Delay(upload_delay_ms);
@@ -89,11 +126,13 @@ public:
     {
         textures.erase(image.slot);
     }
-    void add_image(ImDrawList *, Image, Point, Point, Point, Point) override
+    void add_image(ImDrawList *, Image image, Point, Point, Point, Point) override
     {
+        last_drawn_pixel = textures.at(image.slot).first_pixel;
     }
-    void add_image_quad(ImDrawList *, Image, const std::array<Point, 4> &, const std::array<Point, 4> &) override
+    void add_image_quad(ImDrawList *, Image image, const std::array<Point, 4> &, const std::array<Point, 4> &) override
     {
+        last_drawn_pixel = textures.at(image.slot).first_pixel;
     }
     void begin_frame() override
     {
@@ -1079,4 +1118,613 @@ TEST_CASE("image details preserve final GIF counts and the displayed frame after
     CHECK(details->path == file);
     REQUIRE(details->animation);
     CHECK(details->animation->info.total_plays == 1);
+}
+
+namespace
+{
+struct WarmDirectory
+{
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("liltview-warm-viewer-" + std::to_string(SDL_GetPerformanceCounter()));
+    WarmDirectory()
+    {
+        std::filesystem::create_directories(path);
+    }
+    ~WarmDirectory()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+};
+
+void write_warm_gif(const std::filesystem::path &path, unsigned frames = 2, unsigned width = 4, unsigned height = 3,
+                    unsigned total_plays = 1, unsigned delay_cs = 8)
+{
+    struct Encoder
+    {
+        GifFileType *file       = nullptr;
+        ColorMapObject *palette = nullptr;
+        ~Encoder()
+        {
+            int ignored = 0;
+            if (file)
+                EGifCloseFile(file, &ignored);
+            if (palette)
+                GifFreeMapObject(palette);
+        }
+    } encoder;
+    int error    = 0;
+    encoder.file = EGifOpenFileName(path.c_str(), false, &error);
+    REQUIRE(encoder.file);
+    EGifSetGifVersion(encoder.file, true);
+    const GifColorType colors[]{{255, 0, 0}, {0, 0, 255}};
+    encoder.palette = GifMakeMapObject(2, colors);
+    REQUIRE(encoder.palette);
+    REQUIRE(EGifPutScreenDesc(encoder.file, static_cast<int>(width), static_cast<int>(height), 8, 0, encoder.palette) == GIF_OK);
+    if (total_plays != 1)
+    {
+        const auto repeat = total_plays ? total_plays - 1 : 0;
+        const GifByteType loop[]{1, static_cast<GifByteType>(repeat), static_cast<GifByteType>(repeat >> 8)};
+        REQUIRE(EGifPutExtensionLeader(encoder.file, APPLICATION_EXT_FUNC_CODE) == GIF_OK);
+        REQUIRE(EGifPutExtensionBlock(encoder.file, 11, "NETSCAPE2.0") == GIF_OK);
+        REQUIRE(EGifPutExtensionBlock(encoder.file, 3, loop) == GIF_OK);
+        REQUIRE(EGifPutExtensionTrailer(encoder.file) == GIF_OK);
+    }
+    for (unsigned frame = 0; frame < frames; ++frame)
+    {
+        GraphicsControlBlock control{};
+        control.DisposalMode     = DISPOSE_DO_NOT;
+        control.DelayTime        = static_cast<int>(delay_cs);
+        control.TransparentColor = NO_TRANSPARENT_COLOR;
+        GifByteType extension[4];
+        REQUIRE(EGifGCBToExtension(&control, extension) == 4);
+        REQUIRE(EGifPutExtension(encoder.file, GRAPHICS_EXT_FUNC_CODE, 4, extension) == GIF_OK);
+        REQUIRE(EGifPutImageDesc(encoder.file, 0, 0, static_cast<int>(width), static_cast<int>(height), false, nullptr) ==
+                GIF_OK);
+        std::vector<GifPixelType> row(width, static_cast<GifPixelType>(frame % 2));
+        for (unsigned y = 0; y < height; ++y)
+            REQUIRE(EGifPutLine(encoder.file, row.data(), static_cast<int>(width)) == GIF_OK);
+    }
+    auto *file   = encoder.file;
+    encoder.file = nullptr;
+    REQUIRE(EGifCloseFile(file, &error) == GIF_OK);
+}
+
+void check_background_quota(const liltview::Viewer &viewer)
+{
+    CHECK(viewer.prefetch_stats().active + viewer.animation_warmup_stats().outstanding_requests <= 2);
+}
+
+template <class Predicate>
+void warm_until(liltview::Viewer &viewer, Predicate done, bool allow_failure = false,
+                std::chrono::seconds timeout = std::chrono::seconds(8))
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!done())
+    {
+        viewer.pump();
+        check_background_quota(viewer);
+        if (!allow_failure)
+            REQUIRE_FALSE(viewer.failed());
+        if (done())
+            return;
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Event event;
+        SDL_WaitEventTimeout(&event, viewer.wait_timeout_ms(2));
+    }
+}
+
+void ready_neighbors(liltview::Viewer &viewer, std::size_t count = 1, std::chrono::seconds timeout = std::chrono::seconds(8))
+{
+    warm_until(
+        viewer, [&]
+        { return viewer.animation_warmup_stats().ready == count && !viewer.prefetch_pending() && !viewer.navigation().scanning; },
+        false, timeout);
+}
+
+struct WarmGui
+{
+    WarmGui()
+    {
+        ImGui::CreateContext();
+        auto &io       = ImGui::GetIO();
+        io.DisplaySize = {128, 96};
+        io.DeltaTime   = 1.0f / 60;
+        io.IniFilename = io.LogFilename = nullptr;
+        io.Fonts->AddFontDefault();
+        unsigned char *pixels = nullptr;
+        int width = 0, height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        io.Fonts->SetTexID(1);
+    }
+    ~WarmGui()
+    {
+        ImGui::DestroyContext();
+    }
+    void draw(liltview::Viewer &viewer, TestRenderer &renderer)
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos({0, 0});
+        ImGui::SetNextWindowSize({128, 96});
+        ImGui::Begin("warm_frame", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
+        renderer.last_drawn_pixel.reset();
+        viewer.draw({0, 0}, {128, 96}, 1, false);
+        ImGui::End();
+        ImGui::Render();
+        REQUIRE(renderer.last_drawn_pixel);
+    }
+};
+
+void open_static_for_warm(EventLoop &loop, liltview::Viewer &viewer, const std::filesystem::path &folder)
+{
+    liltview::test::checkerboard(folder / "1.bmp", 31, 23, 7);
+    viewer.open(folder / "1.bmp");
+    loop.settle(viewer);
+}
+} // namespace
+
+TEST_CASE("GIF neighbor warms by content without GPU work and presents genuine frames zero and one", "[viewer][warm]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    write_warm_gif(directory.path / "2.png"); // Encoded GIF despite its PNG suffix.
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    open_static_for_warm(loop, viewer, directory.path);
+    const auto uploads = renderer.uploads, creates = renderer.creates;
+    const auto textures = renderer.textures.size();
+    ready_neighbors(viewer);
+    CHECK(renderer.uploads == uploads);
+    CHECK(renderer.creates == creates);
+    CHECK(renderer.textures.size() == textures);
+    CHECK(viewer.animation_frames_presented() == 0);
+    CHECK(viewer.animation_warmup_stats().retained_bytes > 0);
+    viewer.navigate(1);
+    warm_until(viewer, [&] { return viewer.warmed_first_frames_presented() == 1; });
+    CHECK(viewer.displayed_frame_index() == 0);
+    CHECK(viewer.animation_frames_presented() == 1);
+    REQUIRE(viewer.image_details());
+    REQUIRE(viewer.image_details()->animation);
+    CHECK(viewer.image_details()->path == directory.path / "2.png");
+    CHECK(viewer.image_details()->image.format == LV_FORMAT_GIF);
+    WarmGui gui;
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+    viewer.suspend_animation(true);
+    for (unsigned i = 0; i < 100; ++i)
+    {
+        viewer.pump();
+        CHECK(viewer.animation_frames_presented() == 1);
+        CHECK(viewer.warmed_first_frames_presented() == 1);
+    }
+    viewer.suspend_animation(false);
+    warm_until(viewer, [&] { return viewer.animation_frames_presented() == 2; });
+    CHECK(viewer.displayed_frame_index() == 1);
+    CHECK(viewer.warmed_first_frames_presented() == 1);
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{0, 0, 255, 255});
+    CHECK(viewer.animation_warmup_stats().adopted == 1);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+}
+
+TEST_CASE("ready GIF palette rewrites and deleted sources never upload stale warmed frame zero", "[viewer][warm][source]")
+{
+    for (const bool erase : {false, true})
+    {
+        EventLoop loop;
+        WarmDirectory directory;
+        const auto file = directory.path / "2.png";
+        write_warm_gif(file);
+        TestRenderer renderer;
+        liltview::Viewer viewer(renderer);
+        open_static_for_warm(loop, viewer, directory.path);
+        ready_neighbors(viewer);
+        const auto upload_count = renderer.uploaded_first_pixels.size();
+        if (erase)
+            std::filesystem::remove(file);
+        else
+        {
+            const auto length = std::filesystem::file_size(file);
+            const auto time   = std::filesystem::last_write_time(file);
+            {
+                std::fstream output(file, std::ios::in | std::ios::out | std::ios::binary);
+                REQUIRE(output.good());
+                output.seekp(13); // First global color entry is RGB red; rewrite it to blue without changing length.
+                const std::array<char, 3> blue{0, 0, static_cast<char>(255)};
+                output.write(blue.data(), static_cast<std::streamsize>(blue.size()));
+                output.flush();
+                REQUIRE(output.good());
+            }
+            std::filesystem::last_write_time(file, time + std::chrono::seconds(1));
+            CHECK(std::filesystem::file_size(file) == length);
+        }
+        viewer.navigate(1);
+        warm_until(viewer, [&] { return !viewer.loading(); }, erase);
+        CHECK(viewer.warmed_first_frames_presented() == 0);
+        REQUIRE(viewer.image_details());
+        if (erase)
+        {
+            CHECK(viewer.error() == LV_ERROR_IO);
+            CHECK(viewer.image_details()->path == directory.path / "1.bmp");
+            CHECK(renderer.uploaded_first_pixels.size() == upload_count);
+        }
+        else
+        {
+            CHECK_FALSE(viewer.failed());
+            CHECK(viewer.image_details()->path == file);
+            REQUIRE(renderer.uploaded_first_pixels.size() > upload_count);
+            for (std::size_t i = upload_count; i < renderer.uploaded_first_pixels.size(); ++i)
+                CHECK(renderer.uploaded_first_pixels[i] == std::array<std::uint8_t, 4>{0, 0, 255, 255});
+            CHECK(viewer.animation_frames_presented() == 1);
+        }
+        WarmGui gui;
+        gui.draw(viewer, renderer);
+        CHECK(renderer.last_drawn_pixel ==
+              (erase ? std::array<std::uint8_t, 4>{255, 0, 0, 255} : std::array<std::uint8_t, 4>{0, 0, 255, 255}));
+        viewer.shutdown();
+        CHECK(renderer.textures.empty());
+    }
+}
+
+TEST_CASE("changed framebuffer bounds bypass incompatible warmed animation pixels", "[viewer][warm][bounds]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    write_warm_gif(directory.path / "2.png", 2, 64, 48);
+    TestRenderer renderer;
+    renderer.frame_size = {32, 24};
+    liltview::Viewer viewer(renderer);
+    open_static_for_warm(loop, viewer, directory.path);
+    ready_neighbors(viewer);
+    renderer.frame_size = {16, 12};
+    viewer.navigate(1);
+    warm_until(viewer, [&] { return !viewer.loading(); });
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.animation_warmup_stats().adopted == 0);
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->image.canvas.width == 16);
+    CHECK(viewer.image_details()->image.canvas.height == 12);
+    CHECK(viewer.animation_frames_presented() == 1);
+    viewer.shutdown();
+}
+
+TEST_CASE("warmed single-frame GIFs preserve finite and infinite source loop counts", "[viewer][warm][loop]")
+{
+    for (const unsigned plays : {1u, 3u, 0u})
+    {
+        CAPTURE(plays);
+        EventLoop loop;
+        WarmDirectory directory;
+        write_warm_gif(directory.path / "2.png", 1, 4, 3, plays, 4);
+        TestRenderer renderer;
+        liltview::Viewer viewer(renderer);
+        open_static_for_warm(loop, viewer, directory.path);
+        ready_neighbors(viewer);
+        viewer.navigate(1);
+        warm_until(viewer,
+                   [&]
+                   {
+                       const auto details = viewer.image_details();
+                       return plays ? viewer.animation_frames_presented() == plays && !viewer.animating() :
+                                      details && details->animation && details->animation->frame.key.epoch >= 3;
+                   });
+        CHECK(viewer.warmed_first_frames_presented() == 1);
+        CHECK(viewer.displayed_frame_index() == 0);
+        REQUIRE(viewer.image_details());
+        REQUIRE(viewer.image_details()->animation);
+        CHECK(viewer.image_details()->animation->info.total_plays == plays);
+        CHECK(viewer.image_details()->animation->info.flags & LV_ANIMATION_PLAY_COUNT_KNOWN);
+        if (plays)
+            CHECK(viewer.animation_frames_presented() == plays);
+        else
+        {
+            CHECK(viewer.animation_frames_presented() >= 3);
+            CHECK(viewer.animating());
+        }
+        viewer.shutdown();
+        CHECK(renderer.textures.empty());
+    }
+}
+
+TEST_CASE("paused verified GIF adoption can be replaced or shut down before presentation", "[viewer][warm][shutdown]")
+{
+    for (const bool replace : {false, true})
+    {
+        EventLoop loop;
+        WarmDirectory directory;
+        write_warm_gif(directory.path / "2.png");
+        liltview::test::checkerboard(directory.path / "3.bmp", 17, 13, 7);
+        TestRenderer renderer;
+        liltview::Viewer viewer(renderer);
+        open_static_for_warm(loop, viewer, directory.path);
+        ready_neighbors(viewer);
+        const auto uploads = renderer.uploads;
+        viewer.suspend_animation(true);
+        viewer.navigate(1);
+        warm_until(viewer, [&]
+                   { return viewer.animation_warmup_stats().adopted == 1 && !viewer.animation_warmup_stats().adoption_pending; });
+        CHECK(viewer.loading());
+        CHECK(viewer.warmed_first_frames_presented() == 0);
+        CHECK(viewer.animation_frames_presented() == 0);
+        CHECK(renderer.uploads == uploads);
+        REQUIRE(viewer.image_details());
+        CHECK(viewer.image_details()->path == directory.path / "1.bmp");
+        if (replace)
+        {
+            viewer.open(directory.path / "3.bmp");
+            loop.settle(viewer);
+            REQUIRE_FALSE(viewer.failed());
+            CHECK(viewer.image_details()->path == directory.path / "3.bmp");
+            CHECK_FALSE(viewer.image_details()->animation);
+            CHECK(viewer.warmed_first_frames_presented() == 0);
+            CHECK(viewer.animation_frames_presented() == 0);
+        }
+        viewer.begin_shutdown();
+        REQUIRE(viewer.join_shutdown(5000));
+        viewer.shutdown();
+        CHECK(renderer.textures.empty());
+        CHECK(viewer.animation_warmup_stats().retained_bytes == 0);
+        CHECK_FALSE(viewer.prefetch_pending());
+    }
+}
+
+TEST_CASE("foreground GIF advances while neighbor warmups and errors stay within background quota", "[viewer][warm][priority]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    write_warm_gif(directory.path / "1.png");
+    write_warm_gif(directory.path / "2.gif", 2, 4, 3, 0);
+    std::ofstream(directory.path / "3.png") << "damaged image";
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    viewer.open(directory.path / "2.gif");
+    warm_until(viewer,
+               [&]
+               {
+                   return viewer.animation_frames_presented() >= 3 && viewer.animation_warmup_stats().ready == 1 &&
+                       viewer.prefetch_stats().failed >= 1 && viewer.animation_warmup_stats().failed >= 1;
+               });
+    CHECK_FALSE(viewer.failed());
+    REQUIRE(viewer.image_details());
+    REQUIRE(viewer.image_details()->animation);
+    CHECK(viewer.image_details()->path == directory.path / "2.gif");
+    const auto animation = *viewer.image_details()->animation;
+    CHECK(animation.info.animation_id == animation.frame.key.animation_id);
+    CHECK(animation.frame.key.frame_index <= 1);
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.animation_warmup_stats().ready == 1);
+    viewer.shutdown();
+}
+
+TEST_CASE("unrelated foreground GIF admission releases two large READY resident canvases", "[viewer][warm][budget]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    write_warm_gif(directory.path / "1.png", 2, 2500, 2500);
+    write_warm_gif(directory.path / "3.png", 2, 2500, 2500);
+    std::filesystem::create_directory(directory.path / "new");
+    const auto foreground = directory.path / "new" / "current.gif";
+    write_warm_gif(foreground, 2, 3000, 3000);
+    liltview::test::checkerboard(directory.path / "2.bmp", 31, 23, 7);
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    viewer.open(directory.path / "2.bmp");
+    ready_neighbors(viewer, 2, std::chrono::seconds(20));
+    REQUIRE(viewer.animation_warmup_stats().ready == 2);
+    viewer.open(foreground);
+    warm_until(
+        viewer,
+        [&]
+        {
+            const auto details = viewer.image_details();
+            return details && details->path == foreground && details->animation.has_value();
+        },
+        false, std::chrono::seconds(20));
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.source_size().width == 3000);
+    CHECK(viewer.source_size().height == 3000);
+    CHECK(viewer.animation_frames_presented() == 1);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+}
+
+TEST_CASE("slow candidate uploads cannot skip the actual warmed first frame", "[viewer][warm][upload]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    write_warm_gif(directory.path / "2.png", 2, 4, 3, 1, 4); // 40ms first-frame duration.
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    open_static_for_warm(loop, viewer, directory.path);
+    ready_neighbors(viewer);
+    renderer.upload_delay_ms = 50; // Each upload exceeds the source first-frame duration.
+    viewer.navigate(1);
+    warm_until(viewer, [&] { return viewer.warmed_first_frames_presented() == 1; });
+    CHECK(viewer.animation_frames_presented() == 1);
+    CHECK(viewer.displayed_frame_index() == 0);
+    WarmGui gui;
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+    renderer.upload_delay_ms = 0;
+    warm_until(viewer, [&] { return viewer.animation_frames_presented() == 2; });
+    CHECK(viewer.displayed_frame_index() == 1);
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{0, 0, 255, 255});
+    viewer.shutdown();
+}
+
+TEST_CASE("second warmed texture upload failure falls back before any warmed presentation", "[viewer][warm][upload]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    write_warm_gif(directory.path / "2.png", 2, 4, 3, 1, 4);
+    TestRenderer renderer;
+    liltview::Viewer viewer(renderer);
+    open_static_for_warm(loop, viewer, directory.path);
+    ready_neighbors(viewer);
+    renderer.fail_upload_at = renderer.uploads + 2;
+    viewer.navigate(1);
+    // Stop at the exact failing pump. Ordinary fallback may already be accepted,
+    // but it must not consume/present its first frame before a subsequent pump.
+    warm_until(viewer, [&] { return !renderer.fail_upload_at; });
+    CHECK_FALSE(renderer.fail_upload_at);
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.animation_frames_presented() == 0);
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == directory.path / "1.bmp");
+    CHECK_FALSE(viewer.image_details()->animation);
+    WarmGui gui;
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+    warm_until(viewer, [&] { return viewer.animation_frames_presented() >= 1; });
+    CHECK_FALSE(renderer.fail_upload_at);
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.animation_frames_presented() == 1);
+    CHECK(viewer.displayed_frame_index() == 0);
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == directory.path / "2.png");
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+    warm_until(viewer, [&] { return viewer.animation_frames_presented() == 2; });
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.displayed_frame_index() == 1);
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{0, 0, 255, 255});
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+}
+
+// Reviewed GPU-budget scenario: old 256x256 native mip image plus one 600x600
+// GIF texture fits a fixed 3MiB cap, while retaining old plus both new textures
+// does not. After ordinary first-frame commit releases old, both GIF textures fit.
+TEST_CASE("warmed GPU budget rejection preserves the old scene before ordinary playback succeeds",
+          "[viewer][warm][budget][upload]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    const auto old  = directory.path / "1.bmp";
+    const auto next = directory.path / "2.png";
+    liltview::test::checkerboard(old, 256, 256, 256);
+    write_warm_gif(next, 2, 600, 600, 1, 8);
+    TestRenderer renderer;
+    renderer.image_budget        = 3 * 1024 * 1024;
+    renderer.frame_size          = {600, 600};
+    renderer.strict_image_budget = true;
+    liltview::Viewer viewer(renderer);
+    viewer.open(old);
+    loop.settle(viewer);
+    ready_neighbors(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    REQUIRE(renderer.textures.size() == 1);
+    const auto old_bytes   = renderer.capabilities().image_bytes;
+    const auto old_slot    = renderer.textures.begin()->first;
+    const auto frame_bytes = liltview::render::image_storage_bytes({{600, 600}, false});
+    REQUIRE(old_bytes + frame_bytes <= renderer.image_budget);
+    REQUIRE(old_bytes + 2 * frame_bytes > renderer.image_budget);
+    REQUIRE(2 * frame_bytes <= renderer.image_budget);
+    CHECK(renderer.budget_rejections == 0);
+
+    viewer.navigate(1);
+    // Stop in the actual rejected-create pump, before ordinary fallback events
+    // can be consumed. The first local texture must also have been cleaned up.
+    warm_until(viewer, [&] { return renderer.budget_rejections != 0; });
+    CHECK(renderer.budget_rejections == 1);
+    CHECK(renderer.rejected_live_bytes == old_bytes + frame_bytes);
+    CHECK(renderer.rejected_request_bytes == frame_bytes);
+    CHECK(renderer.textures.size() == 1);
+    CHECK(renderer.textures.contains(old_slot));
+    CHECK(renderer.capabilities().image_bytes == old_bytes);
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.animation_frames_presented() == 0);
+    CHECK(viewer.loading());
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == old);
+    CHECK_FALSE(viewer.image_details()->animation);
+    WarmGui gui;
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+    CHECK(renderer.textures.contains(old_slot));
+
+    warm_until(viewer, [&] { return viewer.animation_frames_presented() >= 1; });
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(viewer.animation_frames_presented() == 1);
+    CHECK(viewer.displayed_frame_index() == 0);
+    CHECK(renderer.budget_rejections == 1);
+    CHECK_FALSE(renderer.textures.contains(old_slot));
+    CHECK(renderer.capabilities().image_bytes == frame_bytes);
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == next);
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{255, 0, 0, 255});
+
+    warm_until(viewer, [&] { return viewer.animation_frames_presented() == 2; });
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.displayed_frame_index() == 1);
+    CHECK(viewer.warmed_first_frames_presented() == 0);
+    CHECK(renderer.budget_rejections == 1);
+    CHECK(renderer.capabilities().image_bytes <= renderer.image_budget);
+    gui.draw(viewer, renderer);
+    CHECK(renderer.last_drawn_pixel == std::array<std::uint8_t, 4>{0, 0, 255, 255});
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    CHECK(renderer.capabilities().image_bytes == 0);
+}
+
+TEST_CASE("a prior static cold restore failure cannot suppress a new GIF's neighbor prefetch", "[viewer][warm][restore]")
+{
+    EventLoop loop;
+    WarmDirectory directory;
+    liltview::test::checkerboard(directory.path / "1.png", 2048, 2048, 31);
+    write_warm_gif(directory.path / "2.gif", 2, 4, 3, 0);
+    liltview::test::checkerboard(directory.path / "3.bmp", 17, 13, 7);
+    TestRenderer renderer;
+    renderer.image_budget = 8 * 1024 * 1024; // The 16MiB source must use cached LODs instead of native GPU residency.
+    liltview::Viewer viewer(renderer);
+    viewer.open(directory.path / "1.png");
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    WarmGui gui;
+    renderer.allow_upload = false;
+    gui.draw(viewer, renderer); // Complete FIT atlas is ready; native center may only be prefetched in RAM.
+    REQUIRE(viewer.detail_ready());
+    viewer.actual_size();
+    gui.draw(viewer, renderer);
+    REQUIRE(viewer.detail_loading());
+    renderer.fail_upload  = true;
+    renderer.allow_upload = true;
+    const auto deadline   = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (!viewer.failed())
+    {
+        viewer.pump();
+        gui.draw(viewer, renderer);
+        check_background_quota(viewer);
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        SDL_Event event;
+        SDL_WaitEventTimeout(&event, 2);
+    }
+    CHECK_FALSE(renderer.fail_upload);
+    CHECK_FALSE(viewer.loading()); // Failure was cache restoration after full decode, not initial loading.
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == directory.path / "1.png");
+    viewer.open(directory.path / "2.gif");
+    warm_until(viewer,
+               [&]
+               {
+                   const auto details = viewer.image_details();
+                   return details && details->animation && details->path == directory.path / "2.gif";
+               });
+    warm_until(viewer, [&] { return !viewer.navigation().scanning && !viewer.prefetch_pending(); });
+    CHECK_FALSE(viewer.failed());
+    CHECK(viewer.image_details()->path == directory.path / "2.gif");
+    REQUIRE(viewer.prefetch_stats().completed > 0);
+    viewer.navigate(1);
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    CHECK(viewer.image_details()->path == directory.path / "3.bmp");
+    CHECK(viewer.last_source_bytes_read() == 0); // New GIF's C neighbor was genuinely prefetched.
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
 }

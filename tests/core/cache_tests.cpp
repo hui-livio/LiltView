@@ -13,6 +13,14 @@
 // oversized DISPLAY bypass versus PREFETCH failure, NATIVE capture pressure,
 // source-slot exhaustion, successful/failed foreground admission, deterministic
 // cancel/terminal races and backpressured replay mutation/cancel, shutdown.
+// Each of the seven codecs additionally starts in a fresh Core with PREFETCH:
+// real decode -> COMPLETE with no pixel events/final count zero/cache residency,
+// then DISPLAY must read zero source bytes and match ordinary decoded pixels.
+// Codec success must use lv_frame_finish's result, not delivered tile count.
+// Borrowed animation NEXT/RESET have no new path allocation: with the worker
+// parked after COMPLETE, accepting either must preserve accounted pool capacity.
+// Positive allocation pressure still reclaims idle pixels (pixel_ownership.c),
+// while retained earlier frames remain immutable (animation_tests.cpp).
 
 #include <array>
 #include <map>
@@ -44,7 +52,7 @@ struct CachedEngine : Engine
     }
 
     explicit CachedEngine(std::uint64_t cache = mib, std::uint64_t memory = 32 * mib, unsigned max = 4, unsigned edge = 16,
-                          unsigned prefetch = 1) :
+                          unsigned prefetch = 1, unsigned sessions = 0) :
         Engine(max, memory, 0, 0, edge)
     {
         REQUIRE(lv_core_begin_shutdown(core) == LV_OK);
@@ -58,7 +66,7 @@ struct CachedEngine : Engine
         config.queue_pixel_bytes      = static_cast<std::uint64_t>(edge) * edge * 4;
         config.tile_edge              = edge;
         config.max_requests           = max;
-        config.animation.max_sessions = 0;
+        config.animation.max_sessions = sessions;
         config.prefetch_workers       = prefetch;
         config.wakeup                 = CachedEngine::wake;
         config.wakeup_userdata        = this;
@@ -109,6 +117,14 @@ struct CachedEngine : Engine
     {
         std::unique_lock lock(mutex);
         REQUIRE(changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered; }));
+    }
+
+    void arm_gate()
+    {
+        std::lock_guard lock(mutex);
+        gate              = true;
+        gate_notification = 0;
+        entered = proceed = false;
     }
 
     void release_gate()
@@ -749,5 +765,120 @@ TEST_CASE("existing static codec outputs all participate in content caching", "[
         REQUIRE(hit.terminal == LV_EVENT_COMPLETE);
         CHECK(hit.completion.source_bytes_read == 0);
         CHECK(hit.data == first.data);
+        CachedEngine prefetched_engine(4 * mib, 48 * mib);
+        const auto prefetched = receive(prefetched_engine, prefetched_engine.request(prefetched_engine.descriptor(path, true)));
+        CHECK(prefetched.terminal == LV_EVENT_COMPLETE);
+        if (prefetched.terminal != LV_EVENT_COMPLETE)
+            continue; // Keep checking other codecs, including GIF and TIFF, on the red run.
+        CHECK(prefetched.coverage.empty());
+        CHECK(prefetched.data.empty());
+        CHECK(prefetched.completion.final_tile_count == 0);
+        CHECK(prefetched.completion.source_bytes_read > 0);
+        CHECK(prefetched_engine.stats().cache_bytes > 0);
+        const auto reused = receive(prefetched_engine, prefetched_engine.request(prefetched_engine.descriptor(path)));
+        REQUIRE(reused.terminal == LV_EVENT_COMPLETE);
+        CHECK(reused.completion.source_bytes_read == 0);
+        CHECK(reused.coverage == first.coverage);
+        CHECK(reused.data == first.data);
     }
+}
+
+TEST_CASE("borrowed animation NEXT and RESET preserve idle pool capacity without a path allocation", "[cache][animation][pool]")
+{
+    Files files;
+    const std::string svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='72'><rect width='96' height='72' fill='red'/></svg>";
+    const auto seed = files.write("pooled.svg", {svg.begin(), svg.end()});
+    const auto gif  = (std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" / "red-blue-loop.gif").string();
+    CachedEngine engine(0, 64 * mib, 2, 512, 1, 1);
+    const auto base = engine.stats().accounted_cpu_bytes;
+    lv_animation_open_desc open;
+    lv_animation_open_desc_init(&open);
+    open.path                 = {LV_PATH_POSIX_BYTES, gif.data(), gif.size()};
+    open.target.as.fit_bounds = {100, 100};
+    lv_animation_id session   = 0;
+    lv_request_id request     = 0;
+    REQUIRE(lv_core_open_animation(engine.core, &open, &session, &request) == LV_OK);
+    for (;;)
+    {
+        Event event(engine.next());
+        REQUIRE(event.view().request_id == request);
+        if (event.view().type == LV_EVENT_COMPLETE)
+            break;
+        REQUIRE(event.view().type == LV_EVENT_ANIMATION_INFO);
+    }
+    const auto seed_id           = engine.request(engine.descriptor(seed));
+    const unsigned char *address = nullptr;
+    for (;;)
+    {
+        Event event(engine.next());
+        REQUIRE(event.view().request_id == seed_id);
+        if (event.view().type == LV_EVENT_REGION_READY)
+            address = lv_pixels_get_view(event.view().as.region.pixels)->data;
+        else if (event.view().type == LV_EVENT_COMPLETE)
+        {
+            // All pixel events were released above. Arming before releasing
+            // this terminal guarantees a future notification pauses the worker.
+            engine.arm_gate();
+            break;
+        }
+        else
+            REQUIRE(event.view().type == LV_EVENT_IMAGE_INFO);
+    }
+    REQUIRE(address);
+    const auto submit_borrowed = [&](lv_animation_action action)
+    {
+        engine.wait_gate();
+        const auto before = engine.stats().accounted_cpu_bytes;
+        lv_animation_request_desc next;
+        lv_animation_request_desc_init(&next);
+        next.animation_id = session;
+        next.action       = action;
+        REQUIRE(lv_core_submit_animation(engine.core, &next, &request) == LV_OK);
+        // Worker is parked: this is admission alone, not allocator coincidence.
+        CHECK(engine.stats().accounted_cpu_bytes == before);
+        engine.release_gate();
+    };
+    const auto collect_frame = [&](std::uint64_t index, bool park)
+    {
+        for (;;)
+        {
+            Event event(engine.next());
+            const auto &view = event.view();
+            REQUIRE(view.request_id == request);
+            if (view.type == LV_EVENT_ANIMATION_FRAME_INFO)
+                CHECK(view.as.frame.key.frame_index == index);
+            else if (view.type == LV_EVENT_ANIMATION_REGION_READY)
+                CHECK(lv_pixels_get_view(view.as.frame_region.region.pixels)->data == address);
+            else
+            {
+                REQUIRE(view.type == LV_EVENT_COMPLETE);
+                if (park)
+                    engine.arm_gate();
+                break;
+            }
+        }
+    };
+    submit_borrowed(LV_ANIMATION_NEXT);
+    collect_frame(0, true); // Output returned to the same idle allocation.
+    submit_borrowed(LV_ANIMATION_NEXT);
+    collect_frame(1, true);
+    submit_borrowed(LV_ANIMATION_RESET);
+    for (;;)
+    {
+        Event event(engine.next());
+        if (event.view().type == LV_EVENT_COMPLETE)
+            break;
+        REQUIRE(event.view().type == LV_EVENT_ANIMATION_INFO);
+        CHECK(event.view().as.animation.epoch == 2);
+    }
+    lv_animation_request_desc next;
+    lv_animation_request_desc_init(&next);
+    next.animation_id = session;
+    REQUIRE(lv_core_submit_animation(engine.core, &next, &request) == LV_OK);
+    collect_frame(0, false);
+    REQUIRE(lv_core_begin_shutdown(engine.core) == LV_OK);
+    REQUIRE(lv_core_join(engine.core, 5000) == LV_OK);
+    CHECK(engine.stats().accounted_cpu_bytes == base);
+    CHECK(lv_core_destroy(&engine.core) == LV_OK);
 }
