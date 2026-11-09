@@ -1,0 +1,108 @@
+# 开发计划与未实现设计
+
+更新：2026-11-09。本文集中保留未完成的产品、性能和接口要求；除明确标注已完成的基础外，下述能力均为待实现。优先级为整理建议，没有新增交付日期或锁定新依赖。现状见[产品设计](PRODUCT_DESIGN.md)与[架构](ARCHITECTURE.md)。
+
+## 1. 工作顺序与完成条件
+
+| 建议顺序 | 工作 | 当前缺口 / 完成条件 |
+| --- | --- | --- |
+| P0 | 首次大图加载与响应 | 首次 LOD、压缩和缓存写入迁出 UI；分开测首行带、全图完成、100% 恢复；不能只凭单帧耗时宣称流畅 |
+| P0 | 内存 / 磁盘总账 | 统一 app 索引、描述符、LOD、暂存、旧 / 新场景与本地缓存预算；补磁盘不足、I/O 失败和恢复测试 |
+| P0 | 缩小质量与冷 LOD | 改善 atlas 强缩小混叠、冷层级批量驻留与预测预热；相机操作继续只使用已生成像素，不重算 LOD |
+| P1 | 同目录连续浏览 | 后台枚举、明确排序、上一张 / 下一张、首尾状态与序号；快速换图取消旧工作并过滤旧结果 |
+| P1 | 相邻文件预读 / core 内容缓存 | 显示优先、有界回收、版本失效和取消；目前 PREFETCH、非零 core 缓存配置仍不支持 |
+| P2 | 浏览信息与动画控制 | 缩放百分比、必要元数据、GIF 暂停 / 继续；双击和信息入口按明确交互实现 |
+| P2 | 新编码格式与颜色链路 | 逐格式定义后端、实际子集、预算、取消和输出；RGBA8 预览与高精度 / HDR 分别验收 |
+| P3 | 原始像素与新渲染路径 | 显式输入参数、CPU 正确性基线、输出协商，再实施专用 pass 和 RGB / YUV 原生纹理 |
+| P3 | Windows、更新检测 | 文件 / 窗口 / D3D11、安装与退出单独验收；更新功能另行引入网络依赖 |
+
+已完成的性能基础：单次静态 NATIVE、原始行带发布、场景 tile / LOD 缓存、后台读取 / 解压、按可见网格索引、邻居预热、完整高清覆盖下相机推进、512px 应用 tile、有界 PBO。上述基础不代表冷跳转或首轮缓存生成已无卡顿，细节与历史测量见[渲染实现](RENDERING.md)。
+
+## 2. 文件格式范围（全部待实现）
+
+| 格式 | 必须分别验收的子能力 |
+| --- | --- |
+| AVIF | 主图有损 / 无损、透明、高位深；普通尺寸动画另项 |
+| JPEG XL | 有损 / 无损、透明、高位深、渐进、JPEG 无损重压缩文件读取；动画另项 |
+| HEIF / HEIC | 容器与实际 codec 子集、主图、方向 / 裁切、透明、高位深；集合 / 序列另项 |
+| APNG | 默认静态图与动画 frame 0、blend / disposal、帧时长、循环；只显示首帧不算完成 |
+| 动画 WebP | 完整画布、透明合成、帧时长与循环；现有静态 decoder 不等于动画可用 |
+| ICO / CUR | PNG / DIB 条目、多尺寸选择、alpha / mask、CUR 热点元数据 |
+| QOI | RGB / RGBA 无损读取，可作编解码性能对照 |
+| JPEG 2000 | JP2 与裸 J2K 明确子集、有损 / 无损、高位深、颜色及区域 / 分辨率成本 |
+| OpenEXR | 明确 part / 通道选择、半浮点 / 浮点到 RGB(A)、window / origin、NaN / Inf 显示政策、压缩与 scanline / tile 子集；deep 等另项 |
+| 相机 RAW / DNG | 指定相机 / 编码子集、active area / CFA / 标定；内嵌预览与完整显影独立验收，不承诺所有厂商机型 |
+| TIFF 多页 | 首页之外的页面枚举 / 选择及版本锚定；不自动把独立页作为动画 |
+
+后端尚未选型锁定，可评估 libavif、libjxl、libheif、OpenJPEG、OpenEXR、LibRaw 等。每项接入前确认版本、构建组件、许可证、发行包体积和依赖边界。普通尺寸动画与超大静态图分开验收；超大动图、CAD、PSD / PSB 等专用设计源文件不纳入。
+
+## 3. 无文件头原始像素
+
+产品需有独立打开 / 参数入口，参数可查看、修改与复用。`.raw`、`.yuv`、文件长度以及 `YUV420`、`RAW10` 都不能唯一决定布局；缺失参数要补充或明确展示预览假设，不能静默猜测。相机 RAW 是带元数据的文件类别，与此处裸像素不同。
+
+| 必需描述 | 要求 |
+| --- | --- |
+| 尺寸与方向 | 有效宽高、存储行方向、显示方向；不把 FIT 显示大小当源尺寸 |
+| 数值与格式 | 通道顺序、alpha 语义、整数 / 半浮点 / 浮点、有效位 / 容器位宽、有效位对齐 |
+| 存储 | 字节序、具体 packing、数据起点、各 plane 顺序 / 相对偏移 / 正 stride；行方向独立表示 |
+| 颜色 | RGB / 灰度的色域 / transfer 或具名未校准预览；YUV 的 matrix / range / chroma siting / primaries / transfer |
+| Bayer 处理 | CFA 原点、黑白电平、曝光 / 白平衡、颜色矩阵、去马赛克算法与边界策略；缺少标定时报告未校准 |
+| 多帧（后续） | 显式 frame_stride、帧数、起始帧和帧率；不从剩余文件字节自动猜动画 |
+
+| 类别 | 待支持的具体布局 |
+| --- | --- |
+| RGB / 灰度 | RGB24、BGR24、RGBA8、BGRA8、RGB565、Gray8 / Gray16；更高位深及浮点逐项定义 |
+| YUV 4:2:0 | I420 / IYUV、YV12、NV12 / NV21；核对 UV / VU 顺序 |
+| YUV 4:2:2 | YUYV / YUY2=`Y0 U0 Y1 V0`、UYVY=`U0 Y0 V0 Y1`、YVYU=`Y0 V0 Y1 U0`、VYUY=`V0 Y0 U0 Y1`；另含显式三平面与 NV16 / NV61 |
+| YUV 4:4:4 | 显式三平面、NV24 / NV42；packed 444 须明确通道与 alpha / padding 规范 |
+| 高位深 YUV | P010 / P016、10 / 12 / 16 位 planar 等逐项定义，不与同位深其他 packing 混用 |
+| Bayer | RGGB、BGGR、GRBG、GBRG；8 / 10 / 12 / 14 / 16 位，16 位容器与 MIPI / V4L2 packed 按具体规范分别接入 |
+
+`UYUV` 仅保留为既有需求中指向 UYVY 的说明，不注册未定义解析格式。别名在字节布局核对后规范化。YUV 奇数尺寸、plane 大小、packed 尾组及对齐规则逐格式定义；不支持的尺寸明确拒绝，不能截断。不得按分辨率默猜 BT.601 / 709，也不得把任何 10 位数据自动视为 HDR。
+
+Bayer CFA 以规范化行方向后、尚未应用显示方向的完整源图原点为准；ROI / active-area 偏移改变相位。R / Gr / Gb / B 黑电平和增益映射须明确。去马赛克 halo、边界扩展与质量版本进入处理配置，相邻 tile 不得出现接缝；整次处理固定曝光 / 白平衡 / 映射，不能每 tile 自动曝光。CFA 灰度检视与彩色去马赛克分别验收。
+
+每个 plane 都以受检运算验证：`base_offset + plane_offset + (rows−1) × stride + active_row_bytes ≤ file_size`；stride 不小于有效行长，不要求最后一行存在不会读取的 padding。检查偏移溢出、平面非法重叠、截断、尾部数据、错误 packing 与 64 位文件定位，不能用 `宽 × 高 × 1.5` 概括全部 YUV。
+
+## 4. Core 接口扩展边界（尚未实施）
+
+保留本地文件、不可变请求、worker、不可变事件 / 像素主线。首轮不同时引入网络流、用户 I/O 回调、相机采集、DMA-BUF、任意内存借用或动态插件 ABI。
+
+| 描述层 | 必要职责 |
+| --- | --- |
+| input / raw_layout | 编码文件与显式 raw 模式、路径、源字节布局；编码提示须核对内容 |
+| selection / probe | 有界异步枚举 item / page / part / 通道 / 预览角色；不在 submit 同步扫描容器 |
+| processing | 类型化颜色 / CFA / 去马赛克 / 显影配方，与存储布局分离 |
+| output | 允许的像素格式、精度、颜色、alpha、HDR 映射与是否允许转换回退；INFO 报实际结果 |
+| identity | 文件版本、选中图像、规范化处理身份、目标 / 实际 layout 缓存键分别表达；user_tag 不作处理身份 |
+| diagnostics | 有界、可选的阶段统计与稳定错误 detail，不要求 UI 解析英文诊断 |
+
+当前 ABI 2 使用精确 `struct_size`，不能原位追加字段或把 reserved 改成指针。仅新增内部 RGBA8 decoder 可复用现有布局；raw / selector / 颜色 / 多平面需要布局变更时集中升级下一主 ABI（候选 ABI 3），同步初始化器、event union、C23 / C++20 / C++23 布局与生命周期测试。候选描述不是当前 C 声明。
+
+- submit 成功前有界深拷贝异步所需数组、路径、ICC 和描述；限制 plane 数（首轮至多 4）、profile / metadata 字节，全部计预算。core 不解析应用 YAML 或隐式 sidecar。
+- probe 只返回有界目录及续枚举位置，不完整解码全部内容；选择不存在明确失败，不悄悄替换为另一个条目。probe→decode 校验期望源版本，变更重新探测。
+- 文件版本不是处理配方；颜色、CFA、布局、质量或输出改变形成新处理身份。默认值 / 别名先规范化，拒绝 NaN / Inf 配置，不能仅靠未核查碰撞的短 hash 判等。
+- REGION 继续表达未旋转输出 canvas 的覆盖，不偷换成源像素裁剪；源 ROI 按色度对齐、filter / demosaic halo 后裁切。可生成区域与高效随机访问分别声明。
+- 首阶段 CPU 转换为 RGBA8，声明量化 / tone-map；SDR 预览不算保留高精度或原生 HDR。后续协商 `输入可生成 ∩ 调用方允许 ∩ renderer 可消费` 的格式，无交集且未允许转换则拒绝。
+- 多平面与必要颜色元数据由同一不可变像素 owner 锚定，retain 后独立于 INFO / event；整个 plane 集原子交付。core 不暴露 GL / D3D 句柄。
+- 队列与预算按实际 layout / halo / 解包 / 颜色 / 动画参考推导，真实 backing 只记一次。至少一个 payload 必须能进入队列，否则报错而非永久等待；不能发布中途改变格网。
+- 逐行 / 块 / 解包 / 转换及队列等待设取消点；第三方不可中断调用如实报告，沿用终结竞争与三阶段关闭。文件、解析、源尺寸、输出阈值和工作集限制分别记录。
+- 动画扩展沿用会话、epoch、NEXT / RESET、整帧切换；各 adapter 归一时长和总循环数，精确有理时间累计后再换算，隐藏参考帧不当显示帧。处理配方变化创建新会话。
+
+## 5. 后续渲染阶段
+
+1. 先完成现有 RGBA8 性能和画质问题，再以独立 image pass 做视觉等价验证；保留 ImGui UI shader。比较直接画布与 viewport-size FBO，禁止源图大小 FBO 绕过预算。
+2. 按 OpenGL 3.3 vertex / fragment 能力实施，不直接提高最低版本；完整恢复 program / VAO / buffers / sampler / blend / scissor / framebuffer / pixel-store 状态。
+3. RGB8 / R8 输入先明确通道扩展、alpha、BGR 顺序、奇数宽度、alignment / stride 与 fallback；不能硬编码 width×4，也不承诺 RGB8 必然少占 25% 物理显存。
+4. 多平面先验收 8-bit I420 / NV12，再单列 YV12 / NV21、422 / 444、packed、高位深；每 plane 的尺寸、offset、stride、UV 顺序和颜色规则明确，使用 golden reference。
+5. JPEG 原生 YCbCr 先评估现有 libjpeg component / MCU / progressive 行为；当前 `WITH_TURBOJPEG=OFF`，不能假设 TurboJPEG API 可链接。YUV shader 不等于 GPU JPEG / PNG 解码，也不把 RGB 图片先转成 YUV。
+6. PBO 已实现；下一步完善 GPU 提交 / 完成时间线及暂存总账，测量 direct fallback 和冷 LOD 整体等待。任何新异步读取调用方数据的接口都先定义 retain / 完成与预算。
+
+## 6. 验收与性能口径
+
+- 新格式确定后端 / 版本 / 许可证，接通真实入口、能力查询、后台任务、错误、取消和预算后，才更新[实际兼容表](IMAGE_FORMATS.md)。合法但不支持与非法输入分开报错。
+- 覆盖正常、损坏 / 截断、异常尺寸、offset / stride / packing、透明、源变更、预算失败、快速换图与退出；新增源的能力、访问成本及颜色限制逐项声明。
+- 画质覆盖 1px 棋盘、非均匀图、透明边缘、EXIF 1..8、HiDPI 1 / 1.25 / 1.5 / 2、强缩小、缓存淘汰恢复，以及 YUV 彩条 / 电平、Bayer 四相位 / halo。
+- 性能固定输入版本、Release 构建、机器 / 驱动、窗口 / DPI、采样与质量；冷 / 热 OS 缓存和 GPU 驻留分开记录。报告首行带、全图、100%、帧 P50 / P95 / P99 / 最大值、目标完成、draw calls 和资源峰值。
+- 统计拆分探测 / 读文件 / 解码 / 解包 / 色转 / 去马赛克 / LOD / 压缩 / 缓存 / 上传 / draw / present；core COMPLETE 不等于 GPU 完成或用户看见。未知阶段写 unknown，raw 压缩解码写不适用，不能伪造零耗时。
+- 现有生成样本按[输入清单](../benchmarks/inputs/README.md)维护，新格式样本待补、性能未测；RGB / YUV / Bayer 由记录转换参数的同源数据生成，不靠改扩展名。完整矩阵见[测试计划](../benchmarks/TEST_PLAN.md)。

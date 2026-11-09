@@ -1,20 +1,17 @@
-# 核心实现分区
+# 核心源码入口
 
-已实现 Linux JPEG / PNG / SVG / WebP / BMP / GIF / TIFF DISPLAY / FIT 链路和所有公共函数入口。JPEG / PNG / 未压缩 BMP / TIFF 另支持 DISPLAY / REGION；未接入的 PREFETCH、缓存、多 worker 与扩展格式返回明确不支持，不提供伪成功实现。
+当前为 Linux、C23、ABI 2、单 worker；七类格式的实际范围见[兼容表](../../docs/IMAGE_FORMATS.md)。调用、所有权、预算、取消和关闭统一维护在 [Core 契约](../../docs/CORE_CONTRACTS.md)，完整声明见 [core.h](../include/liltview/core.h)。
 
-现有分工与后续扩展：
+| 路径 | 职责 |
+| --- | --- |
+| `api/config.c` | 配置 / 请求初始化、ABI 查询 |
+| `api/engine.c`、`api/animation.c` | 参数校验、请求 / 会话入口、取消、三阶段关闭 |
+| `engine/worker.c`、`engine/animation.c` | 静态与动画任务调度、会话状态和清理 |
+| `engine/objects.c` | 资源账本、事件池、像素引用、源版本及队列背压 |
+| `codecs/image.c`、`codecs/raster.c` | 内容探测、输出准入、行带 / tile 发布、受检采样 |
+| `codecs/` 其他文件 | 各格式解码、GIF 持久合成、格式限制与清理 |
+| `platform/file.c` | 常规文件、版本核验和单调时钟 |
 
-- `api/config.c`：配置 / 请求初始化和 ABI 查询。
-- `api/engine.c`：创建、参数校验、单 worker 调度、取消与三阶段关闭。
-- `engine/objects.c`：预算预约、事件池、像素引用计数、源身份与队列背压。
-- `codecs/image.c`：内容探测、单次打开、共用预算 / FIT / tile 发布与 alpha 缩放。
-- `codecs/jpeg.c`：有界输入、8 位 RGB / 灰度 JPEG、EXIF、缩放解码、双线性 FIT 和最终 tile 发布。
-- `codecs/png.c` / `webp.c` / `bmp.c` / `svg.c`：各格式校验、解码 / 栅格化及清理。
-- `cache/` 为后续规划，尚未实现。
-- `platform/file.c`：Linux 常规文件、版本检查和单调时钟；Windows 文件适配待实施。线程使用 C 线程 API。
+静态支持 FIT / NATIVE，JPEG / PNG / 未压缩 BMP / TIFF 另有 REGION；NATIVE 的区域 codec 可提前发布完整原始行带。最终像素交付移交引用或共享 backing，不为事件拆分深拷贝。
 
-核心不链接 ImGui、spdlog、Catch2 或网络库。新增 `.c` 文件由 C23 编译器编译。动画会话 / 单 worker 生命周期见 api/animation.c 与 engine/animation.c / worker.c，GIF 持久解码见 codecs/gif_animation.c。
-
-所有 codec 依赖由固定 submodule 静态构建；JPEG 采用独立 ExternalProject，PNG / WebP / SVG 采用本地 CMake。格式兼容范围见[图片格式与解码实现](../../docs/IMAGE_FORMATS.md)。当前解码器内部内存使用保守预约，未拦截其分配，不把账本当进程 RSS 硬上限。运行约束详见 [Core API 当前实现范围](../../docs/CORE_API-v0.1.md#12-当前实现范围)。
-
-大图、直接图块输出、共享连续 backing 与缓冲回收规则见[大图与像素所有权](../../docs/LARGE_IMAGES.md)。`codecs/raster.c` 负责有界行采样；`image.c` 在最终发布时只转移引用或创建视图，不复制像素。
+Core 不依赖 UI、renderer、翻译、spdlog 或网络。codec 使用固定源码静态构建；工作集按保守 allowance 准入，不承诺进程 RSS 硬上限。PREFETCH、跨请求内容 / 磁盘缓存、多 worker 和 Windows 文件适配仍待实现；应用场景缓存见[渲染说明](../../docs/RENDERING.md)。

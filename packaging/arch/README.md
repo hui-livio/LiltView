@@ -107,9 +107,9 @@ pacman -Qlp ./liltview-*.pkg.tar.zst
 
 PKGBUILD 的 `check()` 验证实际可执行文件版本和 desktop 文件语法；不要求桌面会话。发布前还应在干净 Arch 构建环境检查依赖，在有桌面的机器验证 X11 / Wayland 和图形驱动。安装需要管理权限，打包、归档与离屏冒烟测试不需要安装应用到系统。
 
-操作语义以本机 `makepkg(8)`、`PKGBUILD(5)`、`pacman(8)` 和 `paru(8)` 为准。性能待办仍见[性能优化记录](../../docs/PERFORMANCE_TODO.md)，增加打包脚本不代表加载速度问题已解决。
+操作语义以本机 `makepkg(8)`、`PKGBUILD(5)`、`pacman(8)` 和 `paru(8)` 为准。性能待办见[开发计划](../../docs/DEVELOPMENT_PLAN.md)，打包能力不代表加载速度问题已解决。
 
-## 7. 本次验证记录（2026-11-09）
+## 7. 历史打包验证（2026-11-09）
 
 - 开发版 105 项常规测试通过；实际 makepkg 完成源码 SHA-256 校验、Release 构建、`check()`、打包和元数据生成，JPEG 的 NASM SIMD 对象参与构建。
 - 实测本地包压缩约 7.59 MiB、安装约 13.34 MiB；体积随工具链、makepkg 标志和压缩配置变化。

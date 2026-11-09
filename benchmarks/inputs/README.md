@@ -36,7 +36,7 @@ GIF 使用 256 色全局调色板。全帧样本移动棋盘并更新色块；�
 
 ## 后续输入（待补充）
 
-AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG，以及无文件头的原始 RGB / 灰度、YUV、Bayer 都已列入 [性能测试计划](../TEST_PLAN.md)。相关应用能力均为 [待开发](../../docs/FORMAT_ROADMAP.md)。
+AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG，以及无文件头的原始 RGB / 灰度、YUV、Bayer 都已列入 [性能测试计划](../TEST_PLAN.md)。相关应用能力均为[待开发](../../docs/DEVELOPMENT_PLAN.md)。
 
 新增静态文件规划放到 `static/normal/<format>/`，适用的超大静态文件放到 `static/large/<format>/`，普通动图放到 `animation/<format>/`。原始数据规划放到 `raw/rgb/`、`raw/yuv/`、`raw/bayer/`，并随附宽高、具体布局、位深、字节序、行跨度、文件 / 平面偏移和适用颜色 / CFA 参数的描述文件；这些目录和描述文件目前尚未创建，具体配置格式待实现确定。
 

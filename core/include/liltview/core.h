@@ -1,9 +1,8 @@
 #ifndef LILTVIEW_CORE_H
 #define LILTVIEW_CORE_H
 
-/* Runtime ABI v2: static DISPLAY/FIT/REGION and bounded GIF animation sessions.
- * Contracts: docs/CORE_API-v0.1.md and docs/CORE_RUNTIME-v0.1.md.
- * Animation contract: docs/CORE_ANIMATION-v0.2.md.
+/* Runtime ABI v2: static DISPLAY/FIT/REGION/NATIVE and bounded GIF animation sessions.
+ * Contracts: docs/CORE_CONTRACTS.md; rendering: docs/RENDERING.md.
  * C23 implementation, C++20/23 consumers.
  * ABI compatibility is for the same architecture and platform ABI only. */
 #include <stddef.h>

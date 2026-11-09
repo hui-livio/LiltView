@@ -1,0 +1,175 @@
+# Core 接口与生命周期契约
+
+更新：2026-11-09。本文合并原 API、Runtime 与动画契约，按当前工作区源码静态核对；不表示本次重新执行全部测试。正式声明以 [core.h](../core/include/liltview/core.h) 为准，模块关系见 [架构文档](ARCHITECTURE.md)，显示与缓存见 [渲染说明](RENDERING.md)。
+
+## 1. 当前能力与 ABI
+
+Core 使用 C23，向 C / C++20 / C++23 提供无窗口、GPU、ImGui 或平台对象的 C 接口。当前运行时为 **ABI 2**，只支持 Linux 常规本地文件。
+
+| 能力 | 当前实现 |
+| --- | --- |
+| 静态 DISPLAY / FIT / NATIVE | JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 首帧、TIFF 首页 |
+| 静态 DISPLAY / REGION | JPEG、PNG、未压缩 BMP / bitfields、TIFF；顺序格式仍可能扫描源文件 |
+| 动画会话 | 普通 GIF，顺序 NEXT / RESET；完整帧合成由 Core 负责 |
+| 调度 | 单 worker；待执行任务按优先级、同级请求 ID 排序，不保证抢占正在解码的任务 |
+| 尚未实现 | PREFETCH、Core 跨请求缓存 / 磁盘缓存、多 worker、Windows 文件适配、其他动画后端 |
+
+`lv_core_query_format()` 返回构建能力上限，具体文件的 INFO 再收窄；枚举和能力位存在不表示所有格式变体可用。完整兼容子集见 [格式表](IMAGE_FORMATS.md)。app 的匿名 tile / LOD 缓存独立于尚未实现的 Core 缓存配置。
+
+- 配置的 `abi_version`、`struct_size` 和各 descriptor 的 `struct_size` 必须精确匹配；不匹配返回 `LV_ABI_MISMATCH`。
+- ABI 只覆盖相同体系结构与平台 ABI；结构不是文件序列化格式。不兼容布局变更应提升主 ABI，计划见 [开发计划](DEVELOPMENT_PLAN.md)。
+- 先调用配套初始化器，再填写必需字段。初始化器会清空旧值；NULL 输出为无操作。动态加载时先查询 `lv_core_abi_version()`，匹配后才调用初始化器。
+- 同步失败清空有效输出 core / ID / event；不产生异步事件。输出参数自身为 NULL 返回 `LV_INVALID_ARGUMENT`。
+- C++ 异常不得穿过 C API 或回调边界；调用方负责在适配器内捕获。
+
+## 2. 配置与输入
+
+| 字段 | 初值 / 当前限制 |
+| --- | --- |
+| `cpu_budget_bytes` / `queue_pixel_bytes` | 均初始化为 0，调用方必须填写非零合法预算 |
+| `cache_budget_bytes` / `disk_cache_budget_bytes` | 0；非零在 create 返回 `LV_UNSUPPORTED` |
+| `foreground_workers` / `prefetch_workers` | 1 / 1；当前只允许一个前台 worker，预读未接入 |
+| `tile_edge` | 256；允许 16..1024 的 2 次幂 |
+| `max_requests` | 16；允许 1..1024，包含终结尚未 release 的请求 |
+| 分档阈值 | 文件 16 MiB、small 像素 64 MiB、large 像素 256 MiB |
+| 显示策略参数 | `progressive_after_ms=100`、`update_interval_ms=33`；不是首帧时限保证 |
+| 动画会话 | `max_sessions=2`，允许 0..64；0 禁用会话，reserved 必须为 0 |
+| 动画驻留子预算 | 0 在 create 解析为 `min(CPU/2, 128 MiB)`；显式值不得超过 CPU 总预算 |
+| 日志 / 唤醒 | 日志等级 WARN；回调默认为空 |
+
+队列预算不得超过 CPU 预算，且至少容纳 `tile_edge × tile_edge × 4`；创建还要容纳基础对象、控制记录和最小输出块。预算关系非法返回 `LV_INVALID_ARGUMENT`，真实分配失败返回 `LV_OUT_OF_MEMORY`。应用设置的预算和 tile 尺寸见 [渲染说明](RENDERING.md)，它们不是 Core 初始化默认值。
+
+路径携带编码、指针和字节长度，不要求 NUL 结尾。当前接受绝对路径的 `LV_PATH_UTF8` 或 `LV_PATH_POSIX_BYTES`，禁止内嵌零；UTF-8 必须合法。Windows UTF-16 当前返回 `LV_UNSUPPORTED`。
+
+submit 仅做参数校验、路径复制和有界资源受理，不做文件 I/O、stat 或 realpath。成功后调用方可释放原路径。worker 按内容识别格式，扩展名不决定解码器；允许符号链接指向常规文件，目录、设备、FIFO、socket 等拒绝为异步 I/O 错误。
+
+## 3. 显示请求与事件
+
+初始化请求默认 DISPLAY、CURRENT、FIT、`user_tag=0`；路径和 FIT 边界由调用方填写。`LV_OK` 只表示受理，文件错误、格式错误和解码预算错误由 worker 异步报告。
+
+| 目标 | 坐标与交付 |
+| --- | --- |
+| FIT | 边界是方向变换后的物理像素；位图等比缩小、不放大。INFO.canvas 是未旋转输出尺寸 |
+| NATIVE | 无需先知源尺寸；位图使用原始未旋转画布，SVG 按自然尺寸。区域 codec 按行带发布最终像素，其余 codec 可完整解码后发布 |
+| REGION | 提供未旋转的完整输出 canvas 和其中半开 rect；canvas 只是坐标空间，不要求分配完整画布 |
+
+REGION 必须非空、无溢出、位于 canvas 内，并保持源图比例（允许一像素舍入误差）；无法实现的目标异步 `TARGET_UNSUPPORTED`，预算不足为 `MEMORY_BUDGET`，不得静默缩小。JPEG / PNG 的 REGION 能力不等于高效随机读取。
+
+**当前静态 Viewer 只提交一次 NATIVE**。缩放和平移使用已生成纹理 / 缓存，不再提交 FIT → REGION；API 仍保留这两类目标供其他调用者使用。
+
+正常运行且调用方持续消费时，每个受理请求只有一个终结：COMPLETE、ERROR 或 CANCELLED。不同请求可交错，同一请求 sequence 严格递增，允许间隙。
+
+| 事件 | 含义 |
+| --- | --- |
+| IMAGE_INFO | 最多一次，在像素前到达；含实际尺寸、方向、能力、canvas、region 和源版本 |
+| REGION_READY | 不可变有效像素、格网 tile ID、revision、FINAL 和呈现策略 |
+| COMPLETE | 所有必要最终块已发布，生产结束；不代表上传、GPU 执行或用户已看见 |
+| ERROR | 分类错误、可用系统错误 / 预算诊断；`has_partial_output` 只表示曾发布像素 |
+| CANCELLED | 协作退出，不再生产数据 |
+
+早期失败 / 取消可以没有 INFO。ERROR 保留此前有效排队结果，但部分输出不得当作整图成功；SOURCE_CHANGED 后不能继续与新版本拼接。
+
+tile 网格从 canvas 原点开始，边界裁到请求区域，`tile_id = row × ceil(canvas.width / tile_edge) + column`。最终块须无缝覆盖 INFO.region，COMPLETE.final_tile_count 与覆盖一致。
+
+接口保留同 tile 的单调 revision 和不可变细化语义；**当前实现只发布 revision=1 的 FINAL 块**，不是 progressive JPEG 扫描或 Adam7 pass 的多次修订。
+
+- NATIVE 的完整原始行带经过源版本检查即可发布为 IMMEDIATE，允许整图 COMPLETE 前显示；已发布像素不再修改。
+- FIT / REGION 当前在完成解码及检查后发布，标为 AT_COMPLETE；调用方可边上传边归还 CPU 引用。
+- 100 ms 仅是静态内容呈现策略，超时没有像素时继续等待，不重启解码；33 ms 不代表当前已有扫描合并算法。
+- 终结 release 才归还请求槽。保留 INFO / pixels 不使旧请求槽继续有效，但仍占预算 / 控制记录。
+
+## 4. 所有权、线程与源版本
+
+```text
+poll_event → 调用方拥有 event → event 持有 pixels 引用
+                             └─ pixels_retain → 独立延长寿命
+event_release → 归还 event 及其引用
+pixels_release → 归还额外 retain 的引用
+```
+
+get_view 返回借用指针，不能 free、修改或仅靠复制 view 延长寿命；diagnostic 随 event 失效，需留存时复制。retain 必须发生在已有有效引用期间；每个事件及额外引用各释放一次，release / retain(NULL) 无操作，get_view(NULL) 返回 NULL。
+
+当前像素为左上原点 RGBA8，字节顺序 R/G/B/A、straight alpha；方向由调用方应用。未知颜色解释保持 UNKNOWN，不宣称完成 sRGB 转换。按 stride_bytes / byte_count 访问，不能假定紧密排列；有效地址跨度为 `(height−1)×stride + width×4`。
+
+像素可共享更大的 backing。Core → event → app 的交接不深拷贝最终像素；最后引用释放后才允许复用。codec 合成 / 重采样、app 缓存编码和 renderer 自有 PBO 拷贝是各自工作，不属于“所有阶段零拷贝”。
+
+创建 core 的线程是唯一控制线程；submit、cancel、poll、query、stats、shutdown、join、destroy 与动画控制均串行调用。该约束由调用方遵守，不承诺运行时检测错误线程。
+
+持有有效对象时可跨线程读 view；event_release、pixels_retain / release 可跨线程调用，调用方负责移交所有权并结束并发访问。日志 / 唤醒可能由 worker 调用，只能快速、线程安全地记录或通知，不重入 Core / UI。
+
+wakeup 是“可能有事件或资源可用”，允许随后 poll=EMPTY。控制线程应排空队列，或达到帧预算后主动继续消费；不能丢掉未消费内容后只等下一次边沿通知。BUSY 后继续处理事件 / 释放资源并重试，不在 UI 忙等。
+
+`source_revision` 是实例内、不复用的不透明文件版本身份，不是内容哈希或跨运行 ID。活动请求、保留的 INFO 等锚定同一可观测版本；只复制 INFO 值再 release 不保留锚点。不同 core 的 revision 不可比较。
+
+若调用方组合 FIT / REGION，须保留 INFO 锚点并核对 revision、尺寸和方向。当前 NATIVE 每行带及结束检查可检测的源变化；本地文件并非快照，无法保证发现所有并发修改，完成后也不自动监控文件变化。
+
+## 5. 预算、背压与取消
+
+Core 先预留可推进工作集，再实际分配；共享 backing 只计一次。CPU 账本包含受追踪的对象、路径、像素、元数据和空闲池，预约不计入 accounted_cpu_bytes。第三方内部内存按保守 allowance 准入，线程栈 / 系统分配等另测，**不是进程 RSS 硬上限**。
+
+| 统计 / 限制 | 口径 |
+| --- | --- |
+| `accounted_cpu_bytes` | 当前实际追踪分配，含共享 backing 的真实大小及空闲池 |
+| `queued_pixel_bytes` | 未 poll 像素的逻辑 `width×height×4`，不含 stride 行间空隙 |
+| `pinned_pixel_bytes` | 已借出的像素 view 逻辑面积，不是 backing 实际驻留量 |
+| cache / disk cache stats | 当前 Core 未实现内容缓存；空闲分配复用池不是内容缓存 |
+
+上述统计可能重叠，不能相加作 RSS。poll 释放队列额度，实际像素仍占 CPU 预算直到最后引用消失。队列满或外部引用占用时允许背压等待，cancel / shutdown 必须能唤醒。
+
+控制池容量为 `2×max_requests + 2×max_sessions + 1`。受理前取得请求槽、两个控制记录和路径空间，避免解码失败时无法交付终结；长期保留 INFO 可使新提交 BUSY，不能无限扩池。
+
+自身固定需求超过预算则异步 MEMORY_BUDGET，不能等待唯一 worker 自己永远无法释放的驻留会话或排队路径。真实分配失败为 OUT_OF_MEMORY；永久路径 / ID 上限为 LIMIT_REACHED。关闭清理优先于新任务准入。
+
+流式 NATIVE 的 canvas 可超过完整 RGBA 256 MiB：区域 codec 只保留活动行带，但索引和实际工作集仍须准入。FIT / REGION 单次输出不超过 `min(large_pixel_bytes, 256 MiB)`；progressive JPEG / Adam7 PNG 仍受系数 / 合并工作集限制，其他格式限制见 [格式表](IMAGE_FORMATS.md)。
+
+| cancel 判定点 | 行为 |
+| --- | --- |
+| 请求仍活动 | 标记取消、禁止新非终结发布、丢弃未 poll 的像素、保留已排队 INFO；安全退出后 CANCELLED |
+| 已标记取消但未终结 | OK，不重复产生终结 |
+| 终结已经提交、尚未 release | OK，无操作；保留全部排队像素及原终结 |
+| 终结已 release / ID 不存在 | NOT_FOUND |
+
+cancel 与终结提交在同一锁下裁决；借出对象始终有效。取消协作执行，不强杀线程，不保证第三方调用 / 阻塞 I/O 的硬实时退出。切图先让旧 ID / user_tag 不可展示，再 cancel，所有过期事件仍须 release。
+
+## 6. GIF 会话与播放
+
+会话只接受不可变 FIT 目标，按完整逻辑源画布准入，不能通过缩小 FIT 绕过原图合成预算。GIF 文件上限 64 MiB，原始 RGBA 不超过 `min(large_pixel_bytes, 256 MiB)`；超大动图不在范围内。
+
+| 请求 | 成功事件序列 |
+| --- | --- |
+| OPEN | ANIMATION_INFO(epoch=1) → COMPLETE(0)，不解码首帧 |
+| NEXT 一帧 | ANIMATION_FRAME_INFO → ANIMATION_REGION_READY × N → COMPLETE |
+| NEXT 到有效结尾 | ANIMATION_END → COMPLETE(0)，不自动循环 |
+| RESET | ANIMATION_INFO(epoch+1) → COMPLETE(0)，下次 NEXT 从 frame 0 开始 |
+
+同会话同时仅一个 OPEN / NEXT / RESET，包含未 release 的终结；否则 BUSY。OPEN 成功返回两个非零 ID 只表示受理；异步失败仍须 close。ID 在所属 core 内不复用，不能跨 core 传递。
+
+帧身份为 `(animation_id, epoch, frame_index)`，从 index=0 开始；每次成功 RESET 增加 epoch，不回绕。Core 完成 disposal / 透明合成后交付可独立显示的整画布，逐 tile 输出，全部 FINAL / AT_COMPLETE，不把编码 delta 交给 UI 拼图。
+
+UI 只有在 COMPLETE、全部上传成功且 deadline 到达后切换候选完整帧；不能逐块覆盖当前帧，也不能套用静态 100 ms 半帧揭示。当前 app 自动播放、复用两张 GPU 纹理、最多准备一帧，无播放按钮或进度条。
+
+`source_duration_ns` 是该帧显示时长，已知零与未知由 KNOWN 位区分；`source_pts_ns` 是本轮此前源时长之和。未知 / 溢出清 KNOWN 位，不以回绕时间继续播放。GIF UserInputFlag 当前明确拒绝。
+
+`total_plays` 包含首次：KNOWN+0 无限，1 一轮，N 共 N 轮；GIF 非零 repeat=N 转 N+1，无循环扩展在有效结尾确认为一轮。未知帧数 / 时长不是无限；损坏尾帧返回 ERROR，不能冒充 END。
+
+当前 app 使用单调时钟：首帧就绪立即展示；未知 / 零时长按 100 ms、正值低于 10 ms 提升至 10 ms。准时从计划 deadline 累加，迟到保留当前帧、到达后重建 deadline，不跳帧追赶。最后一帧显示满时长再循环；隐藏 / 最小化暂停并保存剩余时间，恢复不突发补帧。
+
+| 会话边界 | 行为 |
+| --- | --- |
+| NEXT 取消 / 一般解码失败 | NEEDS_RESET；只能 RESET 或 close，不能继续 NEXT |
+| OPEN 失败 / 取消 | FAILED；close 后重新 open |
+| NEXT 已到 END | 再 NEXT 为 INVALID_STATE；RESET 后可重放 |
+| 检测源变化 | SOURCE_CHANGED，INVALID_SOURCE；只能 close，RESET 不跟随新文件 |
+| close | 立即拒绝新提交，活动任务协作取消；终结已提交则保留原终结 / 像素 |
+
+close 清理异步执行，资源未回收前会话槽可能仍占用；重复 close 在清理中 OK，回收后 NOT_FOUND。旧 INFO / pixels 独立于会话存活。驻留子预算覆盖所有会话的 decoder、合成和 disposal 备份，输出 / 队列仍计总 CPU，GPU 两帧另计。
+
+## 7. 三阶段关闭与验证入口
+
+1. `begin_shutdown`：停止新请求、自动关闭动画、丢弃未 poll 事件并唤醒背压；此后不保证逐请求终结交付，已借出对象仍有效。
+2. `join(0)` 非阻塞检查；短超时可有界等待。TIMEOUT 时继续保留 core、回调 userdata 和唤醒目标；OK 后不再有 Core 回调，但平台已排队通知仍需识别退出状态。
+3. 归还全部外部 event / pixels，结束应用上传与并发访问，再 `destroy(&core)`；未 join 或尚有外部对象则 BUSY，成功置空。join 不代替等待应用自己的线程。
+
+begin_shutdown / 成功 join 可重复；RUNNING 时 join 返回 INVALID_STATE；shutdown 后 submit / cancel / poll / query / 动画控制返回 CLOSING，get_stats 和对象 release 仍可使用。重复释放、悬空指针、输入输出重叠或错误线程控制调用属于调用方违约。
+
+可执行契约见 [C / C++ ABI 检查](../tests/contract/)、[配置](../tests/core/config_tests.cpp)、[像素引用](../tests/core/pixel_ownership.c)、[REGION / NATIVE](../tests/core/region_tests.cpp)、[大图](../tests/core/large_tests.cpp)、[动画生命周期](../tests/core/animation_tests.cpp) 和 [播放时钟](../tests/app/playback_tests.cpp)。构建与执行方法见 [架构文档](ARCHITECTURE.md)；未实现能力及验收要求集中在 [开发计划](DEVELOPMENT_PLAN.md)。

@@ -1,97 +1,57 @@
-# 图片格式与解码实现
+# 图片格式兼容表
 
-当前支持 JPEG、PNG、基础静态 SVG、静态 WebP、BMP、GIF 自动播放和 TIFF 首页的后台打开与 FIT 显示。
-UI 沿用命令行、菜单 / Ctrl+O 和拖放入口；静态区域格式可用 100%、滚轮缩放和拖动查看原始细节。
-本表是实际兼容范围；[总体设计](DESIGN-v0.1.md)中的扩展格式和完整 SVG 验收仍是后续规划。
+更新：2026-11-09，按当前源码静态核对。本文只列实际兼容子集，新增格式见[开发计划](DEVELOPMENT_PLAN.md)；后台加载和渲染链路见[架构](ARCHITECTURE.md)与[渲染说明](RENDERING.md)。
 
-| 格式 | 后端 | 已实现范围 | 限制 |
-| --- | --- | --- | --- |
-| JPEG / JPG | libjpeg-turbo 3.1.2 | 8 位 RGB / 灰度，baseline / progressive 最终结果，EXIF 1..8，缩放解码 | CMYK / YCCK、12 位及扫描预览未实现 |
-| PNG | libpng 1.6.58 + zlib 1.3.2 | RGB / RGBA / 灰度 / 灰度 alpha / 索引色，合法 1 / 2 / 4 / 8 / 16 位组合，tRNS，Adam7 | 16 位缩至 8 位；APNG 明确拒绝；不应用 ICC、gamma 或 PNG EXIF |
-| WebP | libwebp 1.6.0 decoder | 静态有损 / 无损、alpha、解码器缩放 FIT | 动画明确拒绝；不应用 ICC / EXIF 方向 |
-| BMP | 项目 C23 解码器 | 1 / 4 / 8 位调色板，16 / 24 / 32 位真彩，行对齐、上下行序，16 / 32 位 bitfields，RLE4 / RLE8 | 不支持内嵌 JPEG / PNG、OS/2 扩展压缩和色彩配置转换；RLE 不允许 top-down |
-| SVG | PlutoSVG 0.0.8 + 固定 PlutoVG 1.3.3 | 路径、基本几何、组、变换、fill / stroke、透明度、线性 / 径向渐变、viewBox，按 FIT 栅格化并允许放大 | 下述受限静态 profile，不等同于浏览器 SVG |
-| GIF | giflib 6.1.3 | GIF87a / GIF89a 动画会话，透明、交错、局部调色板、disposal 0..3、循环次数与源帧时长 | 普通尺寸顺序播放；静态 submit 仍可仅读首帧；无 seek / 超大动图 |
-| TIFF / TIF | LibTIFF 4.7.2 | Classic / BigTIFF 首页及有界大图区域；大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 不支持页面切换、浮点 / CMYK；调色板 16 位等不受支持组合明确拒绝，仍受内存限制 |
+## 1. 已支持格式
 
-BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头，位域掩码必须连续、不重叠且在位深范围内。
-BI_RGB 32 位的第四字节视为保留位，统一不透明；只有显式 alpha mask 才使用 alpha。
-RLE 的跳过区域使用调色板第零项填充，检查 run、delta、绝对块、padding 和结束标记。
+| 格式 / 后端 | 已实现范围 | 主要限制 |
+| --- | --- | --- |
+| JPEG / libjpeg-turbo | 8 位 RGB / 灰度，baseline / progressive 最终结果，EXIF 1..8，缩放解码 | 无 CMYK / YCCK、12 位、扫描预览或 ICC 转换 |
+| PNG / libpng + zlib | RGB / RGBA / 灰度 / 灰度 alpha / 索引色，合法 1 / 2 / 4 / 8 / 16 位组合，tRNS、Adam7 | 16 位转 8 位；APNG 拒绝；不应用 ICC、gamma、PNG EXIF |
+| WebP / libwebp decoder | 静态有损 / 无损、alpha、FIT 缩放 | 动画拒绝；不应用 ICC / EXIF 方向 |
+| BMP / 项目 C23 decoder | 1 / 4 / 8 位调色板、16 / 24 / 32 位真彩、上下行序、bitfields、RLE4 / RLE8 | 无内嵌 JPEG / PNG、OS/2 扩展压缩或色彩配置转换；RLE 不支持 top-down / REGION |
+| SVG / PlutoSVG + PlutoVG | 受限静态 profile，路径 / 几何 / 渐变 / viewBox；按目标栅格化，可放大 | 不是完整浏览器 SVG，具体拒绝项见下文 |
+| GIF / giflib | GIF87a / GIF89a，普通尺寸自动播放，透明 / 交错 / 局部调色板、disposal 0..3、源时长和循环 | 顺序 NEXT / RESET，无 seek / 超大动图；静态 API 可仅读首帧；UserInputFlag 拒绝 |
+| TIFF / LibTIFF | Classic / BigTIFF 首页，大小端、strip / tile、常见压缩、方向、灰度 / RGB / 调色板及显式 alpha | 无页面切换、浮点 / CMYK；调色板 16 位等未支持组合明确拒绝 |
 
-GIF 已通过 ABI 2 会话及 UI 自动播放；JPEG / PNG / 未压缩 BMP / TIFF 已支持静态大图和 REGION，16K 与 32K 验证见[实现说明](LARGE_IMAGES.md)。动画 WebP / APNG、多页切换、AVIF、HEIF / HEIC 和预读仍未实现。[GIF 动画接口与实现](CORE_ANIMATION-v0.2.md)。
-不支持 CAD、PSD / PSB 等专用设计源文件。
-后续开发范围分别为普通尺寸动图播放与静态超大图显示；超大动图明确不纳入范围。动画 FIT 缩小不能绕过源逻辑画布及实际工作集的限制，详见[动画范围约定](CORE_ANIMATION-v0.2.md#11-已确定的开发范围)。
+具体依赖提交与版本以 [dependencies.json](../third_party/dependencies.json) 及 gitlink 为准，不在多份文档重复维护版本号。窗口入口支持命令行、菜单 / Ctrl+O 和单文件拖放；不扫描目录。
 
-## 已确认的后续支持项（全部待开发）
+BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头；位域掩码须连续、不重叠且在位深范围内。BI_RGB 32 位第四字节视为保留位，只有显式 alpha mask 才使用 alpha。RLE 跳过区域填调色板第零项，并检查 run、delta、绝对块、padding 和结束标记。
 
-2026-11-08 已将 AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG 列入后续兼容支持计划。另列无文件头的原始 RGB / 灰度、YUV 和 Bayer 输入与渲染，要求能够设置宽高、具体格式、位深、字节序、文件 / 平面偏移和行跨度等必要信息。
+## 2. 静态、大图与动画能力
 
-YUV 覆盖 4:4:4、4:2:2、4:2:0 的具体存储布局，包括 YUYV / YUY2、UYVY、YVYU、VYUY、I420 / IYUV、YV12、NV12 / NV21、NV16 / NV61、NV24 / NV42 及待明确规范的高位深 / packed 444 变体。用户提到的 `UYUV` 暂按 `UYVY` 记录，不能作为未定义布局直接解析。Bayer 覆盖 RGGB、BGGR、GRBG、GBRG，位深、打包、去马赛克和颜色处理分项验收。
+| 路径 | 当前能力 | 成本 / 限制 |
+| --- | --- | --- |
+| JPEG、非交错 PNG | NATIVE 原始行带、FIT、REGION | 顺序扫描；REGION 不等于原生随机访问 |
+| Progressive JPEG | 同一最终输出接口 | 保守预约完整系数工作集；没有扫描细化，不保证低内存首行带 |
+| Adam7 PNG | 完整合并后输出 | 需要原图合并缓冲，超预算可失败；没有逐 pass 细化 |
+| 未压缩 BMP / bitfields | NATIVE 行带、FIT、REGION，按需 seek 行 | 极宽单行仍须满足工作集预算 |
+| TIFF 首页 | 有界局部块解码、NATIVE 行带、FIT、REGION | 源边长不超过 INT32_MAX，块与 codec 内存有界；core 缩小采样当前为最近邻 |
+| WebP、SVG、RLE BMP、静态 GIF | 各自有界完整解码 / 栅格化输出，可分块交付 | 不因此获得静态 REGION 或任意超大源能力 |
+| GIF 动画 | 会话持续合成，整帧交付与 UI 双纹理自动播放 | 源画布、disposal 备份和输出均准入；缩小 FIT 不能绕过源预算 |
 
-这些条目均为 **待开发**，没有变更上方已实现能力声明。待办、边界和验收条件以 [FORMAT_ROADMAP.md](FORMAT_ROADMAP.md) 为准；原始像素参数和布局见 [RAW_PIXEL_INPUT.md](RAW_PIXEL_INPUT.md)，对应性能测试见 [TEST_PLAN.md](../benchmarks/TEST_PLAN.md)。新增格式的输入样本待补充，尚无性能实测结论。
+静态 app 使用单次 NATIVE，随后缩放 / 平移从当前场景的原始 tile 与预生成 LOD 绘制或恢复，不再重新请求 REGION。core FIT / REGION 继续可用；流式行带是最终像素提前交付，**不是解码扫描中的多轮 refinement**。
 
-相关 core 接口已完成 [兼容性 Review](CORE_INTERFACE_REVIEW-2026-11-08.md)，后续按 [扩展方案](CORE_FORMAT_EXTENSION_PLAN.md) 补充输入描述、选择器、颜色 / 输出、结果身份、预算及诊断；先行 RGBA8 预览与完整高精度 / HDR / 多平面支持分别验收。
+构建查询返回格式能力上限；具体文件 INFO 收窄，例如 RLE BMP 不报告 REGION。JPEG / WebP 可报告 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 报 ANIMATION；JPEG / PNG / BMP / TIFF 具有区域能力。当前不报告 INCREMENTAL / REFINEMENT，load_mode 只是大小分档，不能当作已实现扫描细化的证据。
 
-## 共用加载链路
+## 3. 输出、资源与失败
 
-```text
-UI submit → 单 worker 打开常规文件并取得版本
-          → 有界文件头按内容探测 → 选择 codec
-          → 尺寸 / 格式检查 → 工作集预算预约
-          → IMAGE_INFO → 解码或栅格化 → RGBA8 FIT 图
-          → 销毁 codec / 临时数据 → 验证文件及路径版本
-          → 有界队列交付最终 tile → COMPLETE
-UI poll → 上传 renderer → release event / pixels
-```
+- 像素为左上原点、RGBA8、straight alpha；stride 可大于 width×4。方向交给 viewer 应用，颜色语义为 UNKNOWN，没有完整 ICC / HDR 色彩管理。
+- PNG / BMP 的 core FIT 使用 alpha 加权双线性；SVG 原生预乘 ARGB 转为 straight RGBA。app LOD / atlas 是另一层显示处理，不等同于 codec FIT。
+- JPEG、PNG、未压缩 BMP、TIFF 不套统一 64 MiB 文件 / 完整 RGBA 上限；仍按实际工作集、源元数据和输出准入。流式 NATIVE 只保留活动行带，逻辑 canvas 不等于整图分配。
+- FIT / REGION 单次输出不超过 `min(large_pixel_bytes, 256 MiB)`；WebP、静态 GIF、RLE BMP 等保留 64 MiB 文件与既有原图 RGBA 限制。SVG 最多 1 MiB、8192 元素、128 层，并受输出预算限制。
+- 内容探测、解码及版本核验使用同一个已打开文件；流式块发布前检查版本，读取结束再检查。检测到源变化即报 SOURCE_CHANGED，不能把部分输出与新版本拼接；不承诺文件快照。
+- 最终像素以引用移交或共享 backing 视图发布，不为排队深拷贝。第三方工作集按保守 allowance 准入，不保证整个进程 RSS 硬上限；所有权与关闭见 [Core 契约](CORE_CONTRACTS.md)。
+- 文件读取、行 / pass / run、转换和队列等待有取消点；PlutoSVG 单次 parse / render、WebP 单次 decode 不能中途强杀。取消后阻止新像素发布，不保证固定关闭延迟。
 
-文件扩展名和大小写不决定 decoder；同一个已打开文件用于探测、解码及最终版本核验。
-修改文件后不发布旧版本像素；INFO 可以早于解码完成。已经借出的事件 / 像素寿命、取消竞争及关闭规则沿用 [Core Runtime](CORE_RUNTIME-v0.1.md)。
-损坏输入异步返回 ERROR，worker 可继续接收下一张；单次请求至多一个终结事件。
-代码分为 `image.c` 共用准入 / FIT / tile / alpha 缩放，以及每格式独立文件；公共 C API 不暴露第三方依赖类型；动画会话接入后布局已升级为 ABI 2。
+## 4. SVG 静态 profile
 
-query 对七类格式均返回静态 available；JPEG / WebP 报 SCALED_DECODE，SVG 报 VECTOR_RASTERIZE，GIF 另报 ANIMATION；JPEG / PNG / BMP / TIFF 另报 REGION_DECODE，RLE BMP 的文件 INFO 不报告该能力。
-不报告 INCREMENTAL / REFINEMENT。`load_mode` 仍是大小阈值分类，不代表已实现解码中逐步显示。
-静态请求及每个动画帧请求都先完成解码与版本核验，再交付最终 tile；WebP 的增量输入仅用于在输入块之间检查取消。
+允许：`svg`、`g`、`defs`、`path`、`rect`、`circle`、`ellipse`、`line`、`polyline`、`polygon`、`linearGradient`、`radialGradient`、`stop`、`title`、`desc`，以及库支持的变换、fill / stroke、透明度和简单 inline style / presentation attributes。
 
-## 像素、内存与取消
+明确拒绝：text / 字体、CSS stylesheet / class、clipPath、mask、filter、use / symbol、image（含 data URI）、foreignObject、脚本、动画、DTD / 实体。不读取外部文件或网络，不扫描系统字体。没有自然尺寸时按 viewBox / 默认 300×150 规则；无效尺寸拒绝。此 profile 不代表完整 SVG2 / XML 一致性。
 
-所有输出为 top-left、RGBA8、straight alpha，stride 可大于 width × 4；没有完成 ICC / HDR 色彩管理，颜色语义为 UNKNOWN。
-PNG / BMP 的 FIT 使用 alpha 加权双线性，SVG 的原生 premultiplied ARGB 在交付前转换为 straight RGBA。
-JPEG 保留缩放解码加两行 FIT 缓冲的路径。
+## 5. 待实现与验收入口
 
-| 项目 | 当前边界 |
-| --- | --- |
-| JPEG / PNG / 未压缩 BMP / TIFF 源 | 不设统一文件 / 原图 RGBA 大小上限；按格式与 codec 工作集准入 |
-| 单次输出区域 | 不超过 `min(large_pixel_bytes, 256 MiB)` 且须满足 CPU 预算，canvas 不等于分配 |
-| WebP / GIF / RLE BMP 源 | 保留 64 MiB 文件、原始 RGBA 的既有有界限制 |
-| SVG | 最大 1 MiB、8192 元素、128 层；输出仍有区域限制 |
-| UI 默认预算 | CPU 384 MiB、队列 4 MiB、renderer 图片 128 MiB |
-| 最终交付 | 直接 tiles 移交引用或连续输出的共享视图；无发布 / UI 深拷贝，队列按有效面积背压 |
+AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG、TIFF 多页、原始 RGB / 灰度 / YUV / Bayer 全部待实现；高位深读取、SDR 映射、原生 HDR 与 GPU 多平面分别验收。计划不改变本表已支持范围。
 
-非交错 PNG / JPEG 复用两行 RGBA，未压缩 BMP 复用文件行及 RGBA 行，TIFF 复用局部解码块，直接写最终 tiles；缩小 TIFF 当前用最近邻。顺序 codec 的 REGION 可能重新扫描整个文件。Adam7 仍需完整合并图，progressive JPEG 仍需系数工作集，因此可能因预算失败。
-WebP 保留压缩输入并直接生成最终连续输出；SVG 直接栅格化。静态 GIF / RLE BMP 在无需缩放时也直接写最终连续输出。连续图块仅创建共享 backing 的描述符，不复制图片数据。
-GIF 动画仍保留逻辑画布、disposal 备份和一帧不可变输出；这些是解码合成开销，不会在最终事件发布时再复制一份。超大动图不在范围内。所有 codec 的实际工作集仍须满足预算；详情见[大图与所有权](LARGE_IMAGES.md)。
-
-可追踪的输入、原始图、FIT、tile 和事件分配进入 core 账本；外部分配按保守 allowance 提前预约。
-第三方内部 allocator、C runtime 和线程栈未完全纳入追踪，预算不承诺进程 RSS 硬上限。
-在文件读块、PNG 行 / pass、BMP 行 / RLE run、缩放行和 tile 队列等待处检查取消。
-PlutoSVG 的一次 parse / render 和 WebP 的单次解码调用无法被中途打断；取消会在返回后阻止像素发布，不能据此承诺固定关闭延迟。
-
-## SVG 静态 profile
-
-允许的元素为 svg、g、defs、path、rect、circle、ellipse、line、polyline、polygon、linearGradient、radialGradient、stop、title、desc。
-支持简单 inline style 和 presentation attributes，受 PlutoSVG 实际能力约束。
-字体 / text、CSS stylesheet / class、clipPath、mask、filter、use / symbol、image（含 data URI）、foreignObject、脚本、动画、DTD / 实体等明确返回 FORMAT_UNSUPPORTED。
-当前不访问外部文件或网络，也不扫描系统字体。没有自然尺寸时使用库的 viewBox / 默认 300×150 规则；无有效尺寸或非有限值则拒绝。
-profile 是保守兼容子集，不是通用 XML 验证器；属性和路径语法仍由 PlutoSVG 解析，不能宣称完整 SVG2 一致性。
-
-## 构建与验证
-
-需要编译的依赖均固定为 Git submodule；PlutoVG 由 PlutoSVG 的嵌套 gitlink 固定。
-执行 `git submodule update --init --recursive` 后由 CMake 使用本地源码静态构建，不自动下载，不选择系统 codec 库。
-主程序仅链接 WebP decoder，测试编码器只用于生成测试输入；上游工具、示例、测试程序不进入应用。
-安装包包含 libpng、zlib、libwebp 的 COPYING / PATENTS、PlutoSVG / PlutoVG 许可证、bundled stb 署名及 FreeType FTL。
-
-格式测试覆盖内容探测、PNG 位深 / Adam7 / tRNS、WebP 有损 / 无损 / alpha、BMP 位深 / 掩码 / RLE / 行序、SVG 渐变 / FIT / alpha，以及损坏输入、动画拒绝、预算、修改源文件和取消。
-`tests/fixtures/` 保存原创小样本，desktop.formats 用真实 OpenGL 回读截图检查六类格式的红色内容；desktop.animation 验证真实 OpenGL 红 / 蓝帧切换，desktop.animation_app 验证应用进入下一轮。
-最新构建验证记录见 [目录与构建](PROJECT_STRUCTURE.md)。
+合法 / 损坏输入、位深、方向、预算、源变更和取消测试见 [`tests/core/`](../tests/core/)，真实像素回读见 [`tests/integration/`](../tests/integration/)；输入样本与性能方法见[测试计划](../benchmarks/TEST_PLAN.md)。本文状态来自源码核对，没有把历史通过数量当作本次运行结果。
