@@ -118,6 +118,10 @@ void Viewport::pan(double x, double y)
     center_y_ -= y * density_ / scale_;
     clamp();
 }
+void Viewport::zoom(double wheel)
+{
+    zoom(wheel, {(min_.x + max_.x) * 0.5f, (min_.y + max_.y) * 0.5f});
+}
 void Viewport::zoom(double wheel, render::Point anchor)
 {
     if (!source_.width || !source_.height)

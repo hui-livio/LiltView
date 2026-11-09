@@ -15,6 +15,16 @@ enum class MenuAction
     open,
     quit,
     fullscreen,
+    previous,
+    next,
+    fit,
+    actual_size,
+    pan_left,
+    pan_right,
+    pan_up,
+    pan_down,
+    zoom_in,
+    zoom_out,
     about,
     language_system,
     language_english,
@@ -33,12 +43,15 @@ struct MenuItem
     bool separator    = false;
     bool checkable    = false;
     bool checked      = false;
+    bool repeatable   = false;
     std::vector<std::string> shortcut;
     std::vector<MenuItem> children;
 };
 
-MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen);
+MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen, bool has_image = false,
+                    bool can_actual_size = false);
 const MenuItem *find_menu_item(const MenuItem &root, std::int32_t id);
+MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std::string> &shortcut, bool repeat = false);
 void apply_menu_setting(MenuAction action, Settings &settings);
 } // namespace liltview
 

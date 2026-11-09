@@ -62,15 +62,6 @@ Text image_error_text(lv_error_code code)
     }
 }
 
-void unavailable_button(Language language, Text text, const char *id)
-{
-    ImGui::BeginDisabled();
-    ImGui::Button(label(language, text, id).c_str());
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("%s", translate(language, Text::unavailable));
-}
-
 void begin_main_window(bool system_menu)
 {
     const auto *viewport = ImGui::GetMainViewport();
@@ -109,7 +100,12 @@ MenuAction draw_menu(const MenuItem &root)
             {
                 if (!shortcut.empty())
                     shortcut += "+";
-                shortcut += key == "Control" ? "Ctrl" : key;
+                if (key == "Control")
+                    shortcut += "Ctrl";
+                else if (key.size() == 1 && key[0] >= 'a' && key[0] <= 'z')
+                    shortcut += static_cast<char>(key[0] - 'a' + 'A');
+                else
+                    shortcut += key;
             }
             if (ImGui::MenuItem(title.c_str(), shortcut.empty() ? nullptr : shortcut.c_str(), item.checked, item.enabled))
                 result = item.action;
@@ -155,75 +151,29 @@ void apply_style(bool dark, float scale)
     style.FontScaleDpi = scale;
 }
 
-ShellActions Shell::draw(Settings &settings, Language language, const MenuItem &menu, bool system_menu, bool fullscreen,
-                         render::Renderer &renderer, render::Image icon, Viewer &viewer)
+MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu, render::Renderer &renderer, render::Image icon,
+                       Viewer &viewer)
 {
     // 按区域组织一帧；窗口、子画布和弹窗的 Begin/End 在对应函数中配对。
-    ShellActions actions;
+    MenuAction action = MenuAction::none;
     begin_main_window(system_menu);
     if (!system_menu)
-        actions = draw_window_menu(settings, menu);
+        action = draw_window_menu(menu);
 
-    draw_toolbar(language, fullscreen, viewer, actions);
     draw_canvas(language, renderer, icon, viewer);
     draw_status(language, viewer);
     draw_about(language, renderer, icon);
     ImGui::End();
-    return actions;
+    return action;
 }
 
-ShellActions Shell::draw_window_menu(Settings &settings, const MenuItem &menu)
+MenuAction Shell::draw_window_menu(const MenuItem &menu)
 {
-    ShellActions actions;
     if (!ImGui::BeginMenuBar())
-        return actions;
+        return MenuAction::none;
     const auto selected = draw_menu(menu);
-    actions.open        = selected == MenuAction::open;
-    apply_menu_setting(selected, settings);
-    if (selected == MenuAction::quit)
-        actions.quit = true;
-    if (selected == MenuAction::fullscreen)
-        actions.toggle_fullscreen = true;
-    if (selected == MenuAction::about)
-        open_about_ = true;
     ImGui::EndMenuBar();
-    return actions;
-}
-
-void Shell::draw_toolbar(Language language, bool fullscreen, Viewer &viewer, ShellActions &actions)
-{
-    // 宽度不足时逐组收起尚未启用的操作，保留全屏入口。
-    const auto id = [language](Text text, const char *stable_id)
-    {
-        return label(language, text, stable_id);
-    };
-    const float toolbar_width = ImGui::GetContentRegionAvail().x;
-    if (ImGui::Button(id(Text::open, "open_toolbar").c_str()))
-        actions.open = true;
-    if (toolbar_width > 590.0f * ImGui::GetStyle().FontScaleDpi)
-    {
-        ImGui::SameLine();
-        unavailable_button(language, Text::previous, "previous");
-        ImGui::SameLine();
-        unavailable_button(language, Text::next, "next");
-    }
-    const bool wide = toolbar_width > 900.0f * ImGui::GetStyle().FontScaleDpi;
-    if (wide)
-    {
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!viewer.has_image());
-        if (ImGui::Button(id(Text::fit, "fit").c_str()))
-            viewer.fit();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!viewer.can_actual_size());
-        if (ImGui::Button(id(Text::actual_size, "actual_size").c_str()))
-            viewer.actual_size();
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(id(fullscreen ? Text::leave_fullscreen : Text::fullscreen, "fullscreen_toolbar").c_str()))
-        actions.toggle_fullscreen = true;
+    return selected;
 }
 
 void Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer)

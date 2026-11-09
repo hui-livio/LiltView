@@ -25,6 +25,7 @@ public:
     void actual_size();
     void pan(double x, double y);
     void zoom(double wheel, render::Point anchor);
+    void zoom(double wheel); // Keyboard/menu zoom is anchored at the canvas center.
     bool fitting() const
     {
         return fit_;

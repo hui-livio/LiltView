@@ -37,6 +37,11 @@ void Viewer::pan(double x, double y)
     retry_restore();
     viewport_.pan(x, y);
 }
+void Viewer::zoom(double wheel)
+{
+    retry_restore();
+    viewport_.zoom(wheel);
+}
 void Viewer::zoom(double wheel, render::Point anchor)
 {
     retry_restore();

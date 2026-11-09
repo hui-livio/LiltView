@@ -46,6 +46,26 @@ def check_menu(app, folder):
     service = find_service(app.pid)
     all_items = bus_call(service, "GetGroupProperties", "[]", "[]").stdout
     assert "File" in all_items and "Settings" in all_items and "Quit" in all_items, all_items
+    for item, label, shortcut in (
+        (10, "Open", ("Control", "o")),
+        (21, "Previous", ("Left",)),
+        (22, "Next", ("Right",)),
+        (24, "Fit", ("f",)),
+        (25, "100%", ("Control", "1")),
+        (20, "Fullscreen", ("F11",)),
+        (50, "Pan left", ("Shift", "Left")),
+        (51, "Pan right", ("Shift", "Right")),
+        (52, "Pan up", ("Shift", "Up")),
+        (53, "Pan down", ("Shift", "Down")),
+        (54, "Zoom in", ("Control", "Up")),
+        (55, "Zoom out", ("Control", "Down")),
+    ):
+        assert label in bus_call(service, "GetProperty", str(item), "label").stdout
+        keys = bus_call(service, "GetProperty", str(item), "shortcut").stdout
+        for key in shortcut:
+            assert f"'{key}'" in keys, keys
+    for item in (21, 22, 24, 25, 50, 51, 52, 53, 54, 55):
+        assert "false" in bus_call(service, "GetProperty", str(item), "enabled").stdout
     filtered = bus_call(service, "GetGroupProperties", "[]", '["label"]').stdout
     assert "label" in filtered and "enabled" not in filtered, filtered
     assert "standard" in bus_call(service, "GetProperty", "1", "type").stdout
@@ -67,6 +87,29 @@ def test_menu(executable, folder):
         try:
             check_menu(app, folder)
             assert "CRITICAL" not in log.read_text(), log.read_text()
+        finally:
+            if app.poll() is None:
+                app.terminate()
+                app.wait(timeout=5)
+
+    # Loaded-image state must also reach the exported system menu.
+    sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
+    with log.open("w") as output:
+        app = subprocess.Popen([str(executable), "--config-dir", str(folder), "--language", "en-US", str(sample)],
+                               stdout=output, stderr=subprocess.STDOUT)
+        try:
+            service = find_service(app.pid)
+            deadline = time.monotonic() + 10
+            for item in (24, 25, 50, 51, 52, 53, 54, 55):
+                while "true" not in bus_call(service, "GetProperty", str(item), "enabled").stdout:
+                    assert app.poll() is None, log.read_text()
+                    assert time.monotonic() < deadline, log.read_text()
+                    time.sleep(0.025)
+            for item in (25, 54, 50, 51, 52, 53, 55, 24):
+                bus_call(service, "Event", str(item), "clicked", "<0>", "0")
+            bus_call(service, "Event", "12", "clicked", "<0>", "0")
+            assert app.wait(timeout=10) == 0, log.read_text()
+            assert "[error]" not in log.read_text() and "[critical]" not in log.read_text(), log.read_text()
         finally:
             if app.poll() is None:
                 app.terminate()

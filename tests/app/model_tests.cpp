@@ -73,6 +73,8 @@ TEST_CASE("system and fallback menus keep the same identities across language ch
         REQUIRE(translated != nullptr);
         CHECK(translated->action == item.action);
         CHECK(translated->enabled == item.enabled);
+        CHECK(translated->repeatable == item.repeatable);
+        CHECK(translated->shortcut == item.shortcut);
         CHECK(translated->children.size() == item.children.size());
         CHECK(item.label.find("###") == std::string::npos);
         for (const auto &child : item.children)
@@ -83,6 +85,118 @@ TEST_CASE("system and fallback menus keep the same identities across language ch
     CHECK(find_menu_item(english, 10)->enabled);
     CHECK(find_menu_item(english, 10)->action == MenuAction::open);
     CHECK(find_menu_item(english, 9999) == nullptr);
+}
+
+TEST_CASE("toolbar operations live in the menus with shortcuts", "[menu]")
+{
+    for (const auto language : {Language::english, Language::chinese})
+    {
+        const auto menu  = build_menu(Settings{}, language, true, false, true, true);
+        const auto *file = find_menu_item(menu, 1);
+        const auto *view = find_menu_item(menu, 2);
+        REQUIRE(file != nullptr);
+        REQUIRE(view != nullptr);
+        REQUIRE(find_menu_item(*file, 10) != nullptr);
+        CHECK(find_menu_item(*file, 10)->shortcut == std::vector<std::string>{"Control", "o"});
+        for (const auto id : {20, 21, 22, 24, 25})
+        {
+            const auto *entry = find_menu_item(*view, id);
+            REQUIRE(entry != nullptr);
+            CHECK(entry->action != MenuAction::none);
+            CHECK_FALSE(entry->shortcut.empty());
+        }
+        CHECK(find_menu_item(*view, 21)->shortcut == std::vector<std::string>{"Left"});
+        CHECK(find_menu_item(*view, 22)->shortcut == std::vector<std::string>{"Right"});
+        CHECK_FALSE(find_menu_item(*view, 21)->enabled);
+        CHECK_FALSE(find_menu_item(*view, 22)->enabled);
+        CHECK(find_menu_item(*view, 24)->shortcut == std::vector<std::string>{"f"});
+        CHECK(find_menu_item(*view, 25)->shortcut == std::vector<std::string>{"Control", "1"});
+        CHECK(find_menu_item(*view, 20)->shortcut == std::vector<std::string>{"F11"});
+    }
+}
+
+TEST_CASE("image menu enablement follows image and native size availability", "[menu]")
+{
+    for (const bool has_image : {false, true})
+    {
+        for (const bool can_actual_size : {false, true})
+        {
+            const auto menu = build_menu(Settings{}, Language::english, true, false, has_image, can_actual_size);
+            CHECK(find_menu_item(menu, 24)->enabled == has_image);
+            CHECK(find_menu_item(menu, 25)->enabled == (has_image && can_actual_size));
+            CHECK(menu_action_for_shortcut(menu, {"f"}) == (has_image ? MenuAction::fit : MenuAction::none));
+            CHECK(menu_action_for_shortcut(menu, {"Control", "1"}) ==
+                  (has_image && can_actual_size ? MenuAction::actual_size : MenuAction::none));
+        }
+    }
+}
+
+TEST_CASE("shortcuts use the menu definitions and ignore unavailable actions", "[menu][shortcut]")
+{
+    auto menu = build_menu(Settings{}, Language::chinese, true, false, true, true);
+    CHECK(menu_action_for_shortcut(menu, {"Control", "o"}) == MenuAction::open);
+    CHECK(menu_action_for_shortcut(menu, {"Control", "q"}) == MenuAction::quit);
+    CHECK(menu_action_for_shortcut(menu, {"F11"}) == MenuAction::fullscreen);
+    CHECK(menu_action_for_shortcut(menu, {"Left"}) == MenuAction::none);
+    CHECK(menu_action_for_shortcut(menu, {"Right"}) == MenuAction::none);
+    CHECK(menu_action_for_shortcut(menu, {}) == MenuAction::none);
+    CHECK(menu_action_for_shortcut(menu, {"o"}) == MenuAction::none);
+    CHECK(menu_action_for_shortcut(menu, {"Control", "f"}) == MenuAction::none);
+    CHECK(menu_action_for_shortcut(menu, {"Control", "Shift", "1"}) == MenuAction::none);
+    menu.children.front().enabled = false;
+    CHECK(menu_action_for_shortcut(menu, {"Control", "o"}) == MenuAction::none);
+}
+
+TEST_CASE("Shift arrows pan and Control up down zoom with key repeat", "[menu][shortcut]")
+{
+    struct Control
+    {
+        std::int32_t id;
+        MenuAction action;
+        std::vector<std::string> shortcut;
+    };
+    const Control controls[]{
+        {50, MenuAction::pan_left, {"Shift", "Left"}}, {51, MenuAction::pan_right, {"Shift", "Right"}},
+        {52, MenuAction::pan_up, {"Shift", "Up"}},     {53, MenuAction::pan_down, {"Shift", "Down"}},
+        {54, MenuAction::zoom_in, {"Control", "Up"}},  {55, MenuAction::zoom_out, {"Control", "Down"}},
+    };
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool has_image : {false, true})
+        {
+            const auto menu  = build_menu(Settings{}, language, true, false, has_image);
+            const auto *view = find_menu_item(menu, 2);
+            REQUIRE(view != nullptr);
+            for (const auto &control : controls)
+            {
+                CAPTURE(control.id, has_image);
+                const auto *entry = find_menu_item(*view, control.id);
+                REQUIRE(entry != nullptr);
+                CHECK(entry->action == control.action);
+                CHECK(entry->shortcut == control.shortcut);
+                CHECK(entry->enabled == has_image);
+                CHECK(entry->repeatable);
+                for (const bool repeat : {false, true})
+                    CHECK(menu_action_for_shortcut(menu, control.shortcut, repeat) ==
+                          (has_image ? control.action : MenuAction::none));
+            }
+            // The superseded Control+Left/Right bindings must not pan or navigate.
+            CHECK(menu_action_for_shortcut(menu, {"Control", "Left"}) == MenuAction::none);
+            CHECK(menu_action_for_shortcut(menu, {"Control", "Right"}) == MenuAction::none);
+            CHECK(menu_action_for_shortcut(menu, {"Up"}) == MenuAction::none);
+            CHECK(menu_action_for_shortcut(menu, {"Down"}) == MenuAction::none);
+            CHECK(menu_action_for_shortcut(menu, {"Control", "Shift", "Up"}) == MenuAction::none);
+        }
+}
+
+TEST_CASE("key repeat does not reopen dialogs toggle fullscreen or quit", "[menu][shortcut]")
+{
+    const auto menu = build_menu(Settings{}, Language::english, true, false, true, true);
+    for (const auto &shortcut :
+         std::vector<std::vector<std::string>>{{"Control", "o"}, {"Control", "q"}, {"F11"}, {"f"}, {"Control", "1"}})
+    {
+        CHECK(menu_action_for_shortcut(menu, shortcut) != MenuAction::none);
+        CHECK(menu_action_for_shortcut(menu, shortcut, true) == MenuAction::none);
+    }
 }
 
 TEST_CASE("menu state reflects settings and unavailable Chinese font", "[menu]")

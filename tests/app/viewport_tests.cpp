@@ -119,3 +119,68 @@ TEST_CASE("intermediate camera transforms preserve the wheel anchor and reject i
     CHECK_FALSE(before.same_layout(target));
     CHECK(before.toward(target, 0.5).same_view(before));
 }
+
+TEST_CASE("keyboard zoom uses the canvas center and the same steps as the wheel", "[viewport][shortcut]")
+{
+    for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+        {
+            CAPTURE(density, orientation);
+            Viewport view;
+            view.update({17, 31}, {529, 415}, density, {8192, 4096}, orientation);
+            view.actual_size();
+            view.pan(64, -64);
+            auto wheel = view;
+            wheel.zoom(1, {273, 223});
+            view.zoom(1);
+            CHECK(view.same_view(wheel));
+            CHECK(std::abs(view.scale() - 1.25) < 1e-12);
+            wheel.zoom(-1, {273, 223});
+            view.zoom(-1);
+            CHECK(view.same_view(wheel));
+            CHECK(std::abs(view.scale() - 1) < 1e-12);
+        }
+}
+
+TEST_CASE("keyboard zoom respects fit and maximum scale even when repeated", "[viewport][shortcut]")
+{
+    Viewport view;
+    view.zoom(1); // No image loaded yet.
+    CHECK(view.scale() == 1);
+    view.update({0, 0}, {512, 512}, 1, {8192, 4096}, 1);
+    const double fit = view.scale();
+    for (unsigned i = 0; i < 100; ++i)
+        view.zoom(1);
+    CHECK(view.scale() == 32);
+    for (unsigned i = 0; i < 100; ++i)
+        view.zoom(-1);
+    CHECK(view.scale() == fit);
+}
+
+TEST_CASE("directional panning moves image content on screen and preserves image bounds", "[viewport][shortcut]")
+{
+    for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+        {
+            CAPTURE(density, orientation);
+            Viewport original;
+            original.update({0, 0}, {512, 512}, density, {8192, 4096}, orientation);
+            auto fitted = original;
+            fitted.pan(64, 64);
+            CHECK(fitted.same_view(original)); // No room to pan a fitted image.
+            original.actual_size();
+            const auto before = original.quad({0, 0, 8192, 4096}, {8192, 4096});
+            for (const auto delta : {render::Point{-64, 0}, {64, 0}, {0, -64}, {0, 64}})
+            {
+                auto view = original;
+                view.pan(delta.x, delta.y);
+                const auto after = view.quad({0, 0, 8192, 4096}, {8192, 4096});
+                CHECK(std::abs(after[0].x - before[0].x - delta.x) < 0.001f);
+                CHECK(std::abs(after[0].y - before[0].y - delta.y) < 0.001f);
+                view.pan(delta.x * 1000000, delta.y * 1000000);
+                const auto edge = view;
+                view.pan(delta.x, delta.y);
+                CHECK(view.same_view(edge)); // Holding an arrow cannot pan past the edge.
+            }
+        }
+}

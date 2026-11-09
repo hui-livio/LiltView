@@ -1,5 +1,7 @@
 #include "menu_model.hpp"
 
+#include <utility>
+
 namespace liltview
 {
 namespace
@@ -35,12 +37,63 @@ MenuItem file_menu(Language language)
     return file;
 }
 
-MenuItem view_menu(Language language, bool fullscreen)
+MenuItem view_control(Language language, std::int32_t id, Text text, MenuAction action, std::vector<std::string> shortcut,
+                      bool enabled)
+{
+    auto result       = item(language, id, text, action);
+    result.shortcut   = std::move(shortcut);
+    result.enabled    = enabled;
+    result.repeatable = true;
+    return result;
+}
+
+MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_actual_size)
 {
     auto view                = item(language, 2, Text::view);
     auto fullscreen_item     = toggle(language, 20, Text::fullscreen, MenuAction::fullscreen, fullscreen);
     fullscreen_item.shortcut = {"F11"};
-    view.children            = {fullscreen_item};
+    auto previous            = item(language, 21, Text::previous, MenuAction::previous);
+    previous.shortcut        = {"Left"};
+    previous.enabled         = false;
+    auto next                = item(language, 22, Text::next, MenuAction::next);
+    next.shortcut            = {"Right"};
+    next.enabled             = false;
+    // 目录切图尚未实现，保留原工具栏中这两个操作的禁用状态。
+    MenuItem navigation_separator;
+    navigation_separator.id        = 23;
+    navigation_separator.separator = true;
+    auto fit                       = item(language, 24, Text::fit, MenuAction::fit);
+    fit.shortcut                   = {"f"};
+    fit.enabled                    = has_image;
+    auto actual_size               = item(language, 25, Text::actual_size, MenuAction::actual_size);
+    actual_size.shortcut           = {"Control", "1"};
+    actual_size.enabled            = has_image && can_actual_size;
+    MenuItem zoom_separator;
+    zoom_separator.id        = 26;
+    zoom_separator.separator = true;
+    auto pan_left            = view_control(language, 50, Text::pan_left, MenuAction::pan_left, {"Shift", "Left"}, has_image);
+    auto pan_right           = view_control(language, 51, Text::pan_right, MenuAction::pan_right, {"Shift", "Right"}, has_image);
+    auto pan_up              = view_control(language, 52, Text::pan_up, MenuAction::pan_up, {"Shift", "Up"}, has_image);
+    auto pan_down            = view_control(language, 53, Text::pan_down, MenuAction::pan_down, {"Shift", "Down"}, has_image);
+    auto zoom_in             = view_control(language, 54, Text::zoom_in, MenuAction::zoom_in, {"Control", "Up"}, has_image);
+    auto zoom_out            = view_control(language, 55, Text::zoom_out, MenuAction::zoom_out, {"Control", "Down"}, has_image);
+    MenuItem pan_separator;
+    pan_separator.id        = 56;
+    pan_separator.separator = true;
+    view.children           = {previous,
+                               next,
+                               navigation_separator,
+                               fit,
+                               actual_size,
+                               zoom_in,
+                               zoom_out,
+                               pan_separator,
+                               pan_left,
+                               pan_right,
+                               pan_up,
+                               pan_down,
+                               zoom_separator,
+                               fullscreen_item};
     return view;
 }
 
@@ -69,7 +122,8 @@ MenuItem appearance_menu(const Settings &settings, Language language)
 }
 } // namespace
 
-MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen)
+MenuItem build_menu(const Settings &settings, Language language, bool chinese_font, bool fullscreen, bool has_image,
+                    bool can_actual_size)
 {
     // 稳定 ID 属于菜单模型，翻译和平台渲染都不改变它们。
     auto preferences     = item(language, 3, Text::settings);
@@ -77,7 +131,7 @@ MenuItem build_menu(const Settings &settings, Language language, bool chinese_fo
     auto help            = item(language, 4, Text::help);
     help.children        = {item(language, 40, Text::about, MenuAction::about)};
     MenuItem root;
-    root.children = {file_menu(language), view_menu(language, fullscreen), preferences, help};
+    root.children = {file_menu(language), view_menu(language, fullscreen, has_image, can_actual_size), preferences, help};
     return root;
 }
 
@@ -91,6 +145,21 @@ const MenuItem *find_menu_item(const MenuItem &root, std::int32_t id)
             return result;
     }
     return nullptr;
+}
+
+MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std::string> &shortcut, bool repeat)
+{
+    if (!root.enabled || shortcut.empty())
+        return MenuAction::none;
+    if (!root.separator && root.action != MenuAction::none && root.shortcut == shortcut)
+        return !repeat || root.repeatable ? root.action : MenuAction::none;
+    for (const auto &child : root.children)
+    {
+        const auto action = menu_action_for_shortcut(child, shortcut, repeat);
+        if (action != MenuAction::none)
+            return action;
+    }
+    return MenuAction::none;
 }
 
 void apply_menu_setting(MenuAction action, Settings &settings)

@@ -181,10 +181,12 @@ private:
     // 所有 SDL / ImGui 操作限定在主线程；D-Bus 工作线程只提交菜单动作。
     void run_event_loop(const LaunchOptions &options, Shell &shell, GlobalMenu &global_menu)
     {
-        last_activity_   = SDL_GetTicks();
-        menu_preference_ = settings_.language;
-        menu_theme_      = settings_.theme;
-        menu_fullscreen_ = is_fullscreen();
+        last_activity_        = SDL_GetTicks();
+        menu_preference_      = settings_.language;
+        menu_theme_           = settings_.theme;
+        menu_fullscreen_      = is_fullscreen();
+        menu_has_image_       = viewer_->has_image();
+        menu_can_actual_size_ = viewer_->can_actual_size();
         while (!quit_)
         {
             dispatch_global_menu_actions(global_menu, shell);
@@ -195,7 +197,7 @@ private:
             if (options.smoke_test)
                 inject_smoke_events(shell);
 
-            process_events(options.smoke_test);
+            process_events(options.smoke_test, shell);
             consume_dialog();
             viewer_->pump();
 
@@ -211,20 +213,65 @@ private:
         }
     }
 
+    // 系统菜单、窗口菜单和快捷键统一分发，避免操作行为不一致。
+    void dispatch_menu_action(MenuAction action, Shell &shell)
+    {
+        apply_menu_setting(action, settings_);
+        switch (action)
+        {
+        case MenuAction::quit:
+            quit_ = true;
+            break;
+        case MenuAction::fullscreen:
+            toggle_fullscreen();
+            break;
+        case MenuAction::about:
+            shell.show_about();
+            break;
+        case MenuAction::open:
+            open_dialog();
+            break;
+        case MenuAction::fit:
+            if (viewer_->has_image())
+                viewer_->fit();
+            break;
+        case MenuAction::actual_size:
+            if (viewer_->has_image() && viewer_->can_actual_size())
+                viewer_->actual_size();
+            break;
+        case MenuAction::pan_left:
+            if (viewer_->has_image())
+                viewer_->pan(-64, 0);
+            break;
+        case MenuAction::pan_right:
+            if (viewer_->has_image())
+                viewer_->pan(64, 0);
+            break;
+        case MenuAction::pan_up:
+            if (viewer_->has_image())
+                viewer_->pan(0, -64);
+            break;
+        case MenuAction::pan_down:
+            if (viewer_->has_image())
+                viewer_->pan(0, 64);
+            break;
+        case MenuAction::zoom_in:
+            if (viewer_->has_image())
+                viewer_->zoom(1);
+            break;
+        case MenuAction::zoom_out:
+            if (viewer_->has_image())
+                viewer_->zoom(-1);
+            break;
+        default:
+            break;
+        }
+    }
+
     void dispatch_global_menu_actions(GlobalMenu &global_menu, Shell &shell)
     {
         for (const auto action : global_menu.take_actions())
-        {
-            apply_menu_setting(action, settings_);
-            if (action == MenuAction::quit)
-                quit_ = true;
-            if (action == MenuAction::fullscreen)
-                toggle_fullscreen();
-            if (action == MenuAction::about)
-                shell.show_about();
-            if (action == MenuAction::open)
-                open_dialog();
-        }
+            dispatch_menu_action(action, shell);
     }
 
     void stop_image_work()
@@ -240,7 +287,7 @@ private:
     }
 
     // 最近有交互时保持响应；静止时延长等待，避免持续空转重绘。
-    void process_events(bool smoke_test)
+    void process_events(bool smoke_test, Shell &shell)
     {
         const bool active =
             viewer_->loading() || viewer_->detail_loading() || SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
@@ -252,11 +299,11 @@ private:
             return;
         do
         {
-            handle_event(event);
+            handle_event(event, shell);
         } while (SDL_PollEvent(&event));
     }
 
-    void handle_event(const SDL_Event &event)
+    void handle_event(const SDL_Event &event, Shell &shell)
     {
         ImGui_ImplSDL3_ProcessEvent(&event);
         last_activity_ = SDL_GetTicks();
@@ -265,26 +312,38 @@ private:
         if (event.type == SDL_EVENT_QUIT ||
             (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window_)))
             quit_ = true;
-        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
-            handle_shortcut(event.key);
+        if (event.type == SDL_EVENT_KEY_DOWN)
+            handle_shortcut(event.key, shell);
         if (event.type == SDL_EVENT_DROP_FILE && event.drop.data)
             viewer_->open(utf8_path(event.drop.data));
         update_window_settings(event);
     }
 
-    void handle_shortcut(const SDL_KeyboardEvent &key)
+    void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell)
     {
         // 文本输入和弹窗优先处理按键，避免应用快捷键抢走编辑操作。
         if (ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
             return;
-        if (key.key == SDLK_F11)
-            toggle_fullscreen();
-        if (key.key == SDLK_ESCAPE && is_fullscreen())
-            toggle_fullscreen();
-        if (key.key == SDLK_Q && (key.mod & SDL_KMOD_CTRL) != 0)
-            quit_ = true;
-        if (key.key == SDLK_O && (key.mod & SDL_KMOD_CTRL) != 0)
-            open_dialog();
+        if (!key.repeat && key.key == SDLK_ESCAPE && is_fullscreen())
+        {
+            dispatch_menu_action(MenuAction::fullscreen, shell);
+            return;
+        }
+        // 使用菜单模型中的同一份快捷键定义；禁用菜单项不会响应按键。
+        std::vector<std::string> shortcut;
+        if ((key.mod & SDL_KMOD_CTRL) != 0)
+            shortcut.emplace_back("Control");
+        if ((key.mod & SDL_KMOD_SHIFT) != 0)
+            shortcut.emplace_back("Shift");
+        if ((key.mod & SDL_KMOD_ALT) != 0)
+            shortcut.emplace_back("Alt");
+        if ((key.mod & SDL_KMOD_GUI) != 0)
+            shortcut.emplace_back("Super");
+        if (key.key >= SDLK_A && key.key <= SDLK_Z)
+            shortcut.emplace_back(1, static_cast<char>('a' + key.key - SDLK_A));
+        else
+            shortcut.emplace_back(SDL_GetKeyName(key.key));
+        dispatch_menu_action(menu_action_for_shortcut(current_menu(), shortcut, key.repeat), shell);
     }
 
     static void SDLCALL dialog_callback(void *data, const char *const *files, int)
@@ -378,20 +437,23 @@ private:
 
     MenuItem current_menu() const
     {
-        return build_menu(settings_, resolve_language(settings_.language, locale_, chinese_font_), chinese_font_,
-                          is_fullscreen());
+        return build_menu(settings_, resolve_language(settings_.language, locale_, chinese_font_), chinese_font_, is_fullscreen(),
+                          viewer_->has_image(), viewer_->can_actual_size());
     }
 
-    // 菜单数据仅在语言、主题或全屏状态变化时重建，同时更新系统顶栏和窗口回退菜单。
+    // 语言、主题、全屏或图片可用状态变化时，同步系统顶栏和窗口回退菜单。
     void synchronize_menu(GlobalMenu &global_menu)
     {
-        if (menu_preference_ == settings_.language && menu_theme_ == settings_.theme && menu_fullscreen_ == is_fullscreen())
+        if (menu_preference_ == settings_.language && menu_theme_ == settings_.theme && menu_fullscreen_ == is_fullscreen() &&
+            menu_has_image_ == viewer_->has_image() && menu_can_actual_size_ == viewer_->can_actual_size())
             return;
         menu_ = current_menu();
         global_menu.update(menu_);
-        menu_preference_ = settings_.language;
-        menu_theme_      = settings_.theme;
-        menu_fullscreen_ = is_fullscreen();
+        menu_preference_      = settings_.language;
+        menu_theme_           = settings_.theme;
+        menu_fullscreen_      = is_fullscreen();
+        menu_has_image_       = viewer_->has_image();
+        menu_can_actual_size_ = viewer_->can_actual_size();
     }
 
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu)
@@ -400,13 +462,8 @@ private:
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
-        const auto actions  = shell.draw(settings_, language, menu_, system_menu, is_fullscreen(), *renderer_, icon_, *viewer_);
-        if (actions.quit)
-            quit_ = true;
-        if (actions.toggle_fullscreen)
-            toggle_fullscreen();
-        if (actions.open)
-            open_dialog();
+        const auto action   = shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_);
+        dispatch_menu_action(action, shell);
         ImGui::Render();
         present_frame(options);
         ++rendered_frames_;
@@ -543,16 +600,18 @@ private:
     Settings settings_;
     MenuItem menu_;
     std::string locale_;
-    Language menu_preference_ = Language::system;
-    Theme menu_theme_         = Theme::system;
-    Theme system_theme_       = Theme::system;
-    bool menu_fullscreen_     = false;
-    bool chinese_font_        = false;
-    bool quit_                = false;
-    bool applied_dark_        = true;
-    float applied_scale_      = 0.0f;
-    Uint64 last_activity_     = 0;
-    unsigned rendered_frames_ = 0;
+    Language menu_preference_  = Language::system;
+    Theme menu_theme_          = Theme::system;
+    Theme system_theme_        = Theme::system;
+    bool menu_fullscreen_      = false;
+    bool menu_has_image_       = false;
+    bool menu_can_actual_size_ = false;
+    bool chinese_font_         = false;
+    bool quit_                 = false;
+    bool applied_dark_         = true;
+    float applied_scale_       = 0.0f;
+    Uint64 last_activity_      = 0;
+    unsigned rendered_frames_  = 0;
     std::filesystem::path settings_path_;
     SDL_Window *window_ = nullptr;
     std::unique_ptr<render::Renderer> renderer_;

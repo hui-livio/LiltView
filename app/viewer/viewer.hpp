@@ -42,6 +42,7 @@ public:
     void set_viewport(render::Point min, render::Point max, float density = 1);
     void pan(double x, double y);
     void zoom(double wheel, render::Point anchor);
+    void zoom(double wheel); // Keyboard/menu zoom is anchored at the canvas center.
     std::size_t loaded_tiles() const
     {
         return loading_ ? pending_scene_.loaded_tiles() : scene_.loaded_tiles();

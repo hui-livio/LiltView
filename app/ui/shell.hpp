@@ -10,26 +10,18 @@
 namespace liltview
 {
 class Viewer;
-struct ShellActions
-{
-    bool open              = false;
-    bool quit              = false;
-    bool toggle_fullscreen = false;
-};
-
 class Shell
 {
 public:
-    ShellActions draw(Settings &settings, Language language, const MenuItem &menu, bool system_menu, bool fullscreen,
-                      render::Renderer &renderer, render::Image icon, Viewer &viewer);
+    MenuAction draw(Language language, const MenuItem &menu, bool system_menu, render::Renderer &renderer, render::Image icon,
+                    Viewer &viewer);
     void show_about()
     {
         open_about_ = true;
     }
 
 private:
-    ShellActions draw_window_menu(Settings &settings, const MenuItem &menu);
-    void draw_toolbar(Language language, bool fullscreen, Viewer &, ShellActions &);
+    MenuAction draw_window_menu(const MenuItem &menu);
     void draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &);
     void draw_status(Language language, const Viewer &);
     void draw_about(Language language, render::Renderer &renderer, render::Image icon);

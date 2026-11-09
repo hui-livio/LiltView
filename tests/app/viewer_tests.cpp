@@ -281,7 +281,10 @@ TEST_CASE("native scenes retain every decoded tile across camera changes", "[vie
     {
         viewer.actual_size();
         viewer.pan(-20, 10);
-        viewer.zoom(-2, {64, 48});
+        if (i % 2 == 0)
+            viewer.zoom(-2); // Keyboard/menu zoom shares the decode-free camera path.
+        else
+            viewer.zoom(-2, {64, 48});
         viewer.fit();
         loop.settle(viewer);
         CHECK_FALSE(viewer.failed());
