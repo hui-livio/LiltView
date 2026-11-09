@@ -15,7 +15,7 @@ liltview --help
 | `--language system\|en-US\|zh-CN` | 覆盖保存的语言，正常退出后随设置保存 |
 | `--config-dir PATH` | 将 settings.yaml 放在指定目录 |
 | `--smoke-test` | 隐藏窗口执行冒烟流程并退出，不保存设置 |
-| `--screenshot PATH` | 需同时提供 --smoke-test，输出 PPM 截图；透明窗口另输出同名 `-alpha.pgm` 透明度诊断图 |
+| `--screenshot PATH` | 需同时提供 --smoke-test，输出 PPM 截图；圆角／透明窗口另输出同名 `-alpha.pgm` 透明度诊断图 |
 | `--help` / `-h`、`--version` | 显示 CLI11 帮助 / 应用版本，退出前不初始化窗口 |
 | 一个位置参数 | 打开的图片路径；以 `-` 开头的文件名用 `--` 分隔 |
 

@@ -253,22 +253,11 @@ def test_chrome(executable, folder):
             assert len(re.findall(r"LiltView [^\n]+ started,", text)) == 1, text
             assert text.count("Image displayed: red.bmp") == 1, text
             windows = re.findall(r"Window created: system_titlebar=(true|false), transparent=(true|false), native_window_id=(\d+)", text)
-            if os.environ.get("SDL_VIDEODRIVER") == "wayland":
-                assert [(native, alpha) for native, alpha, _ in windows] == [("true", "true")], text
-                reused = re.findall(r"native_window_id=(\d+), surface_reused=true", text)
-                assert reused == [windows[0][2]] * 3, text
-            else:
-                assert [(native, alpha) for native, alpha, _ in windows] == [
-                    ("true", "false"), ("false", "true"), ("true", "false"), ("false", "true")], text
-                assert len({ident for _, _, ident in windows}) == 4, text
-                for _, _, ident in windows[:-1]:
-                    stages = re.findall(rf"Window handoff: old_id={ident}, stage=(\w+)", text)
-                    assert stages == ["hidden", "destroyed", "replacement_shown"], text
-                positions = re.findall(r"Window placement: requested=\((-?\d+), (-?\d+)\), actual=\((-?\d+), (-?\d+)\)", text)
-                for x, y, actual_x, actual_y in positions:
-                    # Some WMs clamp a position at the screen's edges. Reject
-                    # recentering/large jumps while allowing a frame-size clamp.
-                    assert abs(int(x) - int(actual_x)) <= 48 and abs(int(y) - int(actual_y)) <= 48, text
+            alpha = "false" if os.environ.get("SDL_VIDEODRIVER") == "x11" else "true"
+            assert [(native, transparent) for native, transparent, _ in windows] == [("true", alpha)], text
+            reused = re.findall(r"native_window_id=(\d+), surface_reused=true, gl_context_reused=true", text)
+            assert reused == [windows[0][2]] * 3, text
+            assert "Window handoff:" not in text and "Window placement:" not in text, text
             assert text.count("Window decoration applied:") == 3, text
             assert "[error]" not in text and "[critical]" not in text, text
             assert "system_titlebar: false" in settings.read_text(), settings.read_text()

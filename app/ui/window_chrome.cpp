@@ -23,16 +23,15 @@ WindowChromeMetrics window_chrome_metrics(ImVec2 size, const WindowChromeState &
             state.blocked};
 }
 
-WindowModePlacement preserve_content_placement(int x, int y, int width, int height, const WindowChromeState &before,
+WindowContentSize window_content_size_for_mode(int width, int height, const WindowChromeState &before,
                                                const WindowChromeState &after)
 {
-    const auto old     = window_chrome_metrics({static_cast<float>(width), static_cast<float>(height)}, before);
-    const auto next    = window_chrome_metrics({static_cast<float>(width), static_cast<float>(height)}, after);
-    const auto delta_x = static_cast<int>(std::lround(old.border - next.border));
-    const auto delta_y = static_cast<int>(std::lround(old.title_bottom() - next.title_bottom()));
+    const auto old         = window_chrome_metrics({static_cast<float>(width), static_cast<float>(height)}, before);
+    const auto next        = window_chrome_metrics({static_cast<float>(width), static_cast<float>(height)}, after);
+    const auto delta_width = static_cast<int>(std::lround(2 * (next.border - old.border)));
     const auto delta_height =
         static_cast<int>(std::lround(2 * (next.border - old.border) + next.title_height - old.title_height));
-    return {x + delta_x, y + delta_y, std::max(640, width - 2 * delta_x), std::max(480, height + delta_height)};
+    return {std::max(640, width + delta_width), std::max(480, height + delta_height)};
 }
 
 std::vector<WindowSpan> rounded_window_spans(int width, int height, float radius)

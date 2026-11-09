@@ -26,7 +26,6 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -135,6 +134,7 @@ private:
         smoke_started_ = SDL_GetTicks();
         if (settings_.maximized)
             require(SDL_MaximizeWindow(window_), "SDL_MaximizeWindow");
+        update_window_shape();
         if (!options.smoke_test)
             require(SDL_ShowWindow(window_), "SDL_ShowWindow");
         spdlog::info("LiltView {} started, app_id={}, video={}, renderer=OpenGL3, texture_limit={}", LILTVIEW_VERSION,
@@ -145,11 +145,11 @@ private:
     SDL_Window *make_window(int width, int height, bool system_titlebar)
     {
         const auto render_flags = prepare_render_window();
-        auto *window            = SDL_CreateWindow(
-            "LiltView", width, height,
-            render_flags | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN |
-                (system_titlebar ? 0 : SDL_WINDOW_BORDERLESS) |
-                ((!system_titlebar || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland") ? SDL_WINDOW_TRANSPARENT : 0));
+        auto *window =
+            SDL_CreateWindow("LiltView", width, height,
+                             render_flags | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN |
+                                 (system_titlebar ? 0 : SDL_WINDOW_BORDERLESS) |
+                                 (std::string_view(SDL_GetCurrentVideoDriver()) == "x11" ? 0 : SDL_WINDOW_TRANSPARENT));
         if (!window)
             return nullptr;
         if (!SDL_SetWindowMinimumSize(window, 640, 480))
@@ -178,19 +178,20 @@ private:
                          SDL_GetError());
     }
 
-    void apply_window_mode(GlobalMenu &global_menu, Shell &shell)
+    bool apply_window_mode(Shell &shell)
     {
         if (settings_.system_titlebar == applied_system_titlebar_)
-            return;
+            return false;
         if (dialog_)
         {
             settings_.system_titlebar = applied_system_titlebar_;
             spdlog::warn("Close the file dialog before switching window decorations");
-            return;
+            return false;
         }
-        pending_window_position_.reset();
         shell.dismiss_transient_menus();
-        const auto flags = SDL_GetWindowFlags(window_);
+        const auto flags            = SDL_GetWindowFlags(window_);
+        const auto original_window  = SDL_GetWindowID(window_);
+        const auto original_context = SDL_GL_GetCurrentContext();
         int width = settings_.width, height = settings_.height;
         const bool normal = (flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN)) == 0;
         if (normal)
@@ -200,111 +201,37 @@ private:
         before.maximized = before.fullscreen = false;
         auto after                           = before;
         after.system_titlebar                = settings_.system_titlebar;
-        int x = 0, y = 0;
-        const bool positioned = query_window_position(window_, x, y);
-        const auto placement  = preserve_content_placement(x, y, width, height, before, after);
+        const auto placement                 = window_content_size_for_mode(width, height, before, after);
 
-        if (std::string_view(SDL_GetCurrentVideoDriver()) == "wayland")
-        {
-            // Wayland has no global toplevel positioning API. Recreating the
-            // surface lets the compositor place it elsewhere. Keep its identity
-            // and explicitly change the opaque/input regions with decorations.
-            if (!SDL_SetWindowBordered(window_, settings_.system_titlebar))
-            {
-                settings_.system_titlebar = applied_system_titlebar_;
-                return;
-            }
-            applied_system_titlebar_ = settings_.system_titlebar;
-            configure_hit_test();
-            shape_width_ = shape_height_ = 0;
-            if (normal)
-                SDL_SetWindowSize(window_, placement.width, placement.height);
-            SDL_SyncWindow(window_);
-            SDL_PumpEvents();
-            settings_.width  = placement.width;
-            settings_.height = placement.height;
-            close_inputs_    = {};
-            spdlog::debug(
-                "Window decoration applied: system_titlebar={}, transparent=true, native_window_id={}, surface_reused=true",
-                settings_.system_titlebar, SDL_GetWindowID(window_));
-            return;
-        }
-        auto *replacement = make_window(placement.width, placement.height, settings_.system_titlebar);
-        if (!replacement)
-        {
-            settings_.system_titlebar = applied_system_titlebar_;
-            spdlog::warn("Cannot create replacement window: {}", SDL_GetError());
-            return;
-        }
-        if (positioned)
-            SDL_SetWindowPosition(replacement, placement.x, placement.y);
-        const auto old_id            = SDL_GetWindowID(window_);
-        const bool visible           = (flags & SDL_WINDOW_HIDDEN) == 0;
-        const float previous_opacity = SDL_GetWindowOpacity(window_);
-        try
-        {
-            if (visible)
-            {
-                renderer_->retire_surface();
-                // Also retire the native frame where supported; a compositor
-                // may otherwise animate its cached window snapshot on unmap.
-                SDL_SetWindowOpacity(window_, 0);
-                require(SDL_HideWindow(window_), "Hide retiring window");
-                SDL_SyncWindow(window_);
-                SDL_PumpEvents();
-                spdlog::debug("Window handoff: old_id={}, stage=hidden", old_id);
-            }
-            renderer_->rebind_surface(replacement);
-        } catch (const std::exception &error)
-        {
-            SDL_DestroyWindow(replacement);
-            if (visible)
-            {
-                SDL_SetWindowOpacity(window_, previous_opacity < 0 ? 1 : previous_opacity);
-                SDL_ShowWindow(window_);
-            }
-            settings_.system_titlebar = applied_system_titlebar_;
-            spdlog::warn("Cannot switch window decorations: {}", error.what());
-            return;
-        }
-        auto *previous = window_;
-        SDL_SetWindowHitTest(previous, nullptr, nullptr);
-        ImGui_ImplSDL3_Shutdown();
-        platform_ready_          = false;
-        window_                  = replacement;
-        applied_system_titlebar_ = settings_.system_titlebar;
-        platform_ready_          = initialize_imgui_platform(window_);
-        require(platform_ready_, "Rebind ImGui SDL3 backend");
-        configure_hit_test();
-        global_menu.rebind_window(window_); // Old surface stays alive until all native associations are removed.
+        // X11 keeps an opaque visual for its whole lifetime; native Shape clips
+        // rounded custom corners. Remove its bounding/input masks *before*
+        // asking the WM to restore a native frame around this same client.
         shape_width_ = shape_height_ = 0;
-        create_window_icon();
-        if (flags & SDL_WINDOW_MAXIMIZED)
-            SDL_MaximizeWindow(window_);
-        if (flags & SDL_WINDOW_FULLSCREEN)
-            SDL_SetWindowFullscreen(window_, true);
-        // Destroy and flush the old toplevel before mapping the replacement;
-        // never keep both visible during the desktop's hide animation.
-        SDL_DestroyWindow(previous);
-        SDL_PumpEvents();
-        spdlog::debug("Window handoff: old_id={}, stage=destroyed", old_id);
-        if (visible)
+        if (settings_.system_titlebar && !window_shape_->apply(window_, 0, true))
         {
-            require(SDL_ShowWindow(window_), "Show replacement window");
-            SDL_SyncWindow(window_);
-            SDL_PumpEvents();
-            if (positioned && normal && (flags & SDL_WINDOW_MINIMIZED) == 0)
-                pending_window_position_ = SDL_Point{placement.x, placement.y};
-            if (flags & SDL_WINDOW_MINIMIZED)
-                SDL_MinimizeWindow(window_);
-            spdlog::debug("Window handoff: old_id={}, stage=replacement_shown", old_id);
+            settings_.system_titlebar = applied_system_titlebar_;
+            spdlog::warn("Cannot remove custom window shape: {}", SDL_GetError());
+            return false;
         }
+        if (!SDL_SetWindowBordered(window_, settings_.system_titlebar))
+        {
+            settings_.system_titlebar = applied_system_titlebar_;
+            return false;
+        }
+        applied_system_titlebar_ = settings_.system_titlebar;
+        configure_hit_test();
+        if (normal)
+            SDL_SetWindowSize(window_, placement.width, placement.height);
+        SDL_SyncWindow(window_);
+        SDL_PumpEvents();
         settings_.width  = placement.width;
         settings_.height = placement.height;
         close_inputs_    = {};
-        spdlog::debug("Window decoration applied: system_titlebar={}, transparent={}, native_window_id={}",
-                      settings_.system_titlebar, (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0,
-                      SDL_GetWindowID(window_));
+        spdlog::debug(
+            "Window decoration applied: system_titlebar={}, transparent={}, native_window_id={}, surface_reused={}, gl_context_reused={}",
+            settings_.system_titlebar, (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0, SDL_GetWindowID(window_),
+            original_window == SDL_GetWindowID(window_), original_context == SDL_GL_GetCurrentContext());
+        return true;
     }
 
     void initialize_imgui()
@@ -361,18 +288,18 @@ private:
 
             if (quit_)
                 break;
-            apply_window_mode(global_menu, shell);
+            const bool mode_changed = apply_window_mode(shell);
 
             if (options.smoke_test)
                 inject_smoke_events(shell);
 
-            process_events(options.smoke_test, shell);
+            process_events(options.smoke_test, shell, mode_changed);
             // 系统菜单动作由刚收到的 SDL 唤醒事件触发，不延后到下一帧。
             if (!quit_)
                 dispatch_global_menu_actions(global_menu, shell);
             if (quit_)
                 break;
-            apply_window_mode(global_menu, shell);
+            apply_window_mode(shell);
 
             consume_dialog();
             viewer_->pump();
@@ -514,13 +441,13 @@ private:
     }
 
     // 最近有交互时保持响应；静止时延长等待，避免持续空转重绘。
-    void process_events(bool smoke_test, Shell &shell)
+    void process_events(bool smoke_test, Shell &shell, bool force_poll)
     {
         const bool active =
             viewer_->loading() || viewer_->detail_loading() || SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
         const auto flags = SDL_GetWindowFlags(window_);
         viewer_->suspend_animation(!smoke_test && (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)));
-        const int wait_ms = smoke_test ? 0 : viewer_->wait_timeout_ms(active ? 16 : 200);
+        const int wait_ms = (smoke_test || force_poll) ? 0 : viewer_->wait_timeout_ms(active ? 16 : 200);
         SDL_Event event;
         if (!SDL_WaitEventTimeout(&event, wait_ms))
             return;
@@ -735,7 +662,16 @@ private:
         if (shape_width_ == width && shape_height_ == height && shape_radius_ == radius && shape_density_ == density)
             return;
         if (!window_shape_->apply(window_, radius, settings_.system_titlebar))
-            spdlog::warn("Cannot update rounded window input shape: {}", SDL_GetError());
+        {
+            spdlog::warn("Cannot update rounded window shape: {}", SDL_GetError());
+            if (radius > 0 && std::string_view(SDL_GetCurrentVideoDriver()) == "x11")
+            {
+                // An opaque X11 visual needs Shape for clipped corners. Never
+                // leave un-clipped black triangles when the extension is absent.
+                settings_.disable_rounding = true;
+                spdlog::warn("Rounded corners disabled because native X11 shape is unavailable");
+            }
+        }
         shape_width_   = width;
         shape_height_  = height;
         shape_radius_  = radius;
@@ -797,19 +733,6 @@ private:
         renderer_->render_frame(ImGui::GetDrawData());
         capture_smoke_frame(options);
         renderer_->present();
-        if (pending_window_position_)
-        {
-            // The first buffer can finalize WM frame/shadow extents. Position
-            // after that buffer, not against a still-changing unmapped frame.
-            const auto target = *pending_window_position_;
-            pending_window_position_.reset();
-            SDL_SyncWindow(window_);
-            SDL_PumpEvents();
-            position_window_client(window_, target.x, target.y);
-            int actual_x = 0, actual_y = 0;
-            if (query_window_position(window_, actual_x, actual_y))
-                spdlog::debug("Window placement: requested=({}, {}), actual=({}, {})", target.x, target.y, actual_x, actual_y);
-        }
     }
 
     // 测试动作通过真实 SDL 事件路径执行，避免另写一套退出和弹窗处理逻辑。
@@ -949,7 +872,6 @@ private:
 
     // 应用状态只在主线程读写；GlobalMenu 在 run() 内先销毁，再回收这些图形资源。
     Settings settings_;
-    std::optional<SDL_Point> pending_window_position_;
     UiCloseTiming close_inputs_;
     MenuItem menu_;
     std::string locale_;

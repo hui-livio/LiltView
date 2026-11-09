@@ -1,16 +1,12 @@
 #include "window_shape.hpp"
 #include <SDL3/SDL.h>
-#include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <string_view>
 #include "ui/window_chrome.hpp"
 
 #ifdef __linux__
     #include <X11/Xlib.h>
-    #include <X11/Xutil.h>
     #include <X11/extensions/shape.h>
-    #include <poll.h>
     #include <wayland-client.h>
 #endif
 
@@ -66,10 +62,6 @@ WindowShape::~WindowShape() = default;
 
 bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
 {
-    // Native opaque windows are never shaped, including the input region. Do
-    // not send Shape/region changes that could affect the WM's native frame.
-    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) == 0)
-        return true;
     int width = 0, height = 0;
     if (!SDL_GetWindowSize(window, &width, &height))
         return false;
@@ -119,7 +111,7 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
             return SDL_SetError("Missing X11 window for rounded window");
         int event_base = 0, error_base = 0;
         if (!XShapeQueryExtension(display, &event_base, &error_base))
-            return SDL_SetError("X11 Shape extension unavailable");
+            return radius == 0 ? true : SDL_SetError("X11 Shape extension unavailable");
         if (radius == 0)
         {
             XShapeCombineMask(display, native, ShapeBounding, 0, 0, None, ShapeSet);
@@ -165,110 +157,4 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
     SDL_DestroySurface(shape);
     return result;
 }
-bool query_window_position(SDL_Window *window, int &x, int &y)
-{
-    if (std::string_view(SDL_GetCurrentVideoDriver()) == "offscreen")
-        return false;
-#ifdef __linux__
-    const auto props = SDL_GetWindowProperties(window);
-    if (SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr))
-        return false;
-    if (auto *display = static_cast<Display *>(SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr)))
-    {
-        const auto native = static_cast<Window>(SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
-        XWindowAttributes attributes;
-        Window child = 0;
-        return native && XGetWindowAttributes(display, native, &attributes) &&
-            XTranslateCoordinates(display, native, attributes.root, 0, 0, &x, &y, &child);
-    }
-#endif
-    return SDL_GetWindowPosition(window, &x, &y);
-}
-
-bool position_window_client(SDL_Window *window, int x, int y)
-{
-#ifdef __linux__
-    const auto props = SDL_GetWindowProperties(window);
-    if (auto *display = static_cast<Display *>(SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr)))
-    {
-        const auto native = static_cast<Window>(SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
-        if (!native)
-            return false;
-        XSizeHints original{};
-        long supplied = 0;
-        XGetWMNormalHints(display, native, &original, &supplied);
-        auto hints = original;
-        // StaticGravity asks for the *client* position, independent of native
-        // border/shadow extents. Retain this gravity for the lifetime of this
-        // replacement: changing it back can itself re-anchor a window in WSLg.
-        hints.flags       |= PWinGravity;
-        hints.win_gravity  = StaticGravity;
-        XSetWMNormalHints(display, native, &hints);
-        SDL_PumpEvents();
-        const auto deadline = SDL_GetTicksNS() + 100000000;
-        std::vector<XEvent> configure_events;
-        bool matched  = false;
-        int command_x = x, command_y = y;
-        for (unsigned attempt = 0; attempt < 3 && SDL_GetTicksNS() < deadline; ++attempt)
-        {
-            const auto serial = NextRequest(display);
-            XMoveWindow(display, native, command_x, command_y);
-            XFlush(display);
-            bool acknowledged             = false;
-            const auto collect_configures = [&]
-            {
-                XEvent event;
-                while (XCheckTypedWindowEvent(display, native, ConfigureNotify, &event))
-                {
-                    configure_events.push_back(event);
-                    acknowledged |= event.xconfigure.serial >= serial;
-                }
-            };
-            int actual_x = 0, actual_y = 0;
-            for (;;)
-            {
-                collect_configures();
-                if (!query_window_position(window, actual_x, actual_y))
-                    break;
-                matched = std::abs(actual_x - x) <= 1 && std::abs(actual_y - y) <= 1;
-                if (matched || acknowledged)
-                    break;
-                // A synchronous geometry query may itself have read the WM's
-                // ConfigureNotify into Xlib's queue. Check before polling its fd.
-                collect_configures();
-                if (acknowledged)
-                {
-                    query_window_position(window, actual_x, actual_y);
-                    matched = std::abs(actual_x - x) <= 1 && std::abs(actual_y - y) <= 1;
-                    break;
-                }
-                const auto now = SDL_GetTicksNS();
-                if (now >= deadline)
-                    break;
-                pollfd fd{ConnectionNumber(display), POLLIN, 0};
-                const auto remaining = static_cast<int>((deadline - now + 999999) / 1000000);
-                poll(&fd, 1, remaining);
-            }
-            if (matched)
-                break;
-            // WMs which ignore StaticGravity may return a frame-relative result.
-            // Correct only after its actual ConfigureNotify, not an intermediate
-            // SDL cached position, which can otherwise produce 32px oscillation.
-            command_x += x - actual_x;
-            command_y += y - actual_y;
-        }
-        for (auto event = configure_events.rbegin(); event != configure_events.rend(); ++event)
-            XPutBackEvent(display, &*event);
-        XFlush(display);
-        SDL_PumpEvents(); // Deliver the retained ConfigureNotify events normally.
-        return matched;
-    }
-#endif
-    if (!SDL_SetWindowPosition(window, x, y))
-        return false;
-    SDL_SyncWindow(window);
-    SDL_PumpEvents();
-    return true;
-}
-
 } // namespace liltview

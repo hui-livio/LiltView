@@ -81,7 +81,6 @@ class OpenGLRenderer final : public Renderer
 public:
     explicit OpenGLRenderer(const Config &config) :
         staged_uploads_(config.staged_uploads),
-        vsync_(config.vsync),
         budget_(config.image_budget_bytes),
         owner_(next_owner.fetch_add(1))
     {
@@ -277,61 +276,6 @@ public:
                        {uv_max.x, uv_max.y});
     }
 
-    void retire_surface() override
-    {
-        if (!SDL_GL_MakeCurrent(window_, context_))
-            throw Error(ErrorCode::backend_failure, SDL_GetError());
-        SDL_GL_SetSwapInterval(0); // No additional VSync wait for a retiring surface.
-        glDisable(GL_SCISSOR_TEST);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        const bool transparent = (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0;
-        glClearColor(transparent ? 0 : 0.075f, transparent ? 0 : 0.085f, transparent ? 0 : 0.10f, transparent ? 0 : 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-        if (!SDL_GL_SwapWindow(window_))
-        {
-            const std::string error = SDL_GetError();
-            SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
-            throw Error(ErrorCode::backend_failure, error.c_str());
-        }
-        glClear(GL_COLOR_BUFFER_BIT); // Retire both buffers, including debug readback.
-        glFinish();                   // Publish the empty front buffer before the native hide request.
-        SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
-    }
-
-    void rebind_surface(void *surface) override
-    {
-        auto *replacement = static_cast<SDL_Window *>(surface);
-        if (!replacement)
-            throw Error(ErrorCode::invalid_argument, "Missing replacement window");
-        // Always create a context for the replacement drawable's visual.
-        // Merely MakeCurrent can succeed across differing X11 depths, yet a
-        // later Mesa software swap can fail with BadMatch / X_ShmPutImage.
-        if (!SDL_GL_MakeCurrent(window_, context_) || !SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1))
-            throw Error(ErrorCode::backend_failure, SDL_GetError());
-        // Complete outstanding uploads before the new context reads shared
-        // resources. This synchronization is only on window-mode transitions.
-        glFinish();
-        const auto shared              = SDL_GL_CreateContext(replacement);
-        const std::string create_error = shared ? "" : SDL_GetError();
-        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
-        if (!shared)
-        {
-            SDL_GL_MakeCurrent(window_, context_);
-            throw Error(ErrorCode::backend_failure, create_error.c_str());
-        }
-        if (!SDL_GL_MakeCurrent(replacement, shared))
-        {
-            const std::string bind_error = SDL_GetError();
-            SDL_GL_DestroyContext(shared);
-            SDL_GL_MakeCurrent(window_, context_);
-            throw Error(ErrorCode::backend_failure, bind_error.c_str());
-        }
-        SDL_GL_DestroyContext(context_);
-        context_ = shared;
-        window_  = replacement;
-        SDL_GL_SetSwapInterval(vsync_ ? 1 : 0);
-    }
-
     void begin_frame() override
     {
         ImGui_ImplOpenGL3_NewFrame();
@@ -352,8 +296,17 @@ public:
         if (!size.width || !size.height)
             return;
         glViewport(0, 0, static_cast<GLsizei>(size.width), static_cast<GLsizei>(size.height));
-        if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0)
+        const auto flags = SDL_GetWindowFlags(window_);
+        if ((flags & SDL_WINDOW_TRANSPARENT) != 0)
             glClearColor(0, 0, 0, 0);
+        else if ((flags & SDL_WINDOW_BORDERLESS) != 0)
+        {
+            // X11 Shape clips the opaque visual. Give antialiased edge pixels
+            // a theme-matching RGB base instead of a black fringe; retain alpha
+            // for rounded-corner screenshot diagnostics.
+            const auto color = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+            glClearColor(color.x, color.y, color.z, 0);
+        }
         else
             glClearColor(0.055f, 0.063f, 0.075f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -374,8 +327,8 @@ public:
         if (!result.size.width || !result.size.height)
             return result;
         // Keep opaque renderer benchmarks on their original packed RGB path.
-        // Alpha diagnostics are only needed for explicitly transparent windows.
-        if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) == 0)
+        // Alpha diagnostics are only needed for transparent or custom-decorated windows.
+        if ((SDL_GetWindowFlags(window_) & (SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS)) == 0)
         {
             const auto row = static_cast<std::size_t>(result.size.width) * 3;
             result.rgb.resize(row * result.size.height);
@@ -563,7 +516,6 @@ private:
     std::array<UploadSlot, 8> uploads_{};
     UploadStats upload_stats_{};
     bool staged_uploads_ = true;
-    bool vsync_          = true;
     std::vector<Texture> textures_;
     std::uint64_t budget_ = 0, used_ = 0, owner_ = 0;
     std::uint32_t max_edge_ = 0;

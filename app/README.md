@@ -35,7 +35,7 @@
 
 窗口装饰由 `ui/window_chrome` 的纯几何 / 命中测试和绘制实现，Application 将命中结果映射到 SDL hit test，让系统执行移动 / resize（包含 Wayland 的输入 serial），不通过鼠标事件循环模拟移动。标题栏 / 状态栏拖动与四边 / 四角 resize 分区，图片区域及按钮不拖窗；弹窗 / 文件对话框期间禁用自定义 hit test。主题边框及绘制尺寸共享同一套 DPI metrics。
 
-默认 `system_titlebar=false`、`disable_rounding=false`；外观菜单提供系统标题栏及关闭圆角勾选。两项均参与菜单同步 / YAML 持久化。系统标题栏模式不注册自定义 hit test；X11 创建不透明 SDL 窗口且不应用 shape，Wayland 则为复用的 surface 显式设置全矩形不透明 / 输入区域；自绘圆角窗创建透明 OpenGL alpha framebuffer，背景、标题栏和主题边框按相同半径绘制；About 遮罩保持圆角外 alpha 为零。`platform/window_shape` 仅在窗口尺寸 / density / 半径变化时更新原生 shape：Wayland 通过私有队列绑定 compositor 一次并设置 input region；X11 设置 bounding / input Shape。Linux 区域按角部扫描线合并为 O(radius) 个矩形，而非每帧分配窗口大小 RGBA 掩码。最大化 / 全屏 / 系统标题栏时恢复矩形，Wayland proxy 在 SDL display 销毁前回收。
+默认 `system_titlebar=false`、`disable_rounding=false`；外观菜单提供系统标题栏及关闭圆角勾选。两项均参与菜单同步 / YAML 持久化。系统标题栏模式不注册自定义 hit test，并解除所有圆角裁切。X11 始终使用不透明 visual，自绘圆角通过 Shape bounding/input region 实现，切回系统标题栏前先清除 Shape；Wayland 则对同一支持 alpha 的 surface 调整 opaque/input region。背景、标题栏和主题边框按相同半径绘制；About 遮罩保持圆角外 alpha 为零。`platform/window_shape` 仅在窗口尺寸 / density / 半径变化时更新原生 shape：Wayland 通过私有队列绑定 compositor 一次并设置 input region；X11 设置 bounding / input Shape。Linux 区域按角部扫描线合并为 O(radius) 个矩形，而非每帧分配窗口大小 RGBA 掩码。最大化 / 全屏 / 系统标题栏时恢复矩形，Wayland proxy 在 SDL display 销毁前回收。
 
 `update/` 延期，当前不创建网络模块或获取 cpp-httplib。
 
@@ -95,6 +95,6 @@ LILTVIEW_BENCH_DIRECT=1 build/app-release/tests/liltview_viewer_benchmark /path/
 
 基准输出实际 SDL video driver、GL vendor / renderer / version、实际 swap interval，以及初始全图、100%、平移 / 往返缩放的 pump / prepare / upload / submit / present、P50 / P95 / 最大帧、等待 / 停住的帧、读取 / 恢复次数和暂存资源计数。窗口隐藏、VSync 关闭，不含截图读回和应用菜单；平移帧之间 8ms、恢复帧之间 1ms 的测试节流只计入阶段总耗时，不计入单帧耗时。它用于隔离驱动和 viewer，不是完整用户窗口 FPS 或与其他应用的对比。冷区域仍需恢复，不能把帧耗时降低说成所有冷跳转零延迟。
 
-装饰模式切换发生在 ImGui 帧外，先关闭非模态弹出菜单。Wayland 没有普通 toplevel 的全局位置控制，因此保留同一 SDL window / wl_surface、原地调整装饰及 opaque/input region，而不是创建新 surface 让合成器重新放置。X11 因不透明 / 透明 visual 不同仍创建隐藏窗口；先清空旧 front/back buffer（透明旧窗 alpha 清零），尽可能设置旧窗 opacity=0，再隐藏并同步。renderer 使用共享 GL context 保留纹理 / 字体 / cache 句柄，重新绑定 SDL ImGui backend 和原菜单服务；旧窗口销毁 / flush 后才显示新窗口。不能将原 GL context 直接绑定到不同 X11 visual 后继续 swap（软件 GL 可能在 X_ShmPutImage 才报 BadMatch）。
+装饰模式切换发生在 ImGui 帧外，先关闭非模态弹出菜单，调用 `SDL_SetWindowBordered` 原地改变装饰。X11 与 Wayland 均保留同一 native window、GL context、菜单服务和 viewer；不创建替代窗口、不重新绑定渲染上下文、不隐藏 / 销毁当前窗口，也不计算或设置窗口全局坐标。只补偿客户区尺寸，使视口尺寸尽量保持一致，并在切换后立即绘制新布局，不追加空闲事件等待。窗口管理器对系统装饰和屏幕边界的少量调整仍由系统负责。
 
-X11 用 XTranslateCoordinates 获取实际客户区坐标，不依赖可能过期的 SDL move 事件；按标题栏 / 边框高度差调整客户区位置与尺寸，保持图片视口锚点。首帧提交、窗口管理器完成边框配置后，再用 StaticGravity 按实际客户区坐标请求定位，不混用阴影 extents 和窗口边框偏移，并有界等待 WM 确认（最多 100ms，完成即返回），保留其他 WM hints，维持 StaticGravity，避免改回 gravity 时窗口再次被重新锚定，不通过固定 sleep 延迟掩盖问题；最终位置仍遵循窗口管理器的边界约束，允许少量系统边框偏差。Wayland 原地切换避免了二次映射的大幅位置变化。失效的旧窗口 resize/hide 事件不写回新窗口状态；文件选择对话框打开时拒绝切换，失败时恢复旧窗口可见性 / opacity 和原模式。
+X11 从创建开始即使用不透明 visual，避免在 ARGB layered 窗口上恢复原生标题栏时发生兼容问题；圆角用真正的 X Shape bounding/input 裁切实现，无需变更 visual。原生 frame 恢复前必须清除裁切，不能只把半径设置为零而留着旧 mask。Shape 扩展不可用时退回直角，不留黑色外角。相关日志 `surface_reused=true, gl_context_reused=true` 记录原地切换结果。

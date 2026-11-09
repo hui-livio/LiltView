@@ -30,7 +30,6 @@ public:
 
     bool active();
     void update(const MenuItem &menu);
-    void rebind_window(SDL_Window *window);
     std::vector<GlobalMenuAction> take_actions();
 
 private:

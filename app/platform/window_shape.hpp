@@ -17,9 +17,5 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-// Unlike SDL's cached event position, query actual X11 client coordinates.
-// Wayland does not expose global toplevel positioning; reuse its surface instead.
-bool query_window_position(SDL_Window *, int &x, int &y);
-bool position_window_client(SDL_Window *, int x, int y);
 } // namespace liltview
 #endif

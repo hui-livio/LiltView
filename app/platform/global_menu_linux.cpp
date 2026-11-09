@@ -12,7 +12,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <functional>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -493,32 +492,23 @@ struct GlobalMenu::Impl
     {
         if (x_window == 0)
             return;
-        const auto id = x_window.load();
-        struct Registration
-        {
-            Impl *self;
-            uint32_t id;
-        };
-        auto *registration = new Registration{this, id};
         ++pending_registrations;
         g_dbus_connection_call(
-            connection, registrar_name, registrar_path, registrar_name, "RegisterWindow", g_variant_new("(uo)", id, object_path),
-            nullptr, G_DBUS_CALL_FLAGS_NONE, 1000, cancellable,
+            connection, registrar_name, registrar_path, registrar_name, "RegisterWindow",
+            g_variant_new("(uo)", x_window.load(), object_path), nullptr, G_DBUS_CALL_FLAGS_NONE, 1000, cancellable,
             [](GObject *object, GAsyncResult *result, gpointer data)
             {
-                std::unique_ptr<Registration> registration(static_cast<Registration *>(data));
-                auto *self     = registration->self;
-                GError *error  = nullptr;
-                auto *response = g_dbus_connection_call_finish(G_DBUS_CONNECTION(object), result, &error);
-                if (self->x_window == registration->id)
-                    self->x_registered = response != nullptr;
+                auto *self         = static_cast<Impl *>(data);
+                GError *error      = nullptr;
+                auto *response     = g_dbus_connection_call_finish(G_DBUS_CONNECTION(object), result, &error);
+                self->x_registered = response != nullptr;
                 --self->pending_registrations;
                 if (response != nullptr)
                     g_variant_unref(response);
                 g_clear_error(&error);
                 self->wake();
             },
-            registration);
+            this);
     }
 
     // 平台探测和各平台协议流程分开，保持 Wayland / X11 的资源边界清楚。
@@ -616,12 +606,12 @@ struct GlobalMenu::Impl
         x_display          = nullptr;
     }
 
-    void invoke(std::function<void(Impl *)> callback)
+    void invoke(void (*callback)(Impl *))
     {
         struct Invocation
         {
             Impl *self;
-            std::function<void(Impl *)> callback;
+            void (*callback)(Impl *);
         };
         auto *source = g_idle_source_new();
         g_source_set_callback(
@@ -632,7 +622,7 @@ struct GlobalMenu::Impl
                 invocation->callback(invocation->self);
                 return G_SOURCE_REMOVE;
             },
-            new Invocation{this, std::move(callback)}, [](gpointer data) { delete static_cast<Invocation *>(data); });
+            new Invocation{this, callback}, [](gpointer data) { delete static_cast<Invocation *>(data); });
         g_source_attach(source, context);
         g_source_unref(source);
     }
@@ -697,27 +687,6 @@ void GlobalMenu::update(const MenuItem &menu)
             g_dbus_connection_emit_signal(self->connection, nullptr, object_path, interface_name, "LayoutUpdated",
                                           g_variant_new("(ui)", self->revision, 0), nullptr);
         });
-}
-
-void GlobalMenu::rebind_window(SDL_Window *window)
-{
-    const auto old_xid = impl_->x_window.load();
-    impl_->disassociate_window();
-    impl_->x_window     = 0;
-    impl_->x_registered = false;
-    impl_->window       = window;
-    if (!impl_->available)
-        return;
-    if (old_xid != 0)
-        impl_->invoke(
-            [old_xid](Impl *self)
-            {
-                if (self->connection)
-                    g_dbus_connection_call(self->connection, registrar_name, registrar_path, registrar_name, "UnregisterWindow",
-                                           g_variant_new("(u)", old_xid), nullptr, G_DBUS_CALL_FLAGS_NONE, 1000, nullptr, nullptr,
-                                           nullptr);
-            });
-    impl_->associate_window();
 }
 
 std::vector<GlobalMenuAction> GlobalMenu::take_actions()

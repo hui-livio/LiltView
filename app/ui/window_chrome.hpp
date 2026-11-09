@@ -52,11 +52,11 @@ struct WindowChromeMetrics
     }
 };
 
-struct WindowModePlacement
+struct WindowContentSize
 {
-    int x, y, width, height;
+    int width, height;
 };
-WindowModePlacement preserve_content_placement(int x, int y, int width, int height, const WindowChromeState &before,
+WindowContentSize window_content_size_for_mode(int width, int height, const WindowChromeState &before,
                                                const WindowChromeState &after);
 WindowChromeMetrics window_chrome_metrics(ImVec2 size, const WindowChromeState &);
 struct WindowSpan

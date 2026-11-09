@@ -247,7 +247,7 @@ TEST_CASE("rounded input regions agree with the visible corner geometry without 
     CHECK(window_chrome_metrics({160, 100}, state).radius == 0);
 }
 
-TEST_CASE("decoration switches keep the picture viewport anchored with reversible geometry", "[chrome][placement]")
+TEST_CASE("decoration switches preserve viewport dimensions without requesting positions", "[chrome][placement]")
 {
     for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
     {
@@ -257,20 +257,16 @@ TEST_CASE("decoration switches keep the picture viewport anchored with reversibl
         WindowChromeState native = custom;
         native.system_titlebar   = true;
         const auto before        = window_chrome_metrics({1120, 760}, custom);
-        const auto switched      = preserve_content_placement(100, 150, 1120, 760, custom, native);
-        CHECK(std::abs(switched.x - (100 + before.border)) <= 0.5f);
-        CHECK(std::abs(switched.y - (150 + before.title_bottom())) <= 0.5f);
-        CHECK(std::abs(switched.width - (1120 - 2 * before.border)) <= 1.0f);
-        CHECK(std::abs(switched.height - (760 - 2 * before.border - before.title_height)) <= 0.5f);
-        const auto restored = preserve_content_placement(switched.x, switched.y, switched.width, switched.height, native, custom);
-        CHECK(restored.x == 100);
-        CHECK(restored.y == 150);
+        const auto switched      = window_content_size_for_mode(1120, 760, custom, native);
+        CHECK(std::abs(static_cast<float>(switched.width) - (1120 - 2 * before.border)) <= 1.0f);
+        CHECK(std::abs(static_cast<float>(switched.height) - (760 - 2 * before.border - before.title_height)) <= 0.5f);
+        const auto restored = window_content_size_for_mode(switched.width, switched.height, native, custom);
         CHECK(restored.width == 1120);
         CHECK(restored.height == 760);
     }
     WindowChromeState custom, native;
     native.system_titlebar = true;
-    const auto minimum     = preserve_content_placement(0, 0, 640, 480, custom, native);
+    const auto minimum     = window_content_size_for_mode(640, 480, custom, native);
     CHECK(minimum.width >= 640);
     CHECK(minimum.height >= 480);
 }
