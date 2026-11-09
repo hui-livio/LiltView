@@ -42,6 +42,7 @@ BMP 接受 12 / 40 / 52 / 56 / 108 / 124 字节 DIB 头；位域掩码须连续�
 - FIT / REGION 单次输出不超过 `min(large_pixel_bytes, 256 MiB)`；WebP、静态 GIF、RLE BMP 等保留 64 MiB 文件与既有原图 RGBA 限制。SVG 最多 1 MiB、8192 元素、128 层，并受输出预算限制。
 - 内容探测、解码及版本核验使用同一个已打开文件；流式块发布前检查版本，读取结束再检查。检测到源变化即报 SOURCE_CHANGED，不能把部分输出与新版本拼接；不承诺文件快照。
 - 最终像素以引用移交或共享 backing 视图发布，不为排队深拷贝。第三方工作集按保守 allowance 准入，不保证整个进程 RSS 硬上限；所有权与关闭见 [Core 契约](CORE_CONTRACTS.md)。
+- 七类静态结果均可参加可选 Core 内存内容缓存 / PREFETCH，按完整目标和源版本复用，过大结果不无限常驻；GIF 此处仅指静态首帧，不表示动画会话已缓存。
 - 文件读取、行 / pass / run、转换和队列等待有取消点；PlutoSVG 单次 parse / render、WebP 单次 decode 不能中途强杀。取消后阻止新像素发布，不保证固定关闭延迟。
 
 ## 4. SVG 静态 profile

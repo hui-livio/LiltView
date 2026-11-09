@@ -11,7 +11,11 @@ bool lv_stopped(lv_core *core, lv_request *request)
 
 static bool plan_fits(lv_core *core, lv_request *request, uint64_t bytes)
 {
-    uint64_t fixed = core->base + core->resident;
+    uint64_t fixed        = core->base + core->resident;
+    const uint64_t replay = lv_cache_fixed_locked(request);
+    if (replay > UINT64_MAX - fixed)
+        return false;
+    fixed += replay;
     for (uint32_t i = 0; i < core->config.animation.max_sessions; ++i)
         fixed += core->animations[i].path_bytes;
     bool impossible    = fixed > core->config.cpu_budget_bytes;
@@ -51,7 +55,18 @@ bool lv_reserve(lv_core *core, lv_request *request, uint64_t bytes)
             mtx_unlock(&core->mutex);
             return false;
         }
-        lv_pixels_trim_locked(core, bytes);
+        lv_cache_trim_locked(core, request, bytes);
+        if (request->cache_failure)
+        {
+            mtx_unlock(&core->mutex);
+            return false;
+        }
+        if (request->desc.kind == LV_REQUEST_PREFETCH && bytes > core->config.cpu_budget_bytes - core->used - core->reserved)
+        {
+            request->cache_failure = LV_ERROR_MEMORY_BUDGET;
+            mtx_unlock(&core->mutex);
+            return false;
+        }
         if (bytes <= core->config.cpu_budget_bytes - core->used - core->reserved)
             break;
         cnd_wait(&core->condition, &core->mutex);
@@ -324,6 +339,7 @@ void lv_notify(lv_core *core)
 
 lv_source *lv_source_for_locked(lv_core *core, const lv_file_version *version)
 {
+retry:
     lv_source *empty = nullptr;
     for (uint32_t i = 0; i < core->control_count; ++i)
     {
@@ -336,6 +352,8 @@ lv_source *lv_source_for_locked(lv_core *core, const lv_file_version *version)
         if (!s->refs)
             empty = s;
     }
+    if (!empty && lv_cache_evict_locked(core))
+        goto retry;
     if (!empty || !core->next_revision)
         return nullptr;
     *empty = (lv_source){.version = *version, .revision = core->next_revision++, .refs = 1};
@@ -358,16 +376,24 @@ bool lv_publish_info(lv_core *core, lv_request *request, lv_image_info *info, co
     info->source_revision = source->revision;
     request->source       = source;
     ++source->refs; // The request and the INFO independently pin this identity.
+    const bool caching           = lv_cache_begin_locked(core, request, info, version, source);
     request->info->source        = source;
     request->info->view.as.image = *info;
     lv_enqueue_locked(core, request->info, request, LV_EVENT_IMAGE_INFO);
     request->info = nullptr;
     mtx_unlock(&core->mutex);
     lv_notify(core);
-    return true;
+    return caching;
 }
 bool lv_publish_tile(lv_core *core, lv_request *request, lv_pixels *pixels, lv_rect_u32 rect, uint64_t tile)
 {
+    if (request->desc.kind == LV_REQUEST_PREFETCH)
+    {
+        mtx_lock(&core->mutex);
+        const bool captured = !lv_stopped(core, request) && lv_cache_capture_locked(core, request, pixels, rect, tile, true);
+        mtx_unlock(&core->mutex);
+        return captured;
+    }
     lv_event *event = lv_allocate(core, request, sizeof(lv_event));
     if (!event)
         return false;
@@ -382,6 +408,25 @@ bool lv_publish_tile(lv_core *core, lv_request *request, lv_pixels *pixels, lv_r
         mtx_unlock(&core->mutex);
         return false;
     }
+    bool unchanged = true;
+    if (request->replay_file)
+    {
+        // Only the worker produces tiles. Queue capacity cannot decrease while
+        // the lock is released, so slow filesystem metadata never blocks UI API calls.
+        mtx_unlock(&core->mutex);
+        unchanged = lv_file_unchanged(request->replay_file, request->path, &request->replay_version);
+        mtx_lock(&core->mutex);
+    }
+    if (!unchanged || lv_stopped(core, request))
+    {
+        if (!unchanged)
+            request->cache_failure = LV_ERROR_SOURCE_CHANGED;
+        core->used -= sizeof(lv_event);
+        free(event);
+        mtx_unlock(&core->mutex);
+        return false;
+    }
+    lv_cache_capture_locked(core, request, pixels, rect, tile, false);
     const lv_region_info region = {tile,
                                    1,
                                    rect,

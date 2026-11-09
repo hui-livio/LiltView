@@ -11,10 +11,11 @@ Core 使用 C23，向 C / C++20 / C++23 提供无窗口、GPU、ImGui 或平台�
 | 静态 DISPLAY / FIT / NATIVE | JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 首帧、TIFF 首页 |
 | 静态 DISPLAY / REGION | JPEG、PNG、未压缩 BMP / bitfields、TIFF；顺序格式仍可能扫描源文件 |
 | 动画会话 | 普通 GIF，顺序 NEXT / RESET；完整帧合成由 Core 负责 |
+| 内容缓存 / PREFETCH | 完整静态结果的有界内存 LRU；预读真实解码入缓存，后续同目标显示重放像素 |
 | 调度 | 单 worker；待执行任务按优先级、同级请求 ID 排序，不保证抢占正在解码的任务 |
-| 尚未实现 | PREFETCH、Core 跨请求缓存 / 磁盘缓存、多 worker、Windows 文件适配、其他动画后端 |
+| 尚未实现 | Core 磁盘内容缓存、多 worker、Windows 文件适配、其他动画后端及动画会话缓存 |
 
-`lv_core_query_format()` 返回构建能力上限，具体文件的 INFO 再收窄；枚举和能力位存在不表示所有格式变体可用。完整兼容子集见 [格式表](IMAGE_FORMATS.md)。app 的匿名 tile / LOD 缓存独立于尚未实现的 Core 缓存配置。
+`lv_core_query_format()` 返回构建能力上限，具体文件的 INFO 再收窄；枚举和能力位存在不表示所有格式变体可用。完整兼容子集见 [格式表](IMAGE_FORMATS.md)。app 的匿名 tile / LOD 缓存与 Core 跨请求内存内容缓存分别计账。
 
 - 配置的 `abi_version`、`struct_size` 和各 descriptor 的 `struct_size` 必须精确匹配；不匹配返回 `LV_ABI_MISMATCH`。
 - ABI 只覆盖相同体系结构与平台 ABI；结构不是文件序列化格式。不兼容布局变更应提升主 ABI，计划见 [开发计划](DEVELOPMENT_PLAN.md)。
@@ -27,8 +28,9 @@ Core 使用 C23，向 C / C++20 / C++23 提供无窗口、GPU、ImGui 或平台�
 | 字段 | 初值 / 当前限制 |
 | --- | --- |
 | `cpu_budget_bytes` / `queue_pixel_bytes` | 均初始化为 0，调用方必须填写非零合法预算 |
-| `cache_budget_bytes` / `disk_cache_budget_bytes` | 0；非零在 create 返回 `LV_UNSUPPORTED` |
-| `foreground_workers` / `prefetch_workers` | 1 / 1；当前只允许一个前台 worker，预读未接入 |
+| `cache_budget_bytes` | 初值 0 关闭；非零启用完整静态结果 LRU，属于 CPU 总预算子集 |
+| `disk_cache_budget_bytes` | 0；非零仍为 `LV_UNSUPPORTED` |
+| `foreground_workers` / `prefetch_workers` | 1 / 1；单共享 worker，预读 0 禁用、1 启用，超过 1 明确不支持 |
 | `tile_edge` | 256；允许 16..1024 的 2 次幂 |
 | `max_requests` | 16；允许 1..1024，包含终结尚未 release 的请求 |
 | 分档阈值 | 文件 16 MiB、small 像素 64 MiB、large 像素 256 MiB |
@@ -56,6 +58,8 @@ submit 仅做参数校验、路径复制和有界资源受理，不做文件 I/O
 REGION 必须非空、无溢出、位于 canvas 内，并保持源图比例（允许一像素舍入误差）；无法实现的目标异步 `TARGET_UNSUPPORTED`，预算不足为 `MEMORY_BUDGET`，不得静默缩小。JPEG / PNG 的 REGION 能力不等于高效随机读取。
 
 **当前静态 Viewer 只提交一次 NATIVE**。缩放和平移使用已生成纹理 / 缓存，不再提交 FIT → REGION；API 仍保留这两类目标供其他调用者使用。
+
+PREFETCH 必须同时启用内容缓存与预读，priority 为 PREFETCH。成功仅交付 IMAGE_INFO → COMPLETE，`final_tile_count=0`，没有像素事件；之后 DISPLAY 才交付缓存像素。完整结果无法落入缓存时明确 MEMORY_BUDGET，不能以只探测文件头代替成功预读。成功受理 DISPLAY / 动画前景工作后，正在运行的预读协作取消；同步受理失败不改变预读。
 
 正常运行且调用方持续消费时，每个受理请求只有一个终结：COMPLETE、ERROR 或 CANCELLED。不同请求可交错，同一请求 sequence 严格递增，允许间隙。
 
@@ -112,7 +116,8 @@ Core 先预留可推进工作集，再实际分配；共享 backing 只计一次
 | `accounted_cpu_bytes` | 当前实际追踪分配，含共享 backing 的真实大小及空闲池 |
 | `queued_pixel_bytes` | 未 poll 像素的逻辑 `width×height×4`，不含 stride 行间空隙 |
 | `pinned_pixel_bytes` | 已借出的像素 view 逻辑面积，不是 backing 实际驻留量 |
-| cache / disk cache stats | 当前 Core 未实现内容缓存；空闲分配复用池不是内容缓存 |
+| `cache_bytes` | 完整内容缓存的元数据、tile 描述与唯一 backing 实际分配；属于 CPU 账本子集，内部引用不计 external / pinned |
+| disk cache stats | Core 磁盘内容缓存未实现；空闲分配池不是内容缓存 |
 
 上述统计可能重叠，不能相加作 RSS。poll 释放队列额度，实际像素仍占 CPU 预算直到最后引用消失。队列满或外部引用占用时允许背压等待，cancel / shutdown 必须能唤醒。
 
@@ -121,6 +126,10 @@ Core 先预留可推进工作集，再实际分配；共享 backing 只计一次
 自身固定需求超过预算则异步 MEMORY_BUDGET，不能等待唯一 worker 自己永远无法释放的驻留会话或排队路径。真实分配失败为 OUT_OF_MEMORY；永久路径 / ID 上限为 LIMIT_REACHED。关闭清理优先于新任务准入。
 
 流式 NATIVE 的 canvas 可超过完整 RGBA 256 MiB：区域 codec 只保留活动行带，但索引和实际工作集仍须准入。FIT / REGION 单次输出不超过 `min(large_pixel_bytes, 256 MiB)`；progressive JPEG / Adam7 PNG 仍受系数 / 合并工作集限制，其他格式限制见 [格式表](IMAGE_FORMATS.md)。
+
+内容 key 为已打开文件的可观测版本与 target 有效成员，排除 request kind / priority / user_tag 和 union 填充字节。命中仍打开文件并在背压后核验 fd / path 版本，以新的请求身份重放；`source_bytes_read=0` 表示未读取解码源字节，不代表没有 open / stat。
+
+缓存仅在 COMPLETE 与 cancel 同锁裁决后提交完整结果；取消、解码错误或源变更丢弃未完成捕获。LRU 最多 64 条，源身份槽不足先驱逐；准入先清理可回收缓存与空闲池。DISPLAY 过大或流式捕获挤占工作集时旁路 / 放弃捕获，PREFETCH 则明确失败，不能让唯一 worker 等待自身引用。重放条目暂时 pin，外借像素在条目淘汰或关闭后仍有效。
 
 | cancel 判定点 | 行为 |
 | --- | --- |

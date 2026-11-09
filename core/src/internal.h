@@ -19,6 +19,7 @@ typedef struct lv_source
 typedef struct lv_request lv_request;
 typedef struct lv_animation lv_animation;
 typedef struct lv_gif_animation lv_gif_animation;
+typedef struct lv_cache_entry lv_cache_entry;
 
 struct lv_animation
 {
@@ -85,6 +86,11 @@ struct lv_request
     uint32_t animation_action; /* 0 = OPEN; otherwise NEXT / RESET. */
     bool animation_end, deferred_info;
     lv_animation_frame_info frame;
+    lv_cache_entry *capture, *replay;
+    FILE *replay_file; // Borrowed only during synchronous worker cache replay.
+    lv_file_version replay_version;
+    lv_error_code cache_failure;
+    bool cache_hit;
 };
 struct lv_core
 {
@@ -105,6 +111,9 @@ struct lv_core
     lv_pixels *free_pixels;
     uint64_t free_pixel_bytes;
     uint32_t free_pixel_count;
+    lv_cache_entry *cache;
+    uint64_t cache_bytes;
+    uint32_t cache_count;
 };
 
 uint64_t lv_clock_ns(void);
@@ -122,6 +131,15 @@ static inline uint64_t lv_pixels_payload(const lv_pixels *p)
 }
 // Mutex held; reclaim idle buffers until required admission fits (0 frees all).
 void lv_pixels_trim_locked(lv_core *, uint64_t required);
+// All *_locked cache functions require the core mutex; internal refs never pin externally.
+bool lv_cache_evict_locked(lv_core *);
+void lv_cache_trim_locked(lv_core *, lv_request *, uint64_t required);
+void lv_cache_clear_locked(lv_core *);
+lv_error_code lv_cache_finish_locked(lv_core *, lv_request *, bool success);
+bool lv_cache_begin_locked(lv_core *, lv_request *, const lv_image_info *, const lv_file_version *, lv_source *);
+bool lv_cache_capture_locked(lv_core *, lv_request *, lv_pixels *, lv_rect_u32, uint64_t, bool take);
+uint64_t lv_cache_fixed_locked(const lv_request *);
+bool lv_cache_replay(lv_core *, lv_request *, FILE *, const lv_file_version *, lv_error_info *);
 bool lv_publish_info(lv_core *, lv_request *, lv_image_info *, const lv_file_version *);
 bool lv_publish_tile(lv_core *, lv_request *, lv_pixels *, lv_rect_u32, uint64_t tile);
 void lv_decode_image(lv_core *, lv_request *, lv_error_info *);

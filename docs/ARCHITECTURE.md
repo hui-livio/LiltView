@@ -46,6 +46,8 @@ flowchart TD
 
 Renderer 不依赖 Core、Viewer、设置或菜单；Core 不包含应用层和图形库类型。Viewer 负责把 Core 像素转换为 renderer 上传描述。公共声明分别以 [core.h](../core/include/liltview/core.h) 和 [renderer.hpp](../app/renderer/renderer.hpp) 为准。
 
+`core/src/engine/cache.c` 提供完整静态结果的可选内存 LRU，按文件版本和 target 匹配，复用不可变像素引用。缓存命中仍核验已打开文件 / 路径，取消与成功提交共用终结锁；未完成捕获不入缓存。PREFETCH 在同一个 worker 低优先级真实解码，只发布 INFO 和终结；前景受理后协作取消活动预读。缓存预算不足时 DISPLAY 旁路，预读明确失败，详见 [Core 契约](CORE_CONTRACTS.md)。
+
 ## 3. 静态图片与大图数据流
 
 ```text
@@ -167,7 +169,7 @@ ctest --preset dev -L large
 | GIF 会话、双纹理与时钟播放 | 已实现（普通尺寸） | APNG / 动画 WebP、seek 及播放控制 |
 | 后台目录导航、边缘按钮、序号 | 已实现 | 仅当前支持后缀及显式目标；首尾不循环，重新打开刷新目录 |
 | 应用 tile/LOD、后台缓存恢复、GPU LRU/PBO | 已实现 | 首次生成后台化、冷 LOD 批处理、统一资源总账 |
-| Core 内容缓存/磁盘缓存、PREFETCH | 待实现 | 当前非零缓存配置/预读请求明确 UNSUPPORTED |
+| Core 内容缓存、PREFETCH | 已实现（静态完整结果） | 应用相邻预读接入另行验收；磁盘内容缓存、动画会话缓存未实现 |
 | 诊断与真实图基准 | 部分实现 | 全链路统一分段、可重复冷/热基线、持续回归 |
 | 原始 RGB/YUV/Bayer、高精度/HDR、多图选择 | 待实现 | 输入/输出/颜色/身份契约及预算扩展 |
 | Windows / D3D11 | 待实现 | 平台文件/线程、Win32 窗口与渲染后端及实机验收 |

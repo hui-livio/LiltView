@@ -25,6 +25,8 @@ void lv_discard_tiles_locked(lv_core *core, lv_request_id id)
 static void finish_request(lv_core *core, lv_request *r, lv_error_info error)
 {
     mtx_lock(&core->mutex);
+    if (r->cache_failure)
+        error.code = r->cache_failure;
     core->reserved -= r->reservation;
     r->reservation  = 0;
     core->used     -= r->path_bytes;
@@ -36,9 +38,13 @@ static void finish_request(lv_core *core, lv_request *r, lv_error_info error)
         --r->source->refs;
         r->source = nullptr;
     }
-    const lv_event_type outcome = atomic_load(&r->cancelled) ? LV_EVENT_CANCELLED :
-        error.code                                           ? LV_EVENT_ERROR :
-                                                               LV_EVENT_COMPLETE;
+    lv_event_type outcome = atomic_load(&r->cancelled) ? LV_EVENT_CANCELLED : error.code ? LV_EVENT_ERROR : LV_EVENT_COMPLETE;
+    const lv_error_code cache_error = lv_cache_finish_locked(core, r, outcome == LV_EVENT_COMPLETE);
+    if (cache_error && outcome == LV_EVENT_COMPLETE)
+    {
+        error.code = cache_error;
+        outcome    = LV_EVENT_ERROR;
+    }
     if (r->animation)
     {
         if (outcome == LV_EVENT_ERROR && error.code == LV_ERROR_SOURCE_CHANGED)

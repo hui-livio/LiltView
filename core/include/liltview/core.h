@@ -232,7 +232,7 @@ typedef struct lv_core_config
     uint32_t abi_version;
     uint32_t struct_size;
     uint64_t cpu_budget_bytes;        /* Required nonzero; not an RSS cap. */
-    uint64_t cache_budget_bytes;      /* Sub-budget of CPU budget; 0 disables. */
+    uint64_t cache_budget_bytes;      /* Complete static-result LRU, within CPU budget; 0 disables. */
     uint64_t queue_pixel_bytes;       /* Required nonzero; queue payload cap. */
     uint64_t small_file_bytes;        /* init: 16 MiB */
     uint64_t small_pixel_bytes;       /* init: 64 MiB */
@@ -242,7 +242,7 @@ typedef struct lv_core_config
     uint32_t tile_edge;               /* init: 256; power of two, 16..1024. */
     uint32_t max_requests;            /* init: 16; includes undrained terminals. */
     uint32_t foreground_workers;      /* init: 1 */
-    uint32_t prefetch_workers;        /* init: 1; 0 disables prefetch requests. */
+    uint32_t prefetch_workers;        /* init: 1; 0 disables. 1 shares the worker; >1 unsupported. */
     uint64_t disk_cache_budget_bytes; /* init: 0; disabled. */
     lv_path disk_cache_directory;     /* Required absolute path if enabled. */
     lv_log_level log_level;           /* init: LV_LOG_WARN */
@@ -491,6 +491,12 @@ LV_API void LV_CALL lv_request_desc_init(lv_request_desc *out_request);
  * create/submit copy input values/paths but borrow callback userdata until join.
  * Failed create leaves no callbacks in flight. Output handles/IDs clear on failure. */
 LV_API lv_status LV_CALL lv_core_create(const lv_core_config *config, lv_core **out_core);
+/* PREFETCH requires enabled content cache and prefetch_workers=1, decodes a
+ * complete static result, and emits INFO plus a terminal with no pixel events.
+ * A successful prefetch COMPLETE has final_tile_count=0. Capacity failure is
+ * explicit; DISPLAY instead bypasses opportunistic caching. Cache hits still
+ * validate the opened file/path version and replay fresh request identity.
+ * Successfully accepted foreground work cooperatively cancels active prefetch. */
 LV_API lv_status LV_CALL lv_core_submit(lv_core *core, const lv_request_desc *request, lv_request_id *out_request_id);
 /* Active cancel invalidates publication, discards unpolled pixel events, then
  * cooperatively stops work. Once a terminal event is committed, cancel is a

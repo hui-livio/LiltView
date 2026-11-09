@@ -8,10 +8,11 @@
 | `api/engine.c`、`api/animation.c` | 参数校验、请求 / 会话入口、取消、三阶段关闭 |
 | `engine/worker.c`、`engine/animation.c` | 静态与动画任务调度、会话状态和清理 |
 | `engine/objects.c` | 资源账本、事件池、像素引用、源版本及队列背压 |
+| `engine/cache.c` | 完整静态结果内存 LRU、版本核验重放、真实 PREFETCH 与资源驱逐 |
 | `codecs/image.c`、`codecs/raster.c` | 内容探测、输出准入、行带 / tile 发布、受检采样 |
 | `codecs/` 其他文件 | 各格式解码、GIF 持久合成、格式限制与清理 |
 | `platform/file.c` | 常规文件、版本核验和单调时钟 |
 
 静态支持 FIT / NATIVE，JPEG / PNG / 未压缩 BMP / TIFF 另有 REGION；NATIVE 的区域 codec 可提前发布完整原始行带。最终像素交付移交引用或共享 backing，不为事件拆分深拷贝。
 
-Core 不依赖 UI、renderer、翻译、spdlog 或网络。codec 使用固定源码静态构建；工作集按保守 allowance 准入，不承诺进程 RSS 硬上限。PREFETCH、跨请求内容 / 磁盘缓存、多 worker 和 Windows 文件适配仍待实现；应用场景缓存见[渲染说明](../../docs/RENDERING.md)。
+Core 不依赖 UI、renderer、翻译、spdlog 或网络。codec 使用固定源码静态构建；工作集按保守 allowance 准入，不承诺进程 RSS 硬上限。已实现可选静态内容缓存和 PREFETCH；磁盘内容缓存、多 worker、Windows 文件适配与动画会话缓存仍待实现。应用场景缓存见[渲染说明](../../docs/RENDERING.md)。

@@ -37,6 +37,11 @@ void lv_decode_image(lv_core *core, lv_request *r, lv_error_info *error)
         *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_SYSTEM_ERRNO, .system_code = code};
         return;
     }
+    if (core->config.cache_budget_bytes && lv_cache_replay(core, r, input.file, &input.version, error))
+    {
+        lv_file_close(input.file);
+        return;
+    }
     uint8_t magic[512];
     const size_t count  = fread(magic, 1, sizeof magic, input.file);
     r->bytes_read      += count;
@@ -229,7 +234,7 @@ bool lv_frame_info(lv_frame *f, lv_error_info *error)
 {
     if (lv_publish_info(f->core, f->request, &f->info, &f->input->version))
         return true;
-    error->code = LV_ERROR_INTERNAL;
+    error->code = f->request->cache_failure ? f->request->cache_failure : LV_ERROR_INTERNAL;
     return false;
 }
 

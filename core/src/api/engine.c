@@ -24,7 +24,7 @@ lv_status LV_CALL lv_core_create(const lv_core_config *config, lv_core **out)
         return LV_ABI_MISMATCH;
     if (!config_valid(config))
         return LV_INVALID_ARGUMENT;
-    if (config->foreground_workers != 1 || config->cache_budget_bytes || config->disk_cache_budget_bytes)
+    if (config->foreground_workers != 1 || config->prefetch_workers > 1 || config->disk_cache_budget_bytes)
         return LV_UNSUPPORTED;
     const uint32_t events = config->max_requests * 2 + config->animation.max_sessions * 2 + 1;
     const uint64_t base   = sizeof(lv_core) + (uint64_t)config->max_requests * sizeof(lv_request) +
@@ -156,8 +156,6 @@ lv_status lv_validate_request(const lv_request_desc *r)
         return LV_INVALID_ARGUMENT;
     if (r->path.encoding == LV_PATH_UTF8 && !valid_utf8(r->path.data, r->path.byte_count))
         return LV_INVALID_ARGUMENT;
-    if (r->kind != LV_REQUEST_DISPLAY)
-        return LV_UNSUPPORTED;
     return LV_OK;
 }
 
@@ -176,6 +174,11 @@ lv_status LV_CALL lv_core_submit(lv_core *core, const lv_request_desc *desc, lv_
     {
         mtx_unlock(&core->mutex);
         return LV_CLOSING;
+    }
+    if (desc->kind == LV_REQUEST_PREFETCH && (!core->config.prefetch_workers || !core->config.cache_budget_bytes))
+    {
+        mtx_unlock(&core->mutex);
+        return LV_UNSUPPORTED;
     }
     status = lv_accept_locked(core, desc, nullptr, 0, out);
     mtx_unlock(&core->mutex);
@@ -212,7 +215,7 @@ lv_status lv_accept_locked(lv_core *core, const lv_request_desc *desc, lv_animat
     {
         return LV_LIMIT_REACHED;
     }
-    lv_pixels_trim_locked(core, length);
+    lv_cache_trim_locked(core, nullptr, length);
     if ((uint64_t)length > core->config.cpu_budget_bytes - core->used - core->reserved)
     {
         return LV_BUSY;
@@ -251,6 +254,13 @@ lv_status lv_accept_locked(lv_core *core, const lv_request_desc *desc, lv_animat
     core->used          += length;
     ++core->accepted;
     *out = r->id;
+    if (desc->kind == LV_REQUEST_DISPLAY)
+        for (uint32_t i = 0; i < core->config.max_requests; ++i)
+        {
+            lv_request *background = &core->requests[i];
+            if (background->state == LV_RUNNING && background->desc.kind == LV_REQUEST_PREFETCH)
+                atomic_store(&background->cancelled, true);
+        }
     cnd_broadcast(&core->condition);
     return LV_OK;
 }
@@ -350,6 +360,7 @@ lv_status LV_CALL lv_core_get_stats(lv_core *core, lv_core_stats *out)
         return LV_INVALID_ARGUMENT;
     mtx_lock(&core->mutex);
     *out = (lv_core_stats){.accounted_cpu_bytes = core->used,
+                           .cache_bytes         = core->cache_bytes,
                            .queued_pixel_bytes  = core->queued_bytes,
                            .pinned_pixel_bytes  = core->pinned_bytes,
                            .accepted_requests   = core->accepted,
@@ -371,6 +382,7 @@ lv_status LV_CALL lv_core_begin_shutdown(lv_core *core)
         return LV_INVALID_ARGUMENT;
     mtx_lock(&core->mutex);
     core->closing = true;
+    lv_cache_clear_locked(core);
     lv_pixels_trim_locked(core, 0);
     for (uint32_t i = 0; i < core->config.animation.max_sessions; ++i)
         if (core->animations[i].id)
