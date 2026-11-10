@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <thread>
-#include <unistd.h>
+#include "platform/file_io.hpp"
 #include <unordered_map>
 #include <utility>
 #include <zlib.h>
@@ -31,18 +31,16 @@ std::uint64_t raw_bytes(const TileReader::Request &request)
 std::vector<std::uint8_t> read_tile(int fd, const TileReader::Request &request)
 {
     const auto bytes = raw_bytes(request);
-    if (request.offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) - request.bytes)
+    if (request.offset > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) - request.bytes)
         throw std::invalid_argument("Cached tile file offset overflow");
     std::vector<std::uint8_t> compressed(request.bytes);
     std::size_t at = 0;
     while (at < compressed.size())
     {
-        const auto count = pread(fd, compressed.data() + at, std::min<std::size_t>(65536, compressed.size() - at),
-                                 static_cast<off_t>(request.offset + at));
-        if (count < 0 && errno == EINTR)
-            continue;
-        if (count <= 0)
-            throw std::system_error(count < 0 ? errno : EIO, std::generic_category(), "Cannot read cached native tile");
+        const auto count = platform::read_at(fd, compressed.data() + at,
+            std::min<std::size_t>(65536, compressed.size() - at), request.offset + at);
+        if (!count)
+            throw std::system_error(EIO, std::generic_category(), "Cannot read cached native tile");
         at += static_cast<std::size_t>(count);
     }
     std::vector<std::uint8_t> data(static_cast<std::size_t>(bytes));
@@ -155,16 +153,14 @@ TileReader::TileReader(int fd, lv_wakeup_fn wake, void *userdata, std::uint64_t 
 {
     if (!budget)
         throw std::invalid_argument("A native tile RAM cache needs a nonzero budget");
-    const int copy = fcntl(fd, F_DUPFD_CLOEXEC, 0);
-    if (copy < 0)
-        throw std::system_error(errno, std::generic_category(), "Cannot duplicate native tile cache fd");
+    const int copy = platform::duplicate_descriptor(fd);
     try
     {
         state_         = std::make_unique<State>(copy, wake, userdata, budget, std::move(loader));
         state_->worker = std::thread([state = state_.get()] { state->run(); });
     } catch (...)
     {
-        close(copy);
+        platform::close_descriptor(copy);
         throw;
     }
 }
@@ -177,7 +173,7 @@ TileReader::~TileReader()
     }
     state_->changed.notify_one();
     state_->worker.join();
-    close(state_->fd);
+    platform::close_descriptor(state_->fd);
 }
 void TileReader::request(const std::vector<Request> &requests)
 {

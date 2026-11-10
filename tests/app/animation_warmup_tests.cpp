@@ -45,6 +45,9 @@
 #include <functional>
 #include <gif_lib.h>
 #include <iterator>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace liltview;
 using namespace liltview::test;
@@ -364,7 +367,15 @@ TEST_CASE("ready GIF mutation replacement deletion and symlink redirection alway
         if (mode == 0)
             std::ofstream(source, std::ios::binary | std::ios::app).put('\0');
         else if (mode == 1)
+        {
+#ifdef _WIN32
+            // Unlike MoveFileEx/std::filesystem::rename, ReplaceFile supports
+            // replacing a source kept open with FILE_SHARE_DELETE by Core.
+            REQUIRE(ReplaceFileW(path.c_str(), std::filesystem::path(alternate).c_str(), nullptr, 0, nullptr, nullptr));
+#else
             std::filesystem::rename(alternate, path);
+#endif
+        }
         else if (mode == 2)
             std::filesystem::remove(path);
         else if (mode == 3)

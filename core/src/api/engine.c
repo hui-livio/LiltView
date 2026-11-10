@@ -152,7 +152,15 @@ lv_status lv_validate_request(const lv_request_desc *r)
     if (r->path.byte_count == SIZE_MAX)
         return LV_LIMIT_REACHED;
     const char *p = r->path.data;
+#if defined(_WIN32)
+    const size_t length = r->path.byte_count;
+    const bool drive = length >= 3 && ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) &&
+        p[1] == ':' && (p[2] == '/' || p[2] == '\\');
+    const bool unc = length >= 5 && ((p[0] == '\\' && p[1] == '\\') || (p[0] == '/' && p[1] == '/'));
+    if ((!drive && !unc) || memchr(p, 0, length))
+#else
     if (p[0] != '/' || memchr(p, 0, r->path.byte_count))
+#endif
         return LV_INVALID_ARGUMENT;
     if (r->path.encoding == LV_PATH_UTF8 && !valid_utf8(r->path.data, r->path.byte_count))
         return LV_INVALID_ARGUMENT;

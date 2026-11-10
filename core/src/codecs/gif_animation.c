@@ -224,7 +224,7 @@ static void open_animation(lv_core *core, lv_request *r, lv_error_info *error)
     s->input.file    = lv_file_open(session->path, &s->input.version, &code);
     if (!s->input.file)
     {
-        *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_SYSTEM_ERRNO, .system_code = code};
+        *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_FILE_SYSTEM_DOMAIN, .system_code = code};
         return;
     }
     uint8_t signature[6];

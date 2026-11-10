@@ -10,6 +10,7 @@
 #include <fstream>
 #include <liltview/core.h>
 #include <mutex>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
@@ -20,12 +21,17 @@ struct Files
     std::filesystem::path directory;
     Files()
     {
-        std::array<char, 64> name{};
-        std::strcpy(name.data(), "/tmp/liltview-jpeg-test-XXXXXX");
-        auto *value = mkdtemp(name.data());
-        if (!value)
-            throw std::runtime_error("mkdtemp");
-        directory = value;
+        std::random_device random;
+        for (unsigned attempt = 0; attempt < 100; ++attempt)
+        {
+            auto candidate = std::filesystem::temp_directory_path() / ("liltview-jpeg-test-" + std::to_string(random()));
+            if (std::filesystem::create_directory(candidate))
+            {
+                directory = std::move(candidate);
+                return;
+            }
+        }
+        throw std::runtime_error("Cannot create a unique test directory");
     }
     ~Files()
     {

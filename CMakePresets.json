@@ -1,40 +1,184 @@
 {
-  "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 30, "patch": 0 },
-  "configurePresets": [
-    {
-      "name": "base",
-      "hidden": true,
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
-        "BUILD_TESTING": true,
-        "LILTVIEW_CXX_STANDARD": "23",
-        "LILTVIEW_BUILD_APP_COMPONENTS": false,
-        "LILTVIEW_BUILD_UNIT_TESTS": false
-      }
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 30,
+        "patch": 0
     },
-    { "name": "debug", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
-    { "name": "release", "inherits": "base", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": false } },
-    { "name": "compat20", "inherits": "debug", "cacheVariables": { "LILTVIEW_CXX_STANDARD": "20" } },
-    { "name": "app-release", "inherits": "release", "cacheVariables": { "LILTVIEW_BUILD_APP_COMPONENTS": true } },
-    {
-      "name": "dev",
-      "inherits": "debug",
-      "cacheVariables": { "LILTVIEW_BUILD_APP_COMPONENTS": true, "LILTVIEW_BUILD_UNIT_TESTS": true }
-    }
-  ],
-  "buildPresets": [
-    { "name": "debug", "configurePreset": "debug" },
-    { "name": "release", "configurePreset": "release" },
-    { "name": "compat20", "configurePreset": "compat20" },
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "app-release", "configurePreset": "app-release" }
-  ],
-  "testPresets": [
-    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
-    { "name": "compat20", "configurePreset": "compat20", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } }
-  ]
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "BUILD_TESTING": true,
+                "LILTVIEW_CXX_STANDARD": "23",
+                "LILTVIEW_BUILD_APP_COMPONENTS": false,
+                "LILTVIEW_BUILD_UNIT_TESTS": false
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "BUILD_TESTING": false
+            }
+        },
+        {
+            "name": "compat20",
+            "inherits": "debug",
+            "cacheVariables": {
+                "LILTVIEW_CXX_STANDARD": "20"
+            }
+        },
+        {
+            "name": "app-release",
+            "inherits": "release",
+            "cacheVariables": {
+                "LILTVIEW_BUILD_APP_COMPONENTS": true
+            }
+        },
+        {
+            "name": "dev",
+            "inherits": "debug",
+            "cacheVariables": {
+                "LILTVIEW_BUILD_APP_COMPONENTS": true,
+                "LILTVIEW_BUILD_UNIT_TESTS": true
+            }
+        },
+        {
+            "name": "msvc-base",
+            "hidden": true,
+            "inherits": "base",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "toolset": {
+                "value": "host=x64",
+                "strategy": "external"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl.exe",
+                "CMAKE_CXX_COMPILER": "cl.exe"
+            }
+        },
+        {
+            "name": "msvc-dev",
+            "displayName": "MSVC x64 Ninja - Dev",
+            "description": "Debug application and unit tests; requires an x64 MSVC developer environment.",
+            "inherits": [
+                "dev",
+                "msvc-base"
+            ]
+        },
+        {
+            "name": "msvc-release",
+            "displayName": "MSVC x64 Ninja - Release",
+            "description": "Release application without tests; requires an x64 MSVC developer environment.",
+            "inherits": [
+                "app-release",
+                "msvc-base"
+            ]
+        },
+        {
+            "name": "使用工具链文件配置预设",
+            "displayName": "使用工具链文件配置预设",
+            "description": "设置 Ninja 生成器、版本和安装目录",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "compat20",
+            "configurePreset": "compat20"
+        },
+        {
+            "name": "dev",
+            "configurePreset": "dev"
+        },
+        {
+            "name": "app-release",
+            "configurePreset": "app-release"
+        },
+        {
+            "name": "msvc-dev",
+            "configurePreset": "msvc-dev"
+        },
+        {
+            "name": "msvc-release",
+            "configurePreset": "msvc-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
+        },
+        {
+            "name": "compat20",
+            "configurePreset": "compat20",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
+        },
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
+        },
+        {
+            "name": "msvc-dev",
+            "configurePreset": "msvc-dev",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
+        }
+    ]
 }

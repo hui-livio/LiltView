@@ -81,6 +81,9 @@ function(liltview_require_catch2)
         set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
         set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
         add_subdirectory("${source}" "${PROJECT_BINARY_DIR}/third_party/Catch2" EXCLUDE_FROM_ALL SYSTEM)
+        # Catch2's compiled string_view/optional support must match our C++20/23
+        # consumers; its default C++14 build otherwise leaves missing symbols.
+        target_compile_features(Catch2 PUBLIC cxx_std_17)
     endif()
     set(LILTVIEW_CATCH_SCRIPT "${source}/extras/Catch.cmake" PARENT_SCOPE)
 endfunction()

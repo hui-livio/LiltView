@@ -10,6 +10,8 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     CommandLineResult result;
     auto &options = result.options;
     CLI::App app{"LiltView " LILTVIEW_VERSION " - a lightweight image viewer", "liltview"};
+    // Keep slash-prefixed paths as positional arguments on Windows too.
+    app.allow_windows_style_options(false);
     app.set_version_flag("--version", "LiltView " LILTVIEW_VERSION);
     app.footer(
         "Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF (first page). Large static JPEG/PNG/BMP/TIFF support regional detail.");

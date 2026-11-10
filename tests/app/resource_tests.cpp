@@ -85,12 +85,12 @@ TEST_CASE("settings replacement preserves complete contents and permissions", "[
     liltview::Settings settings;
     REQUIRE(liltview::save_settings_file(path, settings, error));
     std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    const auto original_permissions = std::filesystem::status(path).permissions();
     settings.theme = liltview::Theme::light;
     REQUIRE(liltview::save_settings_file(path, settings, error));
     CHECK_FALSE(error);
     CHECK(read_file(path) == liltview::serialize_settings(settings));
-    CHECK(std::filesystem::status(path).permissions() ==
-          (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
+    CHECK(std::filesystem::status(path).permissions() == original_permissions);
     CHECK(std::distance(std::filesystem::directory_iterator(directory.path), std::filesystem::directory_iterator{}) == 1);
 }
 

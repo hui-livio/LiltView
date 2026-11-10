@@ -10,7 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <system_error>
-#include <unistd.h>
+#include "platform/file_io.hpp"
 #include <zlib.h>
 
 namespace liltview
@@ -21,12 +21,6 @@ constexpr std::uint64_t max_cache_bytes = 16ULL * 1024 * 1024 * 1024;
 void cache_error(const char *message)
 {
     throw std::system_error(errno ? errno : EIO, std::generic_category(), message);
-}
-void seek(std::FILE *file, std::uint64_t offset)
-{
-    if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
-        fseeko(file, static_cast<off_t>(offset), SEEK_SET) != 0)
-        cache_error("Cannot seek native tile cache");
 }
 std::optional<std::uint32_t> uniform_color(const std::vector<std::uint8_t> &data)
 {
@@ -123,22 +117,7 @@ void Tiles::open_cache()
         directory = std::filesystem::temp_directory_path();
     directory /= "liltview";
     std::filesystem::create_directories(directory);
-    auto name    = (directory / "native-XXXXXX").string();
-    const int fd = mkstemp(name.data());
-    if (fd < 0)
-        cache_error("Cannot create native tile cache");
-    // Anonymous after opening: reclaimed on close, errors, cancellation or crash.
-    if (unlink(name.c_str()) != 0)
-    {
-        close(fd);
-        cache_error("Cannot unlink native tile cache");
-    }
-    cache_ = fdopen(fd, "w+b");
-    if (!cache_)
-    {
-        close(fd);
-        cache_error("Cannot open native tile cache");
-    }
+    cache_ = platform::temporary_file(directory);
 }
 void Tiles::commit_restore() noexcept
 {
@@ -328,7 +307,7 @@ void Tiles::upload(const lv_region_info &region)
                 throw std::runtime_error("Cannot compress native tile cache");
             if (cache_bytes_ + bytes > max_cache_bytes)
                 throw render::Error(render::ErrorCode::memory_budget, "Native tile disk cache exceeds 16 GiB limit");
-            seek(cache_, cache_bytes_);
+            platform::seek_file(cache_, cache_bytes_);
             if (std::fwrite(compressed.data(), 1, bytes, cache_) != bytes)
                 cache_error("Cannot write native tile cache");
             tile.levels.push_back({size, cache_bytes_, static_cast<std::uint32_t>(bytes)});
@@ -436,7 +415,7 @@ void Tiles::request_reads(const std::vector<TileReader::Request> &jobs)
         cache_dirty_ = false;
     }
     if (!reader_)
-        reader_ = std::make_unique<TileReader>(fileno(cache_), wake_, userdata_);
+        reader_ = std::make_unique<TileReader>(platform::file_descriptor(cache_), wake_, userdata_);
     reader_->request(jobs);
 }
 bool Tiles::restore(std::size_t index, unsigned level, const Viewport *preserve)

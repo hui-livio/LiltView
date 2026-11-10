@@ -1,5 +1,9 @@
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "The file/thread adapter currently supports Linux; Windows adapter is pending")
+if(WIN32)
+    set(liltview_file_adapter src/platform/file_win32.c)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(liltview_file_adapter src/platform/file.c)
+else()
+    message(FATAL_ERROR "The file adapter supports Linux and Windows only")
 endif()
 include("${PROJECT_SOURCE_DIR}/cmake/LiltViewJpeg.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/LiltViewCodecs.cmake")
@@ -8,7 +12,7 @@ add_library(liltview_core STATIC src/api/config.c src/api/engine.c src/api/anima
     src/engine/objects.c src/engine/worker.c src/engine/animation.c src/engine/cache.c
     src/codecs/raster.c src/codecs/image.c src/codecs/jpeg.c src/codecs/png.c src/codecs/webp.c src/codecs/bmp.c src/codecs/svg.c
     src/codecs/gif.c src/codecs/gif_animation.c src/codecs/tiff.c
-    src/platform/file.c)
+    ${liltview_file_adapter})
 add_library(LiltView::core ALIAS liltview_core)
 target_include_directories(liltview_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 liltview_configure_c_target(liltview_core)

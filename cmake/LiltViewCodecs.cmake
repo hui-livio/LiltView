@@ -28,6 +28,8 @@ endforeach()
 set(WEBP_USE_THREAD OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF)
 add_subdirectory("${webp_source}" "${PROJECT_BINARY_DIR}/third_party/libwebp" EXCLUDE_FROM_ALL SYSTEM)
+# The decoder-only upstream target does not export src/, unlike webp.
+target_include_directories(webpdecoder SYSTEM INTERFACE "$<BUILD_INTERFACE:${webp_source}/src>")
 
 liltview_dependency_source(plutosvg CMakeLists.txt svg_source)
 if(NOT EXISTS "${svg_source}/plutovg/CMakeLists.txt")

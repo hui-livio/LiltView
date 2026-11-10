@@ -1,4 +1,5 @@
 #pragma once
+#include "file_io.hpp"
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -21,7 +22,7 @@ inline void fixture_check(bool ok, const char *message)
 }
 inline void checker_png(const std::filesystem::path &path, unsigned width, unsigned height, unsigned cell)
 {
-    FILE *file = std::fopen(path.c_str(), "wb");
+    FILE *file = fixture_file(path);
     fixture_check(file, "PNG fixture open");
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
     png_infop info  = png_create_info_struct(png);
@@ -54,7 +55,7 @@ inline void checker_png(const std::filesystem::path &path, unsigned width, unsig
 }
 inline void checker_jpeg(const std::filesystem::path &path, unsigned width, unsigned height, unsigned cell)
 {
-    FILE *file = std::fopen(path.c_str(), "wb");
+    FILE *file = fixture_file(path);
     fixture_check(file, "JPEG fixture open");
     jpeg_compress_struct encoder{};
     jpeg_error_mgr error{};
@@ -123,7 +124,7 @@ inline void checker_bmp(const std::filesystem::path &path, unsigned width, unsig
 inline void checker_tiff(const std::filesystem::path &path, unsigned width, unsigned height, unsigned cell)
 {
     constexpr unsigned edge = 256;
-    TIFF *tif               = TIFFOpen(path.c_str(), "w8");
+    TIFF *tif               = fixture_tiff(path, "w8");
     fixture_check(tif, "TIFF fixture open");
     TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);

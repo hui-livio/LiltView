@@ -6,6 +6,12 @@
 #include <threads.h>
 #include <time.h>
 
+#if defined(_WIN32)
+#define LV_FILE_SYSTEM_DOMAIN LV_SYSTEM_WIN32
+#else
+#define LV_FILE_SYSTEM_DOMAIN LV_SYSTEM_ERRNO
+#endif
+
 typedef struct lv_file_version
 {
     uint64_t device, inode, bytes, modified_s, modified_ns, changed_s, changed_ns;
