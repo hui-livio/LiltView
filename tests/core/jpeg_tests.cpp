@@ -328,8 +328,13 @@ TEST_CASE("unsupported features reject synchronously and clear the request ID", 
     id                           = 99;
     CHECK(lv_core_submit(engine.core, &request, &id) == LV_INVALID_ARGUMENT);
     CHECK(id == 0);
+#ifdef _WIN32
+    // Windows has no POSIX FIFO; directories are also rejected as non-files.
+    auto fifo = files.directory;
+#else
     auto fifo = files.directory / "named-pipe.jpg";
     REQUIRE(mkfifo(fifo.c_str(), 0600) == 0);
+#endif
     engine.submit(fifo.string());
     Event e(engine.next());
     REQUIRE(e.view().type == LV_EVENT_ERROR);

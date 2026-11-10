@@ -6,10 +6,10 @@
 
 | 层次 | 当前实现 | 边界 |
 | --- | --- | --- |
-| 核心 | C23、公共 C ABI 2、单解码 worker | 本地常规文件；无窗口、GPU、翻译或网络依赖 |
+| 核心 | C23（MSVC 使用 C17 私有兼容层）、公共 C ABI 2、单解码 worker | 本地常规文件；无窗口、GPU、翻译或网络依赖 |
 | 应用 | C++23，显式 C++20 兼容模式 | SDL3 窗口与事件、Dear ImGui 界面 |
 | 渲染 | 独立 C++ renderer、OpenGL 3.3 | RGBA8 单平面纹理；图片和 UI 通过 ImGui 绘制 |
-| 平台 | Linux，首发 Arch Linux | 已有 X11 / Wayland 适配；Windows 文件/线程适配与 Win32 + D3D11 尚未实现 |
+| 平台 | Linux 与初步 Windows 支持 | Linux X11 / Wayland；Windows Win32 文件 / C11 线程 / SDL3 + OpenGL3，D3D11 与完整桌面实机验收待完成 |
 | 工程 | CMake 3.30+、Ninja、Catch2 / CTest | 自有源码显式列入构建，关闭 GNU 扩展 |
 
 Core、SDL3、codec 以静态库组成应用；Linux OpenGL、Fontconfig、窗口运行库及可选全局菜单依赖使用系统组件。依赖源码固定在 `third_party/`，CMake 使用本地源码，不自动下载。
@@ -149,6 +149,10 @@ ctest --preset dev
 
 `debug` / `compat20` 默认构建 Core 与语言/ABI 契约检查；`release` 默认仅构建优化 Core。应用发布使用 `app-release`，`dev` 同时开启应用组件与单元测试。x86 安装 NASM 可启用 libjpeg-turbo SIMD；构建不覆盖系统 JPEG / SDL 库。
 
+Windows 使用 `msvc-dev` / `msvc-release`，在 VS 2022 或 VS 2026 的 x64 Developer Shell 中执行相同的 configure / build / test 预设命令，具体用法见 [README](../README.md#windows--msvc--ninja-预设)。两套 VS 的构建目录应分开。MSVC 使用 C17 与私有 C23 写法兼容头、C11 原子/线程特性检查；不改变第三方源文件的语言标准，也不将 C 源文件改作 C++ 编译。两项 POSIX 符号链接 + `..` 专项测试在 Windows 跳过。
+
+单元测试统一使用项目自有 Catch2 入口：仅将“所选测试全部跳过”的退出码转换为 0，便于 VS Code 等直接运行测试的插件处理；CTest 通过独立 stderr 标记继续显示 Skipped。真实断言失败、参数错误和未匹配到测试仍返回非零，不使用放宽空测试检测的选项。
+
 可选桌面与大图回归默认关闭，显式开启后构建并执行：
 
 ```bash
@@ -183,6 +187,6 @@ ctest --preset dev -L large
 | Core 内容缓存、PREFETCH 与相邻图片预读 | 已实现（静态完整结果、应用 GIF 首帧 / 会话预热） | Core 磁盘内容缓存、通用完整动画内容缓存未实现 |
 | 诊断与真实图基准 | 部分实现 | 全链路统一分段、可重复冷/热基线、持续回归 |
 | 原始 RGB/YUV/Bayer、高精度/HDR、多图选择 | 待实现 | 输入/输出/颜色/身份契约及预算扩展 |
-| Windows / D3D11 | 待实现 | 平台文件/线程、Win32 窗口与渲染后端及实机验收 |
+| Windows / D3D11 | 初步 MSVC / Win32 文件与 SDL3 + OpenGL3 支持 | D3D11 后端、完整桌面与大图实机验收 |
 
 建议先补首次缓存生成后台化、真实图分段测量和总预算，再推进格式扩展。新增输入布局、选择器、颜色及诊断先确定兼容契约，随后接 codec 和 UI；避免由既有枚举或草案推导支持状态。具体排期与验收维护于 [开发计划](DEVELOPMENT_PLAN.md)，格式细节维护于 [格式兼容表](IMAGE_FORMATS.md)，CLI/YAML 维护于 [配置说明](CONFIGURATION.md)。

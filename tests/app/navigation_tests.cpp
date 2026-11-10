@@ -1,3 +1,4 @@
+#include "platform/path.hpp"
 #include "viewer/navigation.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -25,7 +26,7 @@ struct Directory
     Directory()
     {
         static std::atomic<unsigned> next{0};
-        path = std::filesystem::temp_directory_path() /
+        path = std::filesystem::current_path() /
             ("liltview-navigation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
              std::to_string(next.fetch_add(1)));
         std::filesystem::create_directories(path);
@@ -57,9 +58,9 @@ void settle(DirectoryNavigation &navigation)
 
 std::vector<std::string> forward(DirectoryNavigation &navigation)
 {
-    std::vector<std::string> result{navigation.snapshot().selected_path.filename().string()};
+    std::vector<std::string> result{platform::path_bytes(navigation.snapshot().selected_path.filename())};
     while (const auto next = navigation.step(1))
-        result.push_back(next->filename().string());
+        result.push_back(platform::path_bytes(next->filename()));
     return result;
 }
 } // namespace
@@ -208,6 +209,9 @@ TEST_CASE("relative navigation paths become absolute without requiring decode co
 
 TEST_CASE("navigation resolves parent symlinks before dot dot without choosing a different directory", "[navigation][path]")
 {
+#ifdef _WIN32
+    SKIP("Win32 resolves dot-dot before following directory symlinks; this is a POSIX path contract");
+#endif
     Directory directory;
     const auto local  = directory.file("photo.png");
     const auto remote = directory.path / "remote";
@@ -320,7 +324,7 @@ TEST_CASE("directory failures and scanner exceptions never publish partial total
     DirectoryNavigation absent({"png"});
     absent.select(directory.path / "absent" / "file.png");
     settle(absent);
-    CHECK(absent.snapshot().error == std::make_error_code(std::errc::no_such_file_or_directory));
+    CHECK(absent.snapshot().error == std::errc::no_such_file_or_directory);
     CHECK(absent.snapshot().total == 0);
     absent.select({});
     CHECK(absent.snapshot().error == std::make_error_code(std::errc::invalid_argument));
@@ -438,4 +442,29 @@ TEST_CASE("directory shutdown also discards ready results and an idle worker", "
     CHECK_FALSE(ready.pump());
     ready.select(file);
     CHECK(wakes.load() == 1);
+}
+
+TEST_CASE("directory navigation handles Unicode names and unsupported Unicode extensions", "[navigation][path]")
+{
+    Directory directory;
+    const std::vector<std::u8string> names{u8"1.png", u8"\u4e01-2.png", u8"\u4e01-10.png", u8"\u4e02.png", u8"\U0001f600.png"};
+    std::vector<std::string> expected;
+    for (const auto &name : names)
+    {
+        const auto file = directory.path / std::filesystem::path(name);
+        std::ofstream(file) << "navigation fixture";
+        expected.emplace_back(name.begin(), name.end());
+    }
+    std::ofstream(directory.path / std::filesystem::path(u8"ignored.\U0001f600")) << "unsupported extension";
+    DirectoryNavigation navigation({"png"});
+    navigation.select(directory.path / std::filesystem::path(names.front()));
+    settle(navigation);
+    REQUIRE_FALSE(navigation.snapshot().error);
+    CHECK(navigation.snapshot().total == names.size());
+    CHECK(forward(navigation) == expected);
+    CHECK_FALSE(navigation.step(1));
+    while (navigation.step(-1))
+    {
+    }
+    CHECK(navigation.snapshot().selected_path.filename() == std::filesystem::path(names.front()));
 }

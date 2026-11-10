@@ -4,6 +4,10 @@
 #include <string_view>
 #include "ui/window_chrome.hpp"
 
+#ifdef _WIN32
+    #include <windows.h>
+#endif
+
 #ifdef __linux__
     #include <X11/Xlib.h>
     #include <X11/extensions/shape.h>
@@ -140,6 +144,49 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
     if (std::string_view(SDL_GetCurrentVideoDriver()) == "offscreen")
         return true;
 #endif
+#ifdef _WIN32
+    const auto hwnd =
+        static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+    if (!hwnd) // Offscreen has no native input region; the renderer still draws alpha.
+        return true;
+    // A rectangular HRGN still disables DWM non-client rendering. Native frames
+    // (and square/maximized custom windows) must remove the region, not fill one.
+    if (opaque || radius <= 0)
+    {
+        if (SetWindowRgn(hwnd, nullptr, TRUE))
+            return true;
+        return SDL_SetError("Cannot clear Win32 window region: %lu", GetLastError());
+    }
+    // Own Win32 regions directly. The pinned SDL cannot safely remove a null
+    // shape, and a cached SDL shape would otherwise be reapplied during resize.
+    int native_width = 0, native_height = 0;
+    if (!SDL_GetWindowSizeInPixels(window, &native_width, &native_height))
+        return false;
+    const auto spans  = rounded_window_spans(native_width, native_height, radius * SDL_GetWindowPixelDensity(window));
+    const auto region = CreateRectRgn(0, 0, 0, 0);
+    const auto strip  = CreateRectRgn(0, 0, 0, 0);
+    bool success      = region && strip;
+    if (success)
+    {
+        for (const auto &span : spans)
+        {
+            if (!SetRectRgn(strip, span.x, span.y, span.x + span.width, span.y + span.height) ||
+                CombineRgn(region, region, strip, RGN_OR) == ERROR)
+            {
+                success = false;
+                break;
+            }
+        }
+    }
+    if (strip)
+        DeleteObject(strip);
+    if (success && SetWindowRgn(hwnd, region, TRUE))
+        return true; // Windows now owns the region.
+    const auto error = GetLastError();
+    if (region)
+        DeleteObject(region);
+    return SDL_SetError("Cannot set Win32 rounded window region: %lu", error);
+#else
     int pixel_width = 0, pixel_height = 0;
     if (!SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height))
         return false;
@@ -156,5 +203,6 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
     const bool result = SDL_SetWindowShape(window, shape);
     SDL_DestroySurface(shape);
     return result;
+#endif
 }
 } // namespace liltview

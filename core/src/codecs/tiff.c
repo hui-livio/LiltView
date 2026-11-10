@@ -72,7 +72,7 @@ static toff_t tiff_seek(thandle_t handle, toff_t offset, int whence)
         return (toff_t)-1;
     if (target > s->input->version.bytes)
         return (toff_t)-1;
-    if (fseek(s->input->file, (long)target, SEEK_SET))
+    if (!lv_file_seek(s->input->file, target))
     {
         s->failure = LV_ERROR_IO;
         return (toff_t)-1;

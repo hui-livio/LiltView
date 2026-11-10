@@ -1,10 +1,12 @@
 #include "application.hpp"
 #include "logging/configure.hpp"
+#include "platform/path.hpp"
 
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
 #include "platform/sdl_render_host.hpp"
 #include "platform/window_shape.hpp"
+#include "platform/window_theme.hpp"
 #include "renderer/renderer.hpp"
 #include "resources/icon_rgba.hpp"
 #include "settings/settings.hpp"
@@ -137,6 +139,7 @@ private:
         update_window_shape();
         if (!options.smoke_test)
             require(SDL_ShowWindow(window_), "SDL_ShowWindow");
+        update_native_window_theme();
         spdlog::info("LiltView {} started, app_id={}, video={}, renderer=OpenGL3, texture_limit={}", LILTVIEW_VERSION,
                      LILTVIEW_APP_ID, SDL_GetCurrentVideoDriver(), renderer_->capabilities().max_texture_edge);
     }
@@ -219,6 +222,7 @@ private:
             return false;
         }
         applied_system_titlebar_ = settings_.system_titlebar;
+        native_theme_dirty_      = true;
         configure_hit_test();
         if (normal)
             SDL_SetWindowSize(window_, placement.width, placement.height);
@@ -309,6 +313,7 @@ private:
 
             update_visual_style();
             update_window_shape();
+            update_native_window_theme();
             synchronize_menu(global_menu, shell);
             render_frame(options, shell, global_menu.active());
         }
@@ -588,14 +593,28 @@ private:
         if (std::abs(scale - applied_scale_) > 0.01f || dark != applied_dark_)
         {
             apply_style(dark, scale);
-            applied_scale_ = scale;
-            applied_dark_  = dark;
+            applied_scale_      = scale;
+            applied_dark_       = dark;
+            native_theme_dirty_ = true;
+        }
+    }
+
+    // Apply after showing the window and after native border/region changes.
+    void update_native_window_theme()
+    {
+        if (native_theme_dirty_)
+        {
+            const bool dark = resolve_theme(settings_.theme, system_theme_) == Theme::dark;
+            if (!apply_native_window_theme(window_, dark))
+                spdlog::debug("Native window theme unchanged: {}", SDL_GetError());
+            native_theme_dirty_ = false;
         }
     }
 
     // SDL 在桌面主题变化时发事件；仅更新观测值，不覆盖用户持久化的三态选择。
     void refresh_system_theme()
     {
+        native_theme_dirty_ = true; // SDL may reset native colors even with an explicit app theme.
         switch (SDL_GetSystemTheme())
         {
         case SDL_SYSTEM_THEME_DARK:
@@ -682,10 +701,11 @@ private:
                 spdlog::warn("Rounded corners disabled because native X11 shape is unavailable");
             }
         }
-        shape_width_   = width;
-        shape_height_  = height;
-        shape_radius_  = radius;
-        shape_density_ = density;
+        native_theme_dirty_ = true;
+        shape_width_        = width;
+        shape_height_       = height;
+        shape_radius_       = radius;
+        shape_density_      = density;
     }
 
     MenuItem current_menu(bool image_info_open) const
@@ -783,8 +803,9 @@ private:
         if (rendered_frames_ == 5)
         {
             const auto filename = utf8_path(options.screenshot);
-            const auto about    = filename.parent_path() / (filename.stem().string() + "-about.ppm");
-            save_screenshot(about.string());
+            auto about          = filename.parent_path() / filename.stem();
+            about              += "-about.ppm";
+            save_screenshot(platform::path_bytes(about));
         }
         if (rendered_frames_ >= 10 && viewer_->settled() && !smoke_captured_)
         {
@@ -878,7 +899,8 @@ private:
         if (!pixels.alpha.empty())
         {
             const auto image      = utf8_path(filename);
-            const auto alpha_path = image.parent_path() / (image.stem().string() + "-alpha.pgm");
+            auto alpha_path       = image.parent_path() / image.stem();
+            alpha_path           += "-alpha.pgm";
             std::ofstream alpha(alpha_path, std::ios::binary);
             alpha << "P5\n" << pixels.size.width << ' ' << pixels.size.height << "\n255\n";
             alpha.write(reinterpret_cast<const char *>(pixels.alpha.data()), static_cast<std::streamsize>(pixels.alpha.size()));
@@ -898,6 +920,7 @@ private:
     bool menu_fullscreen_         = false;
     bool menu_system_titlebar_    = false;
     bool applied_system_titlebar_ = false;
+    bool native_theme_dirty_      = true;
     bool menu_disable_rounding_   = false;
     int shape_width_ = 0, shape_height_ = 0;
     float shape_radius_ = -1, shape_density_ = 0;

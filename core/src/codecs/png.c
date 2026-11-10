@@ -57,7 +57,7 @@ static bool png_static_source(lv_core *core, lv_request *r, lv_input *input, lv_
     {
         if (lv_stopped(core, r))
             return false;
-        if (fseek(input->file, (long)at, SEEK_SET))
+        if (!lv_file_seek(input->file, at))
         {
             error->code = LV_ERROR_IO;
             return false;
@@ -84,7 +84,7 @@ static bool png_static_source(lv_core *core, lv_request *r, lv_input *input, lv_
         if (!memcmp(chunk + 4, "IEND", 4))
             break;
     }
-    if (fseek(input->file, 0, SEEK_SET))
+    if (!lv_file_seek(input->file, 0))
     {
         error->code = LV_ERROR_IO;
         return false;

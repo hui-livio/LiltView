@@ -4,7 +4,8 @@
 struct SDL_Window;
 namespace liltview
 {
-// Native regions are O(radius), not full-window RGBA masks on Linux.
+// Native regions are O(radius), not full-window RGBA masks on Linux / Windows.
+// Native frames clear custom regions so DWM can draw the non-client area.
 // Must be destroyed before SDL tears down its display connection.
 class WindowShape
 {

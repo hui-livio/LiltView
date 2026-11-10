@@ -199,7 +199,7 @@ TEST_CASE("viewer prefetches both neighbors without GPU uploads and navigation r
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-prefetch-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     for (const auto *name : {"1.png", "2.png", "3.png"})
         liltview::test::checkerboard(folder / name, 31, 23, 7);
@@ -241,7 +241,7 @@ TEST_CASE("viewer can shut down accepted neighbor prefetch without polling its t
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-prefetch-close-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-close-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     liltview::test::checkerboard(folder / "1.png", 31, 23, 7);
     liltview::test::checkerboard(folder / "2.png", 4096, 2048, 7);
@@ -270,7 +270,7 @@ TEST_CASE("cross directory generation churn isolates retired neighbor results fr
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-prefetch-generations-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-generations-" + std::to_string(SDL_GetPerformanceCounter()));
     for (const auto *name : {"A", "B", "C"})
     {
         std::filesystem::create_directories(folder / name);
@@ -312,7 +312,7 @@ TEST_CASE("same size neighbor rewrites display new pixels instead of cached cont
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-prefetch-pixels-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-pixels-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     liltview::test::checkerboard(folder / "1.bmp", 31, 23, 7);
     liltview::test::checkerboard(folder / "2.bmp", 31, 23, 7);
@@ -346,7 +346,7 @@ TEST_CASE("viewer neighbor boundaries and failed background reads preserve the c
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-prefetch-errors-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-errors-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     liltview::test::checkerboard(folder / "1.png", 31, 23, 7);
     liltview::Viewer viewer(renderer);
@@ -376,7 +376,7 @@ TEST_CASE("viewer revalidates a prefetched neighbor before displaying changed or
     {
         TestRenderer renderer;
         const auto folder =
-            std::filesystem::temp_directory_path() / ("liltview-prefetch-changed-" + std::to_string(SDL_GetPerformanceCounter()));
+            std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-changed-" + std::to_string(SDL_GetPerformanceCounter()));
         std::filesystem::create_directories(folder);
         liltview::test::checkerboard(folder / "1.png", 31, 23, 7);
         liltview::test::checkerboard(folder / "2.png", 31, 23, 7);
@@ -412,7 +412,7 @@ TEST_CASE("background neighbor events never replace GIF frame identity or foregr
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-prefetch-gif-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-prefetch-gif-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     std::filesystem::copy_file(std::filesystem::path(LILTVIEW_IMAGE_FIXTURES) / "red-blue-loop.gif", folder / "1.gif");
     std::ofstream(folder / "2.png") << "not an encoded image";
@@ -442,7 +442,7 @@ TEST_CASE("viewer browses a naturally sorted directory and can leave a deleted o
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-navigation-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-navigation-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     for (const auto *name : {"image1.png", "image2.PNG", "image10.png"})
     {
@@ -489,10 +489,13 @@ TEST_CASE("viewer browses a naturally sorted directory and can leave a deleted o
 
 TEST_CASE("viewer preserves filesystem meaning of a parent symlink followed by dot dot", "[viewer][navigation][path]")
 {
+#ifdef _WIN32
+    SKIP("Win32 resolves dot-dot before following directory symlinks; this is a POSIX path contract");
+#endif
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-navigation-symlink-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-navigation-symlink-" + std::to_string(SDL_GetPerformanceCounter()));
     const auto remote = folder / "remote";
     std::filesystem::create_directories(remote / "child");
     liltview::test::checkerboard(folder / "photo.png", 17, 13, 1);
@@ -515,7 +518,7 @@ TEST_CASE("canvas navigation interaction blocks real image wheel and drag withou
     TestRenderer renderer;
     renderer.image_budget = 128 * 1024 * 1024; // Keep this input-control test fully resident.
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-navigation-input-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-navigation-input-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     liltview::test::checkerboard(folder / "board.png", 1024, 1024, 17);
     liltview::Viewer viewer(renderer);
@@ -745,7 +748,7 @@ TEST_CASE("native scenes retain every decoded tile across camera changes", "[vie
     renderer.max_edge = 128;
     liltview::Viewer viewer(renderer);
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-native-cache-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-native-cache-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "board.png";
     liltview::test::checkerboard(path, 512, 512, 1);
@@ -784,7 +787,7 @@ TEST_CASE("cached native scene remains an immutable snapshot after source replac
     TestRenderer renderer;
     liltview::Viewer viewer(renderer);
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-native-snapshot-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-native-snapshot-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "board.png";
     liltview::test::checkerboard(path, 513, 513, 17);
@@ -808,7 +811,7 @@ TEST_CASE("failed replacement preserves the displayed source for sharp regional 
     EventLoop loop;
     TestRenderer renderer;
     liltview::Viewer viewer(renderer);
-    auto folder = std::filesystem::temp_directory_path() /
+    auto folder = std::filesystem::canonical(std::filesystem::temp_directory_path()) /
         ("liltview-viewer-failed-replacement-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "board.png";
@@ -834,7 +837,7 @@ TEST_CASE("a native-size preview uses pixel-preserving magnification", "[viewer]
     EventLoop loop;
     TestRenderer renderer;
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-native-preview-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-native-preview-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "small.png";
     liltview::test::checkerboard(path, 17, 13, 1);
@@ -854,7 +857,7 @@ TEST_CASE("native row bands are visible before the complete image finishes decod
     TestRenderer renderer;
     renderer.upload_delay_ms = 5; // Stop the UI pump after the first uploaded tile.
     const auto folder =
-        std::filesystem::temp_directory_path() / ("liltview-native-first-band-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-native-first-band-" + std::to_string(SDL_GetPerformanceCounter()));
     std::filesystem::create_directories(folder);
     const auto path = folder / "stream.png";
     liltview::test::checkerboard(path, 1024, 4096, 7);
@@ -884,7 +887,7 @@ namespace
 struct DetailsDirectory
 {
     std::filesystem::path path =
-        std::filesystem::temp_directory_path() / ("liltview-information-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-information-" + std::to_string(SDL_GetPerformanceCounter()));
     DetailsDirectory()
     {
         std::filesystem::create_directories(path);
@@ -1125,7 +1128,7 @@ namespace
 struct WarmDirectory
 {
     std::filesystem::path path =
-        std::filesystem::temp_directory_path() / ("liltview-warm-viewer-" + std::to_string(SDL_GetPerformanceCounter()));
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / ("liltview-warm-viewer-" + std::to_string(SDL_GetPerformanceCounter()));
     WarmDirectory()
     {
         std::filesystem::create_directories(path);
@@ -1154,7 +1157,7 @@ void write_warm_gif(const std::filesystem::path &path, unsigned frames = 2, unsi
         }
     } encoder;
     int error    = 0;
-    encoder.file = EGifOpenFileName(path.c_str(), false, &error);
+    encoder.file = EGifOpenFileName(path.string().c_str(), false, &error);
     REQUIRE(encoder.file);
     EGifSetGifVersion(encoder.file, true);
     const GifColorType colors[]{{255, 0, 0}, {0, 0, 255}};

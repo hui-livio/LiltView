@@ -333,7 +333,7 @@ static bool read_bmp_row(void *userdata, uint32_t y, uint8_t *out, lv_error_info
     const bmp_header *h   = &s->layout;
     const uint32_t file_y = h->top_down ? y : h->size.height - y - 1;
     const uint64_t offset = h->offset + (uint64_t)file_y * h->row_bytes;
-    if (offset > LONG_MAX || fseek(s->input->file, (long)offset, SEEK_SET))
+    if (!lv_file_seek(s->input->file, offset))
     {
         error->code = LV_ERROR_IO;
         return false;
@@ -396,7 +396,7 @@ void lv_decode_bmp(lv_core *core, lv_request *r, lv_input *input, lv_error_info 
             error->code = LV_ERROR_TARGET_UNSUPPORTED;
             return;
         }
-        if (fseek(input->file, 0, SEEK_SET))
+        if (!lv_file_seek(input->file, 0))
         {
             error->code = LV_ERROR_IO;
             return;

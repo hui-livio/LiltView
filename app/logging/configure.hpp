@@ -5,6 +5,7 @@
 
 namespace liltview
 {
+// Console-only by default: changing the level never enables log-file output.
 // Apply before spawning workers; YAML is read once during startup.
 void configure_logging(LogLevel level);
 } // namespace liltview

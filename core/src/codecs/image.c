@@ -34,7 +34,7 @@ void lv_decode_image(lv_core *core, lv_request *r, lv_error_info *error)
     input.file     = lv_file_open(r->path, &input.version, &code);
     if (!input.file)
     {
-        *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_SYSTEM_ERRNO, .system_code = code};
+        *error = (lv_error_info){.code = LV_ERROR_IO, .system_domain = LV_FILE_SYSTEM_DOMAIN, .system_code = code};
         return;
     }
     if (core->config.cache_budget_bytes && lv_cache_replay(core, r, input.file, &input.version, error))
@@ -58,7 +58,7 @@ void lv_decode_image(lv_core *core, lv_request *r, lv_error_info *error)
         error->code = LV_ERROR_TARGET_UNSUPPORTED;
     else if (!regional && input.version.bytes > UINT64_C(64) * 1024 * 1024)
         error->code = LV_ERROR_DIMENSION_LIMIT;
-    else if (fseek(input.file, 0, SEEK_SET))
+    else if (!lv_file_seek(input.file, 0))
         error->code = LV_ERROR_IO;
     else if (!lv_stopped(core, r))
         decode(core, r, &input, error);

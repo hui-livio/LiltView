@@ -1,3 +1,4 @@
+#include "../fixtures/file_io.hpp"
 #include <gif_lib.h>
 #include <iterator>
 #include <memory>
@@ -81,7 +82,7 @@ Bytes tiff_fixture(TiffFixture fixture = {})
     const auto filename  = files.directory / "fixture.tiff";
     std::string mode     = fixture.big_tiff ? "w8" : "w";
     mode                += fixture.big_endian ? "b" : "l";
-    std::unique_ptr<TIFF, decltype(&TIFFClose)> out(TIFFOpen(filename.c_str(), mode.c_str()), TIFFClose);
+    std::unique_ptr<TIFF, decltype(&TIFFClose)> out(liltview::test::fixture_tiff(filename, mode.c_str()), TIFFClose);
     REQUIRE(out);
     const std::uint32_t width = fixture.tiled ? 17 : 7, height = fixture.tiled ? 19 : 9;
     const unsigned samples = fixture.alpha ? 4 : 3;
@@ -148,7 +149,7 @@ Bytes tiff_gray(unsigned bits, bool palette, std::uint16_t compression)
 {
     Files files;
     const auto filename = files.directory / "gray.tif";
-    std::unique_ptr<TIFF, decltype(&TIFFClose)> out(TIFFOpen(filename.c_str(), "w"), TIFFClose);
+    std::unique_ptr<TIFF, decltype(&TIFFClose)> out(liltview::test::fixture_tiff(filename, "w"), TIFFClose);
     REQUIRE(out);
     REQUIRE(TIFFSetField(out.get(), TIFFTAG_IMAGEWIDTH, 13));
     REQUIRE(TIFFSetField(out.get(), TIFFTAG_IMAGELENGTH, 7));

@@ -1,3 +1,4 @@
+#include "platform/path.hpp"
 #include "animation_warmup.hpp"
 
 #include <algorithm>
@@ -313,8 +314,8 @@ struct AnimationWarmup::State
                 return;
             lv_animation_open_desc open;
             lv_animation_open_desc_init(&open);
-            const auto &path          = node.path.native();
-            open.path                 = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+            const auto &path          = platform::path_bytes(node.path);
+            open.path                 = {platform::path_encoding, path.data(), path.size()};
             open.priority             = LV_PRIORITY_VISIBLE_DETAIL;
             open.target.as.fit_bounds = node.bounds;
             open.user_tag             = node.tag;
@@ -369,7 +370,7 @@ void AnimationWarmup::update(std::uint64_t generation, const std::vector<std::fi
         {
             if (next.size() == 2)
                 break;
-            if (!path.empty() && path.native().size() <= s.budget &&
+            if (!path.empty() && path.native().size() <= s.budget / sizeof(std::filesystem::path::value_type) &&
                 std::none_of(next.begin(), next.end(), [&](const auto &value) { return value.path == path; }))
                 next.push_back({path});
         }
@@ -447,7 +448,7 @@ void AnimationWarmup::pump(bool foreground_idle, std::size_t available_requests)
                         [&](const auto &node) { return node->stage != State::Stage::retiring && node->path == item.path; }))
             continue;
         item.attempted           = true;
-        const std::uint64_t bill = sizeof(State::Node) + item.path.native().size() + 1;
+        const std::uint64_t bill = sizeof(State::Node) + (item.path.native().size() + 1) * sizeof(std::filesystem::path::value_type);
         if (bill > s.budget - s.retained)
         {
             ++s.failed;

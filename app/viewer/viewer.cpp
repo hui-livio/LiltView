@@ -1,3 +1,4 @@
+#include "platform/path.hpp"
 #include "viewer.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -79,8 +80,8 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
                 }
                 lv_request_desc request;
                 lv_request_desc_init(&request);
-                const auto &bytes   = path.native();
-                request.path        = {LV_PATH_POSIX_BYTES, bytes.data(), bytes.size()};
+                const auto &bytes   = platform::path_bytes(path);
+                request.path        = {platform::path_encoding, bytes.data(), bytes.size()};
                 request.kind        = LV_REQUEST_PREFETCH;
                 request.priority    = LV_PRIORITY_PREFETCH;
                 request.target.kind = LV_TARGET_NATIVE;
@@ -190,7 +191,7 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
     viewport_.reset();
     pending_path_  = adopting_animation_ ? std::filesystem::path{} : absolute;
     selected_path_ = absolute;
-    filename_      = absolute.filename().string();
+    filename_      = platform::path_bytes(absolute.filename());
     error_         = 0;
     loading_       = true;
 }
@@ -213,10 +214,10 @@ void Viewer::submit_pending()
 {
     if (pending_path_.empty() || request_)
         return;
-    const auto path = pending_path_.native();
+    const auto path = platform::path_bytes(pending_path_);
     lv_request_desc request;
     lv_request_desc_init(&request);
-    request.path     = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+    request.path     = {platform::path_encoding, path.data(), path.size()};
     request.user_tag = generation_;
     // Only animations use a bounded immutable FIT canvas. Static images are
     // decoded exactly once at native resolution, independent of the viewport.

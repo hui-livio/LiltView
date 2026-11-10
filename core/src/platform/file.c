@@ -60,6 +60,16 @@ bool lv_file_unchanged(FILE *file, const char *path, const lv_file_version *orig
     const lv_file_version a = version(&opened), b = version(&named);
     return !memcmp(&a, original, sizeof a) && !memcmp(&b, original, sizeof b);
 }
+bool lv_file_seek(FILE *file, uint64_t offset)
+{
+    if (offset > INT64_MAX || (uint64_t)(off_t)offset != offset)
+    {
+        errno = EOVERFLOW;
+        return false;
+    }
+    return fseeko(file, (off_t)offset, SEEK_SET) == 0;
+}
+
 void lv_file_close(FILE *file)
 {
     if (file)
