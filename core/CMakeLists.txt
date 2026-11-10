@@ -16,6 +16,9 @@ add_library(liltview_core STATIC src/api/config.c src/api/engine.c src/api/anima
 add_library(LiltView::core ALIAS liltview_core)
 target_include_directories(liltview_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 liltview_configure_c_target(liltview_core)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(liltview_core PRIVATE _FILE_OFFSET_BITS=64)
+endif()
 target_link_libraries(liltview_core PRIVATE liltview_jpeg png_static webpdecoder plutosvg::plutosvg
     liltview_gif TIFF::tiff Threads::Threads)
 add_dependencies(liltview_core liltview_jpeg_build)

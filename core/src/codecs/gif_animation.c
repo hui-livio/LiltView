@@ -67,7 +67,7 @@ static bool restart(lv_gif_animation *s)
     if (s->gif)
         DGifCloseFile(s->gif, nullptr);
     s->gif = nullptr;
-    if (fseek(s->input.file, 0, SEEK_SET))
+    if (!lv_file_seek(s->input.file, 0))
     {
         s->failure = LV_ERROR_IO;
         return false;

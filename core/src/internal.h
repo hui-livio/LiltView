@@ -149,6 +149,8 @@ bool lv_cache_replay(lv_core *, lv_request *, FILE *, const lv_file_version *, l
 bool lv_publish_info(lv_core *, lv_request *, lv_image_info *, const lv_file_version *);
 bool lv_publish_tile(lv_core *, lv_request *, lv_pixels *, lv_rect_u32, uint64_t tile);
 void lv_decode_image(lv_core *, lv_request *, lv_error_info *);
+// Absolute byte offset; rejects values outside the signed 64-bit file range.
+bool lv_file_seek(FILE *, uint64_t offset);
 void lv_file_close(FILE *);
 FILE *lv_file_open(const char *, lv_file_version *, uint32_t *system_code);
 bool lv_file_unchanged(FILE *, const char *, const lv_file_version *);

@@ -50,7 +50,7 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/runner-contract"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/support/runner_contract.cmake")
     set_tests_properties(test.runner_exit_codes PROPERTIES TIMEOUT 60)
-    add_executable(liltview_core_tests core/config_tests.cpp core/cache_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp core/animation_tests.cpp core/region_tests.cpp)
+    add_executable(liltview_core_tests core/config_tests.cpp core/cache_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp core/animation_tests.cpp core/region_tests.cpp core/file_offset_tests.cpp)
     target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg png_static webp
         liltview_gif_encoder TIFF::tiff liltview_test_main)
     liltview_configure_cxx_target(liltview_core_tests)

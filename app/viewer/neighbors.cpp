@@ -1,4 +1,5 @@
 #include "viewer.hpp"
+#include "platform/path.hpp"
 
 #include <algorithm>
 #include <spdlog/spdlog.h>
@@ -64,7 +65,7 @@ void Viewer::pump_neighbors()
         }
     if (animation_warmup_->take_adoption_failure() && adopting_animation_)
     {
-        spdlog::debug("Warm animation validation failed; reopening {}", selected_path_.string());
+        spdlog::debug("Warm animation validation failed; reopening {}", platform::path_bytes(selected_path_));
         fallback_warm_animation();
     }
 }

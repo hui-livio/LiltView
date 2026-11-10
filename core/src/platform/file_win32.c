@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <io.h>
 #include <limits.h>
@@ -123,6 +124,16 @@ bool lv_file_unchanged(FILE *file, const char *path, const lv_file_version *orig
     const bool ok = file_version(current, &named);
     CloseHandle(current);
     return ok && !memcmp(&opened, original, sizeof opened) && !memcmp(&named, original, sizeof named);
+}
+
+bool lv_file_seek(FILE *file, uint64_t offset)
+{
+    if (offset > INT64_MAX)
+    {
+        errno = EOVERFLOW;
+        return false;
+    }
+    return _fseeki64(file, (int64_t)offset, SEEK_SET) == 0;
 }
 
 void lv_file_close(FILE *file)

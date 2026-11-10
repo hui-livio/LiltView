@@ -1,4 +1,5 @@
 #include "image_information.hpp"
+#include "platform/path.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -58,7 +59,7 @@ std::vector<ImageInformationRow> image_information_rows(Language language, const
     const bool size_known = (image.flags & LV_INFO_SOURCE_SIZE_KNOWN) != 0;
     const auto *format    = format_name(image.format);
     std::vector<ImageInformationRow> rows{
-        {Text::info_path, details.path.string()},
+        {Text::info_path, platform::path_bytes(details.path)},
         {Text::info_file_size,
          image.flags & LV_INFO_FILE_BYTES_KNOWN ? std::to_string(image.file_bytes) + " " + t(Text::info_bytes) : unknown},
         {Text::info_format, format ? format : unknown},

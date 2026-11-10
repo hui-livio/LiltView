@@ -11,6 +11,7 @@
 // Viewer tests additionally cover old A -> pending B -> B row bands -> completion, failed B -> A,
 // rapid A/B/C replacement, no-source queries, GIF completion metadata, and presented-camera scale.
 
+#include "platform/path.hpp"
 #include "ui/image_information.hpp"
 #include "ui/shell.hpp"
 
@@ -27,7 +28,7 @@ namespace
 ImageDetails example()
 {
     ImageDetails details;
-    details.path              = "/missing/中文-%s-100%/photo.png";
+    details.path              = std::filesystem::path(u8"/missing/中文-%s-100%/photo.png");
     details.image.format      = LV_FORMAT_PNG;
     details.image.flags       = LV_INFO_SOURCE_SIZE_KNOWN | LV_INFO_FILE_BYTES_KNOWN;
     details.image.source_size = {123, 45};
@@ -85,7 +86,7 @@ TEST_CASE("information file metadata distinguishes zero and unknown without touc
     auto details = example();
     for (const auto language : {Language::english, Language::chinese})
     {
-        CHECK(field(language, details, Text::info_path) == details.path.string());
+        CHECK(field(language, details, Text::info_path) == platform::path_bytes(details.path));
         CHECK(field(language, details, Text::info_file_size) == std::string("0 ") + translate(language, Text::info_bytes));
         CHECK(field(language, details, Text::info_format) == "PNG");
         details.image.flags &= ~static_cast<lv_info_flags>(LV_INFO_FILE_BYTES_KNOWN);
@@ -186,7 +187,7 @@ TEST_CASE("information panel renders literal long paths and closes through a sta
     Context context;
     CHECK_FALSE(context.frame(std::nullopt, Language::english));
     auto details = example();
-    details.path = "/a/" + std::string(500, 'x') + "-中文-%s-%d-100%.png";
+    details.path = std::filesystem::path(std::u8string(u8"/a/") + std::u8string(500, u8'x') + u8"-中文-%s-%d-100%.png");
     CHECK_FALSE(context.frame(details, Language::english));
     auto &io = ImGui::GetIO();
     io.AddMousePosEvent(315, 35);
@@ -207,4 +208,18 @@ TEST_CASE("information shell toggle and dismiss retain a one-action Escape contr
     CHECK(shell.dismiss_image_info()); // Caller consumes Escape; does not also leave fullscreen.
     CHECK_FALSE(shell.image_info_open());
     CHECK_FALSE(shell.dismiss_image_info()); // A following Escape can handle fullscreen.
+}
+
+TEST_CASE("information paths preserve UTF-8 Chinese and emoji independently of Windows code page", "[image_details][path]")
+{
+    auto details             = example();
+    const std::u8string text = u8"/images/\u56fe\u50cf-\U0001f600-100%.png";
+    details.path             = std::filesystem::path(text);
+    const std::string expected(text.begin(), text.end());
+    for (const auto language : {Language::english, Language::chinese})
+    {
+        CHECK(field(language, details, Text::info_path) == expected);
+        Context context;
+        CHECK_NOTHROW(context.frame(details, language));
+    }
 }

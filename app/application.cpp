@@ -1,5 +1,6 @@
 #include "application.hpp"
 #include "logging/configure.hpp"
+#include "platform/path.hpp"
 
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
@@ -802,8 +803,9 @@ private:
         if (rendered_frames_ == 5)
         {
             const auto filename = utf8_path(options.screenshot);
-            const auto about    = filename.parent_path() / (filename.stem().string() + "-about.ppm");
-            save_screenshot(about.string());
+            auto about          = filename.parent_path() / filename.stem();
+            about              += "-about.ppm";
+            save_screenshot(platform::path_bytes(about));
         }
         if (rendered_frames_ >= 10 && viewer_->settled() && !smoke_captured_)
         {
@@ -897,7 +899,8 @@ private:
         if (!pixels.alpha.empty())
         {
             const auto image      = utf8_path(filename);
-            const auto alpha_path = image.parent_path() / (image.stem().string() + "-alpha.pgm");
+            auto alpha_path       = image.parent_path() / image.stem();
+            alpha_path           += "-alpha.pgm";
             std::ofstream alpha(alpha_path, std::ios::binary);
             alpha << "P5\n" << pixels.size.width << ' ' << pixels.size.height << "\n255\n";
             alpha.write(reinterpret_cast<const char *>(pixels.alpha.data()), static_cast<std::streamsize>(pixels.alpha.size()));

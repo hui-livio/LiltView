@@ -1,4 +1,5 @@
 #pragma once
+#include "../fixtures/path.hpp"
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
@@ -43,7 +44,7 @@ struct Files
         auto path = directory / name;
         std::ofstream out(path, std::ios::binary);
         out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        return path.string();
+        return fixture_path_bytes(path);
     }
 };
 

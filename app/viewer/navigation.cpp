@@ -1,4 +1,5 @@
 #include "navigation.hpp"
+#include "platform/path.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -36,8 +37,8 @@ std::string normalized_extension(std::string value)
 // Equal numbers and ASCII case differences use the original full filename as final tie-break.
 bool natural_less(const std::filesystem::path &left, const std::filesystem::path &right)
 {
-    const auto a  = left.filename().string();
-    const auto b  = right.filename().string();
+    const auto a  = platform::path_bytes(left.filename());
+    const auto b  = platform::path_bytes(right.filename());
     std::size_t i = 0, j = 0;
     while (i < a.size() && j < b.size())
     {
@@ -99,7 +100,7 @@ DirectoryScanResult scan_directory(const std::filesystem::path &directory, const
         if (cancelled())
             return {};
         const auto &entry    = *iterator;
-        const auto extension = normalized_extension(entry.path().extension().string());
+        const auto extension = normalized_extension(platform::path_bytes(entry.path().extension()));
         std::error_code error;
         if (std::binary_search(extensions.begin(), extensions.end(), extension) && entry.is_regular_file(error))
         {
