@@ -151,6 +151,8 @@ ctest --preset dev
 
 Windows 使用 `msvc-dev` / `msvc-release`，在 VS 2022 或 VS 2026 的 x64 Developer Shell 中执行相同的 configure / build / test 预设命令，具体用法见 [README](../README.md#windows--msvc--ninja-预设)。两套 VS 的构建目录应分开。MSVC 使用 C17 与私有 C23 写法兼容头、C11 原子/线程特性检查；不改变第三方源文件的语言标准，也不将 C 源文件改作 C++ 编译。两项 POSIX 符号链接 + `..` 专项测试在 Windows 跳过。
 
+单元测试统一使用项目自有 Catch2 入口：仅将“所选测试全部跳过”的退出码转换为 0，便于 VS Code 等直接运行测试的插件处理；CTest 通过独立 stderr 标记继续显示 Skipped。真实断言失败、参数错误和未匹配到测试仍返回非零，不使用放宽空测试检测的选项。
+
 可选桌面与大图回归默认关闭，显式开启后构建并执行：
 
 ```bash

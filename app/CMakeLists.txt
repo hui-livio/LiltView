@@ -54,9 +54,10 @@ file(RELATIVE_PATH liltview_installed_font_dir "${CMAKE_INSTALL_FULL_BINDIR}"
 target_compile_definitions(liltview_fonts PRIVATE LILTVIEW_INSTALLED_FONT_DIR="${liltview_installed_font_dir}")
 target_link_libraries(liltview_fonts PUBLIC LiltView::imgui PRIVATE SDL3::SDL3-static)
 liltview_configure_cxx_target(liltview_fonts)
-add_executable(liltview main.cpp application.cpp platform/window_shape.cpp)
+add_executable(liltview main.cpp application.cpp platform/window_shape.cpp platform/window_theme.cpp)
 if(WIN32)
     enable_language(RC)
+    target_link_libraries(liltview PRIVATE dwmapi)
     # The RC template and CLI share project(VERSION); absent fourth component is 0.
     set(LILTVIEW_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
     if(LILTVIEW_VERSION_TWEAK STREQUAL "")

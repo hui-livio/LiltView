@@ -38,39 +38,55 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
     liltview_configure_c_target(liltview_pixel_ownership)
     add_test(NAME core.pixel_ownership COMMAND liltview_pixel_ownership "${PROJECT_SOURCE_DIR}/tests/fixtures/red.tiff")
     liltview_require_catch2()
+    add_library(liltview_test_main STATIC support/catch_main.cpp)
+    target_link_libraries(liltview_test_main PUBLIC Catch2::Catch2)
+    liltview_configure_cxx_target(liltview_test_main)
+    set(liltview_skip_marker "LILTVIEW_ALL_TESTS_SKIPPED")
+    add_executable(liltview_runner_cases support/runner_cases.cpp)
+    target_link_libraries(liltview_runner_cases PRIVATE liltview_test_main)
+    liltview_configure_cxx_target(liltview_runner_cases)
+    add_test(NAME test.runner_exit_codes COMMAND "${CMAKE_COMMAND}"
+        "-DRUNNER=$<TARGET_FILE:liltview_runner_cases>" "-DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/runner-contract"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/support/runner_contract.cmake")
+    set_tests_properties(test.runner_exit_codes PROPERTIES TIMEOUT 60)
     add_executable(liltview_core_tests core/config_tests.cpp core/cache_tests.cpp core/jpeg_tests.cpp core/format_tests.cpp core/gif_tiff_tests.cpp core/animation_tests.cpp core/region_tests.cpp)
     target_link_libraries(liltview_core_tests PRIVATE LiltView::core liltview_jpeg png_static webp
-        liltview_gif_encoder TIFF::tiff Catch2::Catch2WithMain)
+        liltview_gif_encoder TIFF::tiff liltview_test_main)
     liltview_configure_cxx_target(liltview_core_tests)
     add_executable(liltview_make_checkerboard fixtures/make_checkerboard.cpp)
     target_link_libraries(liltview_make_checkerboard PRIVATE liltview_jpeg png_static TIFF::tiff)
     liltview_configure_cxx_target(liltview_make_checkerboard)
     include("${LILTVIEW_CATCH_SCRIPT}")
-    catch_discover_tests(liltview_core_tests TEST_PREFIX "core." PROPERTIES TIMEOUT 30)
+    catch_discover_tests(liltview_core_tests TEST_PREFIX "core."
+        PROPERTIES TIMEOUT 30 SKIP_REGULAR_EXPRESSION "${liltview_skip_marker}")
     if(TARGET LiltView::app_model)
         add_executable(liltview_app_tests app/window_chrome_tests.cpp app/image_details_tests.cpp app/information_shell_tests.cpp app/navigation_button_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
         target_link_libraries(liltview_app_tests PRIVATE liltview_cli LiltView::logging spdlog::spdlog LiltView::app_model
-            liltview_fonts LiltView::renderer LiltView::ui SDL3::SDL3-static Catch2::Catch2WithMain)
+            liltview_fonts LiltView::renderer LiltView::ui SDL3::SDL3-static liltview_test_main)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
         if(WIN32)
-            target_sources(liltview_app_tests PRIVATE app/windows_resources_tests.cpp)
+            target_sources(liltview_app_tests PRIVATE app/windows_resources_tests.cpp app/windows_window_tests.cpp
+                "${PROJECT_SOURCE_DIR}/app/platform/window_shape.cpp" "${PROJECT_SOURCE_DIR}/app/platform/window_theme.cpp")
             target_include_directories(liltview_app_tests PRIVATE "${PROJECT_BINARY_DIR}/app/generated")
             target_compile_definitions(liltview_app_tests PRIVATE
                 LILTVIEW_TEST_APP_PATH="$<TARGET_FILE:liltview>"
                 LILTVIEW_TEST_GUI=$<IF:$<CONFIG:Release>,1,0>
                 LILTVIEW_TEST_DEBUG=$<IF:$<CONFIG:Debug>,1,0>)
-            target_link_libraries(liltview_app_tests PRIVATE version)
+            target_link_libraries(liltview_app_tests PRIVATE version dwmapi)
             add_dependencies(liltview_app_tests liltview)
         endif()
-        catch_discover_tests(liltview_app_tests TEST_PREFIX "app." PROPERTIES TIMEOUT 30)
+        catch_discover_tests(liltview_app_tests TEST_PREFIX "app."
+            PROPERTIES TIMEOUT 30 SKIP_REGULAR_EXPRESSION "${liltview_skip_marker}")
         add_executable(liltview_viewer_tests app/viewer_tests.cpp app/navigation_tests.cpp app/prefetch_tests.cpp app/animation_warmup_tests.cpp app/playback_tests.cpp app/viewport_tests.cpp app/tile_reader_tests.cpp)
-        target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff liltview_gif_encoder Catch2::Catch2WithMain)
+        target_link_libraries(liltview_viewer_tests PRIVATE liltview_viewer SDL3::SDL3-static liltview_jpeg png_static TIFF::tiff liltview_gif_encoder liltview_test_main)
         target_compile_definitions(liltview_viewer_tests PRIVATE
             LILTVIEW_IMAGE_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures"
             LILTVIEW_JPEG_FIXTURES="${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/testimages")
         liltview_configure_cxx_target(liltview_viewer_tests)
-        catch_discover_tests(liltview_viewer_tests TEST_PREFIX "viewer." PROPERTIES TIMEOUT 30)
+        catch_discover_tests(liltview_viewer_tests TEST_PREFIX "viewer."
+            PROPERTIES TIMEOUT 30 SKIP_REGULAR_EXPRESSION "${liltview_skip_marker}")
     endif()
 endif()
 
@@ -145,7 +161,7 @@ if(LILTVIEW_BUILD_LARGE_IMAGE_TESTS)
         message(FATAL_ERROR "Large image regressions require LILTVIEW_BUILD_UNIT_TESTS")
     endif()
     add_executable(liltview_large_image_tests core/large_tests.cpp)
-    target_link_libraries(liltview_large_image_tests PRIVATE LiltView::core liltview_jpeg png_static TIFF::tiff Catch2::Catch2WithMain)
+    target_link_libraries(liltview_large_image_tests PRIVATE LiltView::core liltview_jpeg png_static TIFF::tiff liltview_test_main)
     target_compile_definitions(liltview_large_image_tests PRIVATE LILTVIEW_LARGE_FIXTURE_DIR="${PROJECT_BINARY_DIR}/large-images")
     liltview_configure_cxx_target(liltview_large_image_tests)
     if(LILTVIEW_BUILD_DESKTOP_TESTS)
@@ -159,7 +175,8 @@ if(LILTVIEW_BUILD_LARGE_IMAGE_TESTS)
     endif()
     foreach(format png jpeg bmp tiff)
         add_test(NAME large.${format} COMMAND liltview_large_image_tests "[large_${format}]")
-        set_tests_properties(large.${format} PROPERTIES TIMEOUT 180 LABELS large RUN_SERIAL TRUE)
+        set_tests_properties(large.${format} PROPERTIES TIMEOUT 180 LABELS large RUN_SERIAL TRUE
+            SKIP_REGULAR_EXPRESSION "${liltview_skip_marker}")
         if(format STREQUAL "tiff")
             set_tests_properties(large.tiff PROPERTIES FIXTURES_SETUP checkerboard_tiff)
         endif()

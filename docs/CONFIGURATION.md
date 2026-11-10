@@ -41,6 +41,7 @@ disable_rounding: false
 - width 为 640..8192，height 为 480..8192；越界字段回退各自默认值。
 - maximized 使用 true / false。
 - system_titlebar 默认 false，使用自绘无边框标题栏；true 恢复系统标题栏和边框。在“设置 → 外观 → 启用系统标题栏”即时切换，退出保存。
+- Windows 系统标题栏由 DWM 绘制，随应用最终解析的深浅主题同步（包括标题栏文字与右侧窗口按钮），而非固定跟随系统颜色；Windows 10 同步每窗口原生深色颜色策略，在主题切换、窗口显示或边框/区域重建后刷新非客户区与标题栏激活态绘制缓存，不改变真实焦点、位置和尺寸，不需要用户切换焦点或最大化/缩放窗口；切换回系统标题栏时移除自定义 Win32 窗口区域，不留下导致经典边框的矩形 HRGN。自绘圆角模式使用独立 Win32 区域；关闭圆角或最大化时移除该区域。不支持深色标题栏属性的系统保留原生默认颜色，不阻止启动。
 - disable_rounding 默认 false，无边框窗口使用透明圆角；true 使用直角。在“设置 → 外观 → 关闭圆角”切换。原生标题栏下该项禁用但保留选择，最大化 / 全屏自动直角。
 - theme 使用 system / dark / light，language 使用 system / en-US / zh-CN；不认识的值回退 system。
 - log_level 使用 trace / debug / info / warn / error / critical / off；有效配置优先于构建默认值。Debug 开发构建默认 debug，Release / RelWithDebInfo / MinSizeRel 发布构建默认 warn；缺失或值无效时使用该构建默认值。上例显式选择 warn。
