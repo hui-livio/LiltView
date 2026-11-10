@@ -116,6 +116,30 @@ def test_menu(executable, folder):
                 app.wait(timeout=5)
 
 
+def test_dialog_failure(executable, folder):
+    # A private session and explicit invalid driver fail without showing a real dialog.
+    log = folder / "dialog.log"
+    environment = dict(os.environ, SDL_FILE_DIALOG_DRIVER="liltview-invalid-driver")
+    with log.open("w") as output:
+        app = subprocess.Popen([str(executable), "--config-dir", str(folder)], env=environment,
+                               stdout=output, stderr=subprocess.STDOUT)
+        try:
+            service = find_service(app.pid)
+            for count in (1, 2):
+                bus_call(service, "Event", "10", "clicked", "<0>", "0")
+                deadline = time.monotonic() + 5
+                while log.read_text().count("File dialog failed: File dialog driver unsupported") < count:
+                    assert app.poll() is None, log.read_text()
+                    assert time.monotonic() < deadline, log.read_text()
+                    time.sleep(0.02)
+            bus_call(service, "Event", "12", "clicked", "<0>", "0")
+            assert app.wait(timeout=10) == 0, log.read_text()
+        finally:
+            if app.poll() is None:
+                app.terminate()
+                app.wait(timeout=5)
+
+
 def test_navigation(executable, folder):
     # Exercise exported actions all the way through Viewer and actual OpenGL display.
     sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
@@ -630,7 +654,8 @@ def main():
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
          "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
          "animation_app": test_animation_app, "status": test_status, "close": test_close, "chrome": test_chrome,
-         "navigation": test_navigation, "info": test_info, "prefetch": test_prefetch}[case](executable, Path(temporary))
+         "navigation": test_navigation, "info": test_info, "prefetch": test_prefetch,
+         "dialog_failure": test_dialog_failure}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")
 
 
