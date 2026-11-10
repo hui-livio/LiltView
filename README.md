@@ -56,6 +56,8 @@ ctest --test-dir build/msvc-dev-vs2022 --output-on-failure
 # VS 2026 可对应使用 build/msvc-dev-vs2026
 ```
 
+Windows 应用通过 `app/resources/liltview.rc.in` 嵌入现有多尺寸 ICO 和文件 / 产品版本信息。CMake 配置时从 `project(VERSION)` 生成构建目录中的 `app/generated/liltview.rc`；更新版本号或 RC 模板后重新配置即可，无需维护第二份版本号。Windows Release 通过目标属性 `WIN32_EXECUTABLE` 构建为窗口程序，不弹控制台；Debug 保留控制台用于诊断。默认仅有控制台日志 sink，不创建日志文件，`log_level` 只控制过滤等级。
+
 MSVC 的 Core 明确使用 `/std:c17`、`/experimental:c11atomics`，并只对项目自有 C 目标启用私有 C23 写法兼容头；CMake 实际编译 / 链接检查 C11 原子与线程支持，不把 MSVC 声明为完整 C23 编译器。其他工具链保留原 C23 检查；公共 C ABI 不变。Windows 文件适配使用 UTF-8 到 UTF-16 的内部转换和 Win32 文件版本信息，tile 缓存使用删除即回收的临时文件和独立偏移读取。
 
 **当前边界：Windows 使用现有 SDL3 + OpenGL3 后端，D3D11 尚未实现，完整桌面与大图实机验收仍待完成。** UTF-16 Core 路径输入仍返回 `LV_UNSUPPORTED`；Windows 调用方应传绝对 UTF-8 路径。两项依赖 POSIX 特有“目录符号链接后接 `..`”解析语义的回归在 Windows 上明确跳过，其余常规测试保持启用。

@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <array>
 
@@ -60,4 +61,13 @@ TEST_CASE("configured log level controls the spdlog runtime filter", "[logging]"
     CHECK(spdlog::get_level() == spdlog::level::err);
     configure_logging(LogLevel::critical);
     CHECK(spdlog::get_level() == spdlog::level::critical);
+}
+
+TEST_CASE("default logging has only a console sink and no file output", "[logging]")
+{
+    // A log level controls filtering only; it must not enable a file sink.
+    const auto logger = spdlog::default_logger();
+    REQUIRE(logger);
+    REQUIRE(logger->sinks().size() == 1);
+    CHECK(std::dynamic_pointer_cast<spdlog::sinks::stdout_color_sink_mt>(logger->sinks().front()) != nullptr);
 }

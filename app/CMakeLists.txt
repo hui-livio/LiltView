@@ -55,6 +55,22 @@ target_compile_definitions(liltview_fonts PRIVATE LILTVIEW_INSTALLED_FONT_DIR="$
 target_link_libraries(liltview_fonts PUBLIC LiltView::imgui PRIVATE SDL3::SDL3-static)
 liltview_configure_cxx_target(liltview_fonts)
 add_executable(liltview main.cpp application.cpp platform/window_shape.cpp)
+if(WIN32)
+    enable_language(RC)
+    # The RC template and CLI share project(VERSION); absent fourth component is 0.
+    set(LILTVIEW_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
+    if(LILTVIEW_VERSION_TWEAK STREQUAL "")
+        set(LILTVIEW_VERSION_TWEAK 0)
+    endif()
+    set(LILTVIEW_WINDOWS_ICON "${PROJECT_SOURCE_DIR}/assets/icons/liltview-color.ico")
+    configure_file(resources/liltview.rc.in "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc" @ONLY)
+    target_sources(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc")
+    set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc" APPEND PROPERTY
+        OBJECT_DEPENDS "${LILTVIEW_WINDOWS_ICON}")
+    target_compile_definitions(liltview PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:RC>>:_DEBUG>")
+    # Keep Debug's console, but launch Release as a GUI application (also multi-config).
+    set_property(TARGET liltview PROPERTY WIN32_EXECUTABLE "$<CONFIG:Release>")
+endif()
 target_include_directories(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(liltview PRIVATE liltview_cli LiltView::ui LiltView::logging liltview_sdl_platform liltview_fonts spdlog::spdlog)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

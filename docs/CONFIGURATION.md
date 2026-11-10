@@ -44,6 +44,7 @@ disable_rounding: false
 - disable_rounding 默认 false，无边框窗口使用透明圆角；true 使用直角。在“设置 → 外观 → 关闭圆角”切换。原生标题栏下该项禁用但保留选择，最大化 / 全屏自动直角。
 - theme 使用 system / dark / light，language 使用 system / en-US / zh-CN；不认识的值回退 system。
 - log_level 使用 trace / debug / info / warn / error / critical / off；有效配置优先于构建默认值。Debug 开发构建默认 debug，Release / RelWithDebInfo / MinSizeRel 发布构建默认 warn；缺失或值无效时使用该构建默认值。上例显式选择 warn。
+- 默认不输出日志文件，也不自动创建日志目录；目前仅使用 spdlog 控制台 sink，`log_level` 不会开启文件日志。Windows Release 是无控制台的窗口程序，Debug 保留控制台；需要控制台诊断时使用 Debug 构建。
 - 设置读取完成后、创建工作线程前，将 log_level 应用到 spdlog。启动期间读取配置前先使用构建默认值；运行中不监控文件变化，修改后需重启。保存时记录实际使用的等级，因此已有有效配置在更换构建类型后仍然优先。
 - 缺失字段保留默认值。支持单个普通 YAML 映射、注释、引号、UTF-8 BOM、CRLF 及可选的 --- / ... 文档标记；不接受多文档，配置不承诺任意 YAML 高级特性。
 - 空文件使用默认值；文件超过 4096 字节、含 NUL、字段类型错误、未知键或语法错误时使用整份默认配置，不应用已解析的半份结果。
