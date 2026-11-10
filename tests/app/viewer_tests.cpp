@@ -932,6 +932,40 @@ struct InformationGui
 };
 } // namespace
 
+TEST_CASE("rapid bidirectional navigation survives cancelled loads and neighbor prefetch", "[viewer][navigation][rapid]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    InformationGui gui;
+    const auto folder = std::filesystem::canonical(std::filesystem::temp_directory_path()) /
+        ("liltview-rapid-navigation-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    for (unsigned i = 0; i < 12; ++i)
+        liltview::test::checkerboard(folder / (std::to_string(i) + ".png"), i % 2 == 0 ? 2048u : 31u, i % 2 == 0 ? 1536u : 23u,
+                                     7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "0.png");
+    loop.settle_prefetch(viewer);
+    for (unsigned i = 0; i < 1000; ++i)
+    {
+        const auto &navigation = viewer.navigation();
+        const int direction    = (i / 11) % 2 == 0 ? 1 : -1;
+        REQUIRE((direction == 1 ? navigation.can_next : navigation.can_previous));
+        viewer.navigate(direction);
+        viewer.pump();
+        gui.frame(viewer, 1);
+        if (i % 3 == 0)
+            SDL_Delay(1);
+    }
+    loop.settle_prefetch(viewer);
+    CHECK_FALSE(viewer.failed());
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == viewer.navigation().selected_path);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    std::filesystem::remove_all(folder);
+}
+
 TEST_CASE("image details follow visible row bands and retain the prior source after replacement failure",
           "[viewer][image_details]")
 {

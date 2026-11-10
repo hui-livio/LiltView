@@ -114,6 +114,13 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_executable(liltview_animation_render integration/animation_render.cpp)
     target_link_libraries(liltview_animation_render PRIVATE liltview_viewer liltview_sdl_platform)
     liltview_configure_cxx_target(liltview_animation_render)
+    add_executable(liltview_navigation_render integration/navigation_render.cpp)
+    target_link_libraries(liltview_navigation_render PRIVATE liltview_viewer liltview_sdl_platform
+        liltview_jpeg png_static TIFF::tiff)
+    liltview_configure_cxx_target(liltview_navigation_render)
+    add_test(NAME desktop.navigation_render COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_navigation_render>)
+    set_tests_properties(desktop.navigation_render PROPERTIES TIMEOUT 30)
     # Opt-in real-image benchmark; user files are never CTest fixtures.
     add_executable(liltview_viewer_benchmark integration/viewer_benchmark.cpp)
     target_link_libraries(liltview_viewer_benchmark PRIVATE liltview_viewer liltview_sdl_platform)
