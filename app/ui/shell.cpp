@@ -64,6 +64,27 @@ Text image_error_text(lv_error_code code)
     }
 }
 
+// Keep small chrome arcs smooth at fractional UI scales and dense framebuffers.
+// This also applies to the root silhouette drawn inside Begin(). Restore shared
+// ImGui data afterwards so this does not change other windows' drawing policy.
+struct ChromeCurveQuality
+{
+    ImDrawListSharedData &data = *ImGui::GetDrawListSharedData();
+    float saved_error          = data.CircleSegmentMaxError;
+    explicit ChromeCurveQuality(bool rounded)
+    {
+        if (rounded)
+        {
+            const auto density = ImGui::GetIO().DisplayFramebufferScale;
+            data.SetCircleTessellationMaxError(std::min(saved_error, 0.1f / std::max({1.0f, density.x, density.y})));
+        }
+    }
+    ~ChromeCurveQuality()
+    {
+        data.SetCircleTessellationMaxError(saved_error);
+    }
+};
+
 void begin_main_window(bool system_menu, bool custom_titlebar, float radius)
 {
     const auto *viewport = ImGui::GetMainViewport();
@@ -191,7 +212,8 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
 {
     // 按区域组织一帧；窗口、子画布和弹窗的 Begin/End 在对应函数中配对。
     const auto metrics = window_chrome_metrics(ImGui::GetMainViewport()->Size, chrome);
-    MenuAction action  = MenuAction::none;
+    const ChromeCurveQuality quality(metrics.custom && metrics.radius > 0);
+    MenuAction action = MenuAction::none;
     begin_main_window(system_menu, metrics.custom, metrics.radius);
     draw_window_background(metrics);
     if (metrics.custom)

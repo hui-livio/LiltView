@@ -1,9 +1,12 @@
 #include "platform/window_shape.hpp"
 #include "platform/live_resize.hpp"
 #include "platform/window_theme.hpp"
+#include "ui/window_chrome.hpp"
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 #include <windows.h>
 
@@ -14,11 +17,11 @@ namespace
 struct NativeWindow
 {
     SDL_Window *window = nullptr;
-    NativeWindow()
+    explicit NativeWindow(bool transparent = true)
     {
         if (SDL_Init(SDL_INIT_VIDEO))
             window = SDL_CreateWindow("LiltView native frame test", 640, 480,
-                                      SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_TRANSPARENT);
+                                      SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | (transparent ? SDL_WINDOW_TRANSPARENT : 0));
     }
     ~NativeWindow()
     {
@@ -523,5 +526,40 @@ TEST_CASE("Windows native sizing timer updates custom regions before SDL polling
         CHECK(bounds.top == 0);
         CHECK(bounds.right == width);
         CHECK(bounds.bottom == height);
+    }
+}
+
+TEST_CASE("Windows alpha visual regions preserve AA padding without expanding opaque shapes", "[windows][chrome][rounding]")
+{
+    for (const bool transparent : {false, true})
+    {
+        CAPTURE(transparent);
+        NativeWindow native(transparent);
+        REQUIRE(native.window);
+        REQUIRE(SDL_SetWindowBordered(native.window, false));
+        liltview::WindowShape shape;
+        REQUIRE(shape.apply(native.window, 12));
+        int width = 0, height = 0;
+        REQUIRE(SDL_GetWindowSizeInPixels(native.window, &width, &height));
+        const float density = SDL_GetWindowPixelDensity(native.window);
+        const auto spans = liltview::rounded_window_spans(width, height, 12 * density, transparent ? density : 0);
+        const auto region = CreateRectRgn(0, 0, 0, 0);
+        REQUIRE(region);
+        const auto kind = GetWindowRgn(native.hwnd(), region);
+        CHECK(kind == COMPLEXREGION);
+        const int extent = static_cast<int>(std::ceil(12 * density));
+        for (int y = 0; y < extent; ++y)
+            for (int x = 0; x < extent; ++x)
+            {
+                const bool covered = std::any_of(spans.begin(), spans.end(), [&](const liltview::WindowSpan &span)
+                {
+                    return x >= span.x && x < span.x + span.width && y >= span.y && y < span.y + span.height;
+                });
+                CHECK((PtInRegion(region, x, y) != 0) == covered);
+                CHECK((PtInRegion(region, width - 1 - x, y) != 0) == covered);
+                CHECK((PtInRegion(region, x, height - 1 - y) != 0) == covered);
+                CHECK((PtInRegion(region, width - 1 - x, height - 1 - y) != 0) == covered);
+            }
+        DeleteObject(region);
     }
 }

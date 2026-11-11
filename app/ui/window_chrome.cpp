@@ -34,21 +34,25 @@ WindowContentSize window_content_size_for_mode(int width, int height, const Wind
     return {std::max(640, width + delta_width), std::max(480, height + delta_height)};
 }
 
-std::vector<WindowSpan> rounded_window_spans(int width, int height, float radius)
+std::vector<WindowSpan> rounded_window_spans(int width, int height, float radius, float fringe)
 {
     if (width <= 0 || height <= 0)
         return {};
     radius = std::clamp(radius, 0.0f, static_cast<float>(std::min(width, height)) * 0.5f);
     if (radius == 0)
         return {{0, 0, width, height}};
-    const int rows = static_cast<int>(std::ceil(radius));
+    // Input-only/opaque regions use the pixel-center silhouette (fringe=0).
+    // An alpha surface needs a conservative VISUAL region: retain the partial
+    // coverage outside the ideal circle and let the compositor blend it.
+    const float outer_radius = radius + std::max(0.0f, fringe);
+    const int rows           = static_cast<int>(std::ceil(radius));
     std::vector<WindowSpan> spans;
     spans.reserve(static_cast<std::size_t>(rows * 2 + 1));
     for (int y = 0; y < rows; ++y)
     {
-        const float dy = radius - (static_cast<float>(y) + 0.5f);
-        const int inset =
-            std::max(0, static_cast<int>(std::ceil(radius - std::sqrt(std::max(0.0f, radius * radius - dy * dy)) - 0.5f)));
+        const float dy  = radius - (static_cast<float>(y) + 0.5f);
+        const int inset = std::max(
+            0, static_cast<int>(std::ceil(radius - std::sqrt(std::max(0.0f, outer_radius * outer_radius - dy * dy)) - 0.5f)));
         spans.push_back({inset, y, width - 2 * inset, 1});
         spans.push_back({inset, height - 1 - y, width - 2 * inset, 1});
     }
@@ -107,10 +111,10 @@ ImVec4 window_border_color()
     // Use the resolved, applied style so explicit and system-following themes
     // share the same palette, including immediately after a live theme change.
     const auto background = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-    const bool dark = background.x + background.y + background.z < 1.5f;
-    // Cool deep gray on light surfaces; soft light blue on dark surfaces.
-    // Both remain opaque and strongly contrasted even at a 1-DIP thickness.
-    return ImGui::ColorConvertU32ToFloat4(dark ? IM_COL32(143, 185, 227, 255) : IM_COL32(80, 91, 104, 255));
+    const bool dark       = background.x + background.y + background.z < 1.5f;
+    // Palette A: mist silver (#818994) / muted blue (#6F8297). Keep the
+    // 1-DIP outline opaque; only the rounded silhouette has coverage alpha.
+    return ImGui::ColorConvertU32ToFloat4(dark ? IM_COL32(111, 130, 151, 255) : IM_COL32(129, 137, 148, 255));
 }
 
 namespace

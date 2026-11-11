@@ -106,7 +106,7 @@ TEST_CASE("Windows live sizing presents title controls and full chrome at each n
     int frames      = 0;
     const auto draw = [&]
     {
-        if (!graphics.shape->apply(graphics.window, chrome.rounded ? 12.0f : 0.0f))
+        if (!graphics.shape->apply(graphics.window, chrome.rounded ? 12.0f * chrome.scale : 0.0f))
             throw std::runtime_error(SDL_GetError());
         graphics.renderer->begin_frame();
         ImGui_ImplSDL3_NewFrame();
@@ -119,7 +119,8 @@ TEST_CASE("Windows live sizing presents title controls and full chrome at each n
         if (const auto *directory = SDL_getenv("LILTVIEW_TEST_RESIZE_CAPTURE"))
         {
             const auto name = std::string(chrome.dark ? "dark-" : "light-") + (chrome.rounded ? "rounded-" : "square-") +
-                std::to_string(pixels.size.width) + "x" + std::to_string(pixels.size.height) + ".ppm";
+                std::to_string(chrome.scale) + "-" + std::to_string(pixels.size.width) + "x" +
+                std::to_string(pixels.size.height) + ".ppm";
             std::filesystem::create_directories(directory);
             std::ofstream output(std::filesystem::path(directory) / name, std::ios::binary);
             output << "P6\n" << pixels.size.width << ' ' << pixels.size.height << "\n255\n";
@@ -151,68 +152,94 @@ TEST_CASE("Windows live sizing presents title controls and full chrome at each n
     LiveResizeRedraw live(SDL_GetWindowID(graphics.window), draw);
     for (const bool dark : {false, true})
         for (const bool rounded : {true, false})
-            for (const auto size : {SIZE{960, 640}, SIZE{480, 320}, SIZE{800, 600}, SIZE{640, 480}})
-            {
-                CAPTURE(dark, rounded, size.cx, size.cy);
-                chrome.dark    = dark;
-                chrome.rounded = rounded;
-                apply_style(dark, 1);
-                REQUIRE(SDL_SetWindowSize(graphics.window, size.cx, size.cy));
-                const int before    = frames;
-                const auto deadline = SDL_GetTicks() + 2000;
-                // Real SDL native sizing timers, with no outer SDL event pump.
-                while (frames == before && SDL_GetTicks() < deadline)
+            for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+                for (const auto size : {SIZE{960, 640}, SIZE{480, 320}, SIZE{800, 600}, SIZE{640, 480}})
                 {
-                    MSG message{};
-                    if (PeekMessageW(&message, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE))
-                        DispatchMessageW(&message);
+                    CAPTURE(dark, rounded, scale, size.cx, size.cy);
+                    chrome.scale   = scale;
+                    chrome.dark    = dark;
+                    chrome.rounded = rounded;
+                    apply_style(dark, scale);
+                    REQUIRE(SDL_SetWindowSize(graphics.window, size.cx, size.cy));
+                    const int before    = frames;
+                    const auto deadline = SDL_GetTicks() + 2000;
+                    // Real SDL native sizing timers, with no outer SDL event pump.
+                    while (frames == before && SDL_GetTicks() < deadline)
+                    {
+                        MSG message{};
+                        if (PeekMessageW(&message, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE))
+                            DispatchMessageW(&message);
+                        else
+                            SDL_Delay(1);
+                    }
+                    live.rethrow_if_failed();
+                    REQUIRE(frames > before);
+                    int width = 0, height = 0, pixel_width = 0, pixel_height = 0;
+                    REQUIRE(SDL_GetWindowSize(graphics.window, &width, &height));
+                    REQUIRE(SDL_GetWindowSizeInPixels(graphics.window, &pixel_width, &pixel_height));
+                    CHECK(metrics.width == width);
+                    CHECK(metrics.height == height);
+                    REQUIRE(pixels.size.width == static_cast<std::uint32_t>(pixel_width));
+                    REQUIRE(pixels.size.height == static_cast<std::uint32_t>(pixel_height));
+                    const float density  = SDL_GetWindowPixelDensity(graphics.window);
+                    const float center_y = metrics.border + metrics.title_height * 0.5f;
+                    for (unsigned button = 0; button < 3; ++button)
+                    {
+                        CAPTURE(button);
+                        const float center_x =
+                            metrics.controls_left() + (static_cast<float>(button) + 0.5f) * metrics.button_width;
+                        CHECK(glyph_visible(pixels, center_x + (button == 1 ? 5.0f * scale : 0.0f), center_y, density, dark));
+                    }
+                    bool footer_visible = false;
+                    for (int offset = 20; offset <= 70; offset += 5)
+                        footer_visible |= glyph_visible(pixels, metrics.width - static_cast<float>(offset) * scale,
+                                                        metrics.status_top() + metrics.status_height * 0.5f, density, dark);
+                    CHECK(footer_visible); // The right-aligned language label follows the resized bottom edge.
+                    bool title_visible = false;
+                    for (int x = 50; x <= 110; x += 4)
+                        title_visible |= glyph_visible(pixels, static_cast<float>(x) * scale, center_y, density, dark);
+                    CHECK(title_visible); // Scan the text span rather than depending on one font's glyph gaps.
+                    REQUIRE(!pixels.alpha.empty());
+                    // Right and bottom edges must be part of THIS frame, not empty
+                    // alpha left behind by the previous drawable's dimensions.
+                    CHECK(pixels.alpha[static_cast<std::size_t>(pixel_height / 2) * pixel_width + pixel_width - 1] == 255);
+                    CHECK(pixels.alpha[static_cast<std::size_t>(pixel_height - 1) * pixel_width + pixel_width / 2] == 255);
+                    const auto region = CreateRectRgn(0, 0, 0, 0);
+                    REQUIRE(region);
+                    const auto kind = GetWindowRgn(hwnd, region);
+                    RECT bounds{};
+                    GetRgnBox(region, &bounds);
+                    if (rounded)
+                    {
+                        // Framebuffer-only checks miss HRGN clipping: every partially
+                        // covered corner pixel must also survive the native region.
+                        const int extent = static_cast<int>(std::ceil(metrics.radius * density));
+                        for (unsigned corner = 0; corner < 4; ++corner)
+                        {
+                            int partial = 0;
+                            for (int y = 0; y < extent; ++y)
+                                for (int x = 0; x < extent; ++x)
+                                {
+                                    const int px     = (corner & 1) ? pixel_width - 1 - x : x;
+                                    const int py     = (corner & 2) ? pixel_height - 1 - y : y;
+                                    const auto alpha = pixels.alpha[static_cast<std::size_t>(py) * pixel_width + px];
+                                    if (alpha == 0 || alpha == 255)
+                                        continue;
+                                    CAPTURE(corner, px, py, alpha);
+                                    CHECK(PtInRegion(region, px, py));
+                                    ++partial;
+                                }
+                            CHECK(partial > 0);
+                        }
+                    }
+                    DeleteObject(region);
+                    if (rounded)
+                    {
+                        CHECK(kind == COMPLEXREGION);
+                        CHECK(bounds.right == pixel_width);
+                        CHECK(bounds.bottom == pixel_height);
+                    }
                     else
-                        SDL_Delay(1);
+                        CHECK(kind == ERROR);
                 }
-                live.rethrow_if_failed();
-                REQUIRE(frames > before);
-                int width = 0, height = 0, pixel_width = 0, pixel_height = 0;
-                REQUIRE(SDL_GetWindowSize(graphics.window, &width, &height));
-                REQUIRE(SDL_GetWindowSizeInPixels(graphics.window, &pixel_width, &pixel_height));
-                CHECK(metrics.width == width);
-                CHECK(metrics.height == height);
-                REQUIRE(pixels.size.width == static_cast<std::uint32_t>(pixel_width));
-                REQUIRE(pixels.size.height == static_cast<std::uint32_t>(pixel_height));
-                const float density  = SDL_GetWindowPixelDensity(graphics.window);
-                const float center_y = metrics.border + metrics.title_height * 0.5f;
-                for (unsigned button = 0; button < 3; ++button)
-                {
-                    CAPTURE(button);
-                    const float center_x = metrics.controls_left() + (static_cast<float>(button) + 0.5f) * metrics.button_width;
-                    CHECK(glyph_visible(pixels, center_x + (button == 1 ? 5.0f : 0.0f), center_y, density, dark));
-                }
-                bool footer_visible = false;
-                for (int offset = 20; offset <= 70; offset += 5)
-                    footer_visible |= glyph_visible(pixels, metrics.width - static_cast<float>(offset),
-                                                    metrics.status_top() + metrics.status_height * 0.5f, density, dark);
-                CHECK(footer_visible); // The right-aligned language label follows the resized bottom edge.
-                bool title_visible = false;
-                for (int x = 50; x <= 110; x += 4)
-                    title_visible |= glyph_visible(pixels, static_cast<float>(x), center_y, density, dark);
-                CHECK(title_visible); // Scan the text span rather than depending on one font's glyph gaps.
-                REQUIRE(!pixels.alpha.empty());
-                // Right and bottom edges must be part of THIS frame, not empty
-                // alpha left behind by the previous drawable's dimensions.
-                CHECK(pixels.alpha[static_cast<std::size_t>(pixel_height / 2) * pixel_width + pixel_width - 1] == 255);
-                CHECK(pixels.alpha[static_cast<std::size_t>(pixel_height - 1) * pixel_width + pixel_width / 2] == 255);
-                const auto region = CreateRectRgn(0, 0, 0, 0);
-                REQUIRE(region);
-                const auto kind = GetWindowRgn(hwnd, region);
-                RECT bounds{};
-                GetRgnBox(region, &bounds);
-                DeleteObject(region);
-                if (rounded)
-                {
-                    CHECK(kind == COMPLEXREGION);
-                    CHECK(bounds.right == pixel_width);
-                    CHECK(bounds.bottom == pixel_height);
-                }
-                else
-                    CHECK(kind == ERROR);
-            }
 }

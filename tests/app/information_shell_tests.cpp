@@ -219,7 +219,7 @@ TEST_CASE("rounded shell corners have only border-colored antialiasing without b
     Shell shell;
     for (const bool dark : {false, true})
         for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
-            for (const float density : {1.0f, 2.0f})
+            for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
             {
                 CAPTURE(dark, scale, density);
                 apply_style(dark, scale);
@@ -233,8 +233,10 @@ TEST_CASE("rounded shell corners have only border-colored antialiasing without b
                 chrome.scale       = scale;
                 chrome.line_height = ImGui::GetTextLineHeight();
                 const auto metrics = window_chrome_metrics(io.DisplaySize, chrome);
-                const auto menu = build_menu(Settings{}, Language::english, true, false, true, true, false, false, true, true);
+                const auto menu    = build_menu(Settings{}, Language::english, true, false, true, true, false, false, true, true);
+                const float saved_error = ImGui::GetDrawListSharedData()->CircleSegmentMaxError;
                 CHECK(shell.draw(Language::english, menu, false, renderer, {}, viewer, chrome) == MenuAction::none);
+                CHECK(ImGui::GetDrawListSharedData()->CircleSegmentMaxError == saved_error);
                 ImGui::Render();
                 const auto &data = *ImGui::GetDrawData();
                 const auto border = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(window_border_color()));
@@ -268,6 +270,17 @@ TEST_CASE("rounded shell corners have only border-colored antialiasing without b
                             ++checked;
                         }
                     CHECK(checked > 0);
+                    // A coarse arc can be antialiased yet still visibly faceted.
+                    // Its half-coverage contour must follow the ideal circle to
+                    // within 0.12 framebuffer pixels (not 0.12 logical units).
+                    for (int step = 1; step < 16; ++step)
+                    {
+                        const float angle = static_cast<float>(step) * 1.570796327f / 16;
+                        const auto edge   = sample(metrics.radius * (1 - std::cos(angle)) + 0.0001f,
+                                                   metrics.radius * (1 - std::sin(angle)) + 0.0002f);
+                        CAPTURE(step, edge.w);
+                        CHECK(std::abs(edge.w - 0.5f) < 0.12f / density);
+                    }
                 }
             }
 }

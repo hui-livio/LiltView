@@ -2,6 +2,7 @@
 #include "ui/window_chrome.hpp"
 
 #include <algorithm>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 
@@ -171,7 +172,7 @@ struct TitleContext
 };
 } // namespace
 
-TEST_CASE("window borders follow the active theme with strong contrast against every adjacent surface", "[chrome][theme]")
+TEST_CASE("window borders use palette A with the designed contrast against adjacent surfaces", "[chrome][theme]")
 {
     TitleContext context;
     const auto luminance = [](ImVec4 color)
@@ -182,51 +183,56 @@ TEST_CASE("window borders follow the active theme with strong contrast against e
         };
         return 0.2126 * linear(color.x) + 0.7152 * linear(color.y) + 0.0722 * linear(color.z);
     };
-    ImVec4 light_border{};
     for (const bool dark : {false, true, false})
         for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
         {
             CAPTURE(dark, scale);
             apply_style(dark, scale);
-            const auto color = window_border_color();
-            const auto &style = ImGui::GetStyle();
+            const auto color    = window_border_color();
+            const auto &style   = ImGui::GetStyle();
             const double border = luminance(color);
             CHECK(color.w == 1);
+            CHECK(ImGui::ColorConvertFloat4ToU32(color) == (dark ? IM_COL32(111, 130, 151, 255) : IM_COL32(129, 137, 148, 255)));
+            // Palette A deliberately softens this non-text outline. Light
+            // surfaces retain >=3:1 except the darker menu strip (>=2.5:1);
+            // dark surfaces retain >=4:1. This is not a text contrast claim.
             // Test the quantized color actually sent to the GPU as well.
             const auto packed = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(color));
-            for (const auto background : {style.Colors[ImGuiCol_WindowBg], style.Colors[ImGuiCol_ChildBg],
-                                          style.Colors[ImGuiCol_MenuBarBg],
-                                          dark ? ImVec4{0.10f, 0.12f, 0.16f, 1} : ImVec4{0.95f, 0.96f, 0.98f, 1}})
+            const std::array surfaces{style.Colors[ImGuiCol_WindowBg], style.Colors[ImGuiCol_ChildBg],
+                                      style.Colors[ImGuiCol_MenuBarBg],
+                                      dark ? ImVec4{0.10f, 0.12f, 0.16f, 1} : ImVec4{0.95f, 0.96f, 0.98f, 1}};
+            for (std::size_t index = 0; index < surfaces.size(); ++index)
             {
-                const double surface = luminance(background);
-                CHECK((std::max(border, surface) + 0.05) / (std::min(border, surface) + 0.05) >= 4.5);
+                CAPTURE(index);
+                const double minimum = dark ? 4.0 : (index == 2 ? 2.5 : 3.0);
+                const double surface = luminance(surfaces[index]);
+                CHECK((std::max(border, surface) + 0.05) / (std::min(border, surface) + 0.05) >= minimum);
                 const double quantized = luminance(packed);
-                CHECK((std::max(quantized, surface) + 0.05) / (std::min(quantized, surface) + 0.05) >= 4.5);
+                CHECK((std::max(quantized, surface) + 0.05) / (std::min(quantized, surface) + 0.05) >= minimum);
                 CHECK((dark ? border > surface : border < surface));
             }
             if (dark)
             {
-                CHECK(border > luminance(light_border));
-                CHECK(color.z - color.x > 0.25f); // Light blue, not a neutral gray or white.
+                CHECK(color.z - color.x > 0.15f); // Muted blue, not a neutral gray or white.
                 CHECK(color.y > color.x);
             }
             else
             {
-                light_border = color;
-                CHECK(color.x < 0.4f); // Deep gray, not a pale low-contrast silver.
+                CHECK(color.x > 0.49f); // Silver-gray rather than the old heavy graphite.
+                CHECK(color.x < 0.55f);
                 CHECK(color.z - color.x < 0.15f);
             }
         }
     // Theme selection comes from the current background, not a stale enum or
     // the foreground text color, which should not tint the chrome independently.
-    const auto original = window_border_color();
+    const auto original                     = window_border_color();
     ImGui::GetStyle().Colors[ImGuiCol_Text] = {0.12f, 0.08f, 0.04f, 0.5f};
     CHECK(window_border_color().x == original.x);
     CHECK(window_border_color().w == 1);
     ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = {0.075f, 0.085f, 0.10f, 0.2f};
-    const auto blue = window_border_color();
-    CHECK(blue.x > original.x);
-    CHECK(blue.z - blue.x > 0.25f);
+    const auto blue                             = window_border_color();
+    CHECK(blue.x < original.x);
+    CHECK(blue.z - blue.x > 0.15f);
     CHECK(blue.w == 1);
     ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = {0.94f, 0.94f, 0.94f, 1};
     CHECK(window_border_color().x == original.x);
@@ -312,4 +318,45 @@ TEST_CASE("decoration switches preserve viewport dimensions without requesting p
     const auto minimum     = window_content_size_for_mode(640, 480, custom, native);
     CHECK(minimum.width >= 640);
     CHECK(minimum.height >= 480);
+}
+
+TEST_CASE("alpha visual regions retain AA coverage without changing pixel-center input regions", "[chrome][rounding]")
+{
+    for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+        {
+            CAPTURE(density, scale);
+            const float radius  = 12 * scale * density;
+            const auto input    = rounded_window_spans(160, 100, radius);
+            const auto visual   = rounded_window_spans(160, 100, radius, density);
+            const auto contains = [](const auto &spans, int x, int y)
+            {
+                return std::any_of(spans.begin(), spans.end(), [&](const WindowSpan &span)
+                                   { return x >= span.x && x < span.x + span.width && y >= span.y && y < span.y + span.height; });
+            };
+            CHECK(visual.size() == input.size());
+            CHECK_FALSE(contains(visual, 0, 0));
+            int fringe = 0;
+            for (int y = 0; y < static_cast<int>(std::ceil(radius)); ++y)
+                for (int x = 0; x < static_cast<int>(std::ceil(radius)); ++x)
+                {
+                    const bool center = contains(input, x, y), padded = contains(visual, x, y);
+                    REQUIRE((!center || padded));
+                    CHECK(padded == contains(visual, 159 - x, y));
+                    CHECK(padded == contains(visual, x, 99 - y));
+                    if (padded && !center)
+                        ++fringe;
+                    const float distance =
+                        std::hypot(radius - (static_cast<float>(x) + 0.5f), radius - (static_cast<float>(y) + 0.5f));
+                    if (distance <= radius + 0.5f * density)
+                        REQUIRE(padded); // All possible ImGui AA support survives.
+                }
+            CHECK(fringe > 0);
+        }
+    CHECK(rounded_window_spans(0, 100, 12, 1).empty());
+    CHECK(rounded_window_spans(160, 0, 12, 1).empty());
+    const auto square = rounded_window_spans(160, 100, 0, 1);
+    REQUIRE(square.size() == 1);
+    CHECK(square[0].width == 160);
+    CHECK(square[0].height == 100);
 }

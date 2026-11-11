@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
     #include <windows.h>
+
     #include <commctrl.h>
 #endif
 
@@ -237,10 +238,16 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
     int native_width = 0, native_height = 0;
     if (!SDL_GetWindowSizeInPixels(window, &native_width, &native_height))
         return false;
-    const auto spans  = rounded_window_spans(native_width, native_height, radius * SDL_GetWindowPixelDensity(window));
-    const auto region = CreateRectRgn(0, 0, 0, 0);
-    const auto strip  = CreateRectRgn(0, 0, 0, 0);
-    bool success      = region && strip;
+    const float density = SDL_GetWindowPixelDensity(window);
+    // HRGN is a binary VISUAL clip, not an alpha mask. A pixel-center circle
+    // cuts away the renderer's partial-alpha edge and reintroduces stair steps.
+    // Keep one logical AA fringe on alpha-capable surfaces; DWM supplies the
+    // visible coverage. Opaque surfaces must retain their exact binary shape.
+    const float fringe = (SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) ? density : 0.0f;
+    const auto spans   = rounded_window_spans(native_width, native_height, radius * density, fringe);
+    const auto region  = CreateRectRgn(0, 0, 0, 0);
+    const auto strip   = CreateRectRgn(0, 0, 0, 0);
+    bool success       = region && strip;
     if (success)
     {
         for (const auto &span : spans)
