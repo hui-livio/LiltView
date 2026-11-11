@@ -70,6 +70,8 @@ Linux 使用静态 SDL3 和 codec，仍需系统 OpenGL、Fontconfig 及窗口�
 python3 scripts/register_desktop.py
 ```
 
+文件选择器通过 SDL 调用桌面 Portal，需要 `xdg-desktop-portal` 和提供 FileChooser 的桌面后端（KDE 为 `xdg-desktop-portal-kde`）；也可用 Zenity 作为备用后端。如果无法打开，查看日志中的具体 SDL 错误，并检查用户会话的 Portal 服务。KDE 可执行 `systemctl --user restart plasma-xdg-desktop-portal-kde.service xdg-desktop-portal.service` 后重启应用。
+
 应用 ID 为 `io.github.hui_livio.LiltView`。安装 / pacman / paru 部署见[打包说明](packaging/README.md)和[Arch 指南](packaging/arch/README.md)。
 
 ## 文档入口

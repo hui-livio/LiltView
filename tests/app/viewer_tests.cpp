@@ -27,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace
 {
@@ -63,6 +64,10 @@ public:
     Size frame_size{128, 96};
     std::optional<std::array<std::uint8_t, 4>> last_drawn_pixel;
     std::vector<std::array<std::uint8_t, 4>> uploaded_first_pixels;
+    // Opt-in deferred submission catches images destroyed after Viewer::draw()
+    // but before the backend consumes the frame, without a real GPU/window.
+    bool record_draws = false;
+    std::vector<Image> frame_images;
 
     bool upload_ready() override
     {
@@ -129,16 +134,27 @@ public:
     void add_image(ImDrawList *, Image image, Point, Point, Point, Point) override
     {
         last_drawn_pixel = textures.at(image.slot).first_pixel;
+        if (record_draws)
+            frame_images.push_back(image);
     }
     void add_image_quad(ImDrawList *, Image image, const std::array<Point, 4> &, const std::array<Point, 4> &) override
     {
         last_drawn_pixel = textures.at(image.slot).first_pixel;
+        if (record_draws)
+            frame_images.push_back(image);
     }
     void begin_frame() override
     {
+        frame_images.clear();
     }
     void render_frame(ImDrawData *) override
     {
+        for (const auto image : frame_images)
+        {
+            INFO("Submitted image slot: " << image.slot);
+            CHECK(textures.contains(image.slot));
+        }
+        frame_images.clear();
     }
     void present() override
     {
@@ -918,7 +934,7 @@ struct InformationGui
     {
         ImGui::DestroyContext();
     }
-    void frame(liltview::Viewer &viewer, float density)
+    void begin_frame(liltview::Viewer &viewer, float density)
     {
         ImGui::GetIO().DisplayFramebufferScale = {density, density};
         ImGui::NewFrame();
@@ -927,10 +943,191 @@ struct InformationGui
         ImGui::Begin("information_camera", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
         viewer.draw({0, 0}, {320, 240}, density, false);
         ImGui::End();
+    }
+    void frame(liltview::Viewer &viewer, float density)
+    {
+        begin_frame(viewer, density);
         ImGui::Render();
     }
 };
+
+// Real decoder/navigation with a deferred test backend. Delaying one upload
+// exhausts pump's 4 ms budget, making a partial scene deterministic on MSVC too.
+struct ProgressiveNavigation
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    InformationGui gui;
+    DetailsDirectory directory;
+    liltview::Viewer viewer{renderer};
+    std::filesystem::path target;
+
+    ProgressiveNavigation(const char *extension, bool cached, int direction)
+    {
+        renderer.image_budget        = (cached ? 4ULL : 128ULL) * 1024 * 1024;
+        renderer.strict_image_budget = true;
+        renderer.record_draws        = true;
+        const auto first             = directory.path / (std::string("1.") + extension);
+        const auto middle            = directory.path / (std::string("2.") + extension);
+        const auto last              = directory.path / (std::string("3.") + extension);
+        liltview::test::checkerboard(first, 64, 64, 7);
+        liltview::test::checkerboard(middle, 1024, 4096, 7);
+        liltview::test::checkerboard(last, 64, 64, 7);
+        target = direction > 0 ? last : first;
+        viewer.open(direction > 0 ? first : last);
+        loop.settle_prefetch(viewer);
+        REQUIRE_FALSE(viewer.failed());
+        renderer.upload_delay_ms = 5;
+        viewer.navigate(direction);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        for (;;)
+        {
+            viewer.pump();
+            REQUIRE_FALSE(viewer.failed());
+            const auto details = viewer.image_details();
+            if (details && details->partial)
+            {
+                REQUIRE(details->path == middle);
+                break;
+            }
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            SDL_Delay(1);
+        }
+    }
+
+    std::vector<TestRenderer::Image> draw()
+    {
+        renderer.begin_frame();
+        gui.begin_frame(viewer, 1);
+        REQUIRE_FALSE(renderer.frame_images.empty());
+        return renderer.frame_images;
+    }
+    void submit()
+    {
+        ImGui::Render();
+        renderer.render_frame(ImGui::GetDrawData());
+        renderer.present();
+    }
+    void check_images(const std::vector<TestRenderer::Image> &images, bool live)
+    {
+        for (const auto image : images)
+        {
+            INFO("Progressive image slot: " << image.slot);
+            CHECK(renderer.textures.contains(image.slot) == live);
+        }
+    }
+    void finish()
+    {
+        renderer.upload_delay_ms = 0;
+        loop.settle_prefetch(viewer);
+        REQUIRE_FALSE(viewer.failed());
+        REQUIRE(viewer.image_details());
+        CHECK(viewer.image_details()->path == target);
+        CHECK(renderer.capabilities().image_bytes == liltview::render::image_storage_bytes({{64, 64}, true}));
+        CHECK(renderer.budget_rejections == 0);
+        viewer.shutdown();
+        CHECK(renderer.textures.empty());
+    }
+};
 } // namespace
+
+TEST_CASE("canvas navigation retains progressive textures until frame submission", "[viewer][navigation][submission]")
+{
+    for (const auto *extension : {"png", "jpg"})
+        for (const bool cached : {false, true})
+            for (const int direction : {1, -1})
+            {
+                CAPTURE(extension, cached, direction);
+                ProgressiveNavigation test(extension, cached, direction);
+                const auto images = test.draw();
+                // Shell builds draw commands before Application dispatches the action.
+                // Multiple actions must not swap the retired scene back into deletion.
+                for (const int step : {direction, -direction, direction})
+                {
+                    test.viewer.navigate(step);
+                    test.check_images(images, true);
+                }
+                test.submit(); // The backend must still resolve every queued texture.
+                test.check_images(images, true);
+                test.renderer.upload_delay_ms = 0;
+                test.viewer.pump();
+                test.check_images(images, false);
+                test.finish();
+            }
+}
+
+TEST_CASE("keyboard navigation releases retired progressive textures before the next frame", "[viewer][navigation][submission]")
+{
+    for (const auto *extension : {"png", "jpg"})
+        for (const bool cached : {false, true})
+            for (const int direction : {1, -1})
+            {
+                CAPTURE(extension, cached, direction);
+                ProgressiveNavigation test(extension, cached, direction);
+                const auto images = test.draw();
+                test.submit();
+                // SDL keyboard events navigate between frames, before the next pump.
+                test.viewer.navigate(direction);
+                test.renderer.upload_delay_ms = 0;
+                test.viewer.pump();
+                test.check_images(images, false);
+                test.draw();
+                test.submit();
+                test.finish();
+            }
+}
+
+TEST_CASE("shutdown releases retired progressive textures without another pump", "[viewer][navigation][submission][shutdown]")
+{
+    for (const auto *extension : {"png", "jpg"})
+        for (const bool cached : {false, true})
+        {
+            CAPTURE(extension, cached);
+            ProgressiveNavigation test(extension, cached, 1);
+            const auto images = test.draw();
+            test.viewer.navigate(1);
+            test.check_images(images, true);
+            test.submit();
+            test.viewer.shutdown();
+            CHECK(test.renderer.textures.empty());
+            CHECK(test.renderer.capabilities().image_bytes == 0);
+            test.viewer.shutdown(); // Cleanup remains idempotent.
+        }
+}
+
+TEST_CASE("rapid bidirectional navigation survives cancelled loads and neighbor prefetch", "[viewer][navigation][rapid]")
+{
+    EventLoop loop;
+    TestRenderer renderer;
+    InformationGui gui;
+    const auto folder = std::filesystem::canonical(std::filesystem::temp_directory_path()) /
+        ("liltview-rapid-navigation-" + std::to_string(SDL_GetPerformanceCounter()));
+    std::filesystem::create_directories(folder);
+    for (unsigned i = 0; i < 12; ++i)
+        liltview::test::checkerboard(folder / (std::to_string(i) + ".png"), i % 2 == 0 ? 2048u : 31u, i % 2 == 0 ? 1536u : 23u,
+                                     7);
+    liltview::Viewer viewer(renderer);
+    viewer.open(folder / "0.png");
+    loop.settle_prefetch(viewer);
+    for (unsigned i = 0; i < 1000; ++i)
+    {
+        const auto &navigation = viewer.navigation();
+        const int direction    = (i / 11) % 2 == 0 ? 1 : -1;
+        REQUIRE((direction == 1 ? navigation.can_next : navigation.can_previous));
+        viewer.navigate(direction);
+        viewer.pump();
+        gui.frame(viewer, 1);
+        if (i % 3 == 0)
+            SDL_Delay(1);
+    }
+    loop.settle_prefetch(viewer);
+    CHECK_FALSE(viewer.failed());
+    REQUIRE(viewer.image_details());
+    CHECK(viewer.image_details()->path == viewer.navigation().selected_path);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    std::filesystem::remove_all(folder);
+}
 
 TEST_CASE("image details follow visible row bands and retain the prior source after replacement failure",
           "[viewer][image_details]")

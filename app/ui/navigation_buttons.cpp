@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <imgui_internal.h>
 
 namespace liltview
 {
@@ -66,8 +67,9 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
     const ImVec2 size{rect.max.x - rect.min.x, rect.max.y - rect.min.y};
     ImGui::SetCursorScreenPos(rect.min);
     ImGui::BeginDisabled(!enabled);
-    const bool pressed      = ImGui::InvisibleButton(id, size);
-    const bool hovered      = ImGui::IsItemHovered();
+    // Arrow keys belong to image shortcuts; clicking an overlay must not leave nav focus behind.
+    const bool pressed      = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_NoNavFocus);
+    const bool hovered      = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
     const bool held         = ImGui::IsItemActive();
     const ImVec4 background = held ? ImVec4{0.24f, 0.30f, 0.38f, 0.92f} :
         hovered                    ? ImVec4{0.20f, 0.24f, 0.29f, 0.82f} :
@@ -84,7 +86,7 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
                          {center.x - sign * half_width, center.y + half_height}};
     const float thickness = std::min({2 * scale, size.x / 8, size.y / 8});
     draw->AddPolyline(arrow, 3, ImGui::GetColorU32(ImVec4{1, 1, 1, 0.95f}), ImDrawFlags_None, thickness);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_NoNavOverride))
         ImGui::SetTooltip("%s", translate(language, previous ? Text::previous : Text::next));
     ImGui::EndDisabled();
     return pressed && enabled ? (previous ? MenuAction::previous : MenuAction::next) : MenuAction::none;

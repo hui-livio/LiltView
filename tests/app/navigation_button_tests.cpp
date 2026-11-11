@@ -14,6 +14,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <imgui_internal.h>
 
 #include <limits>
 #include <utility>
@@ -50,6 +51,7 @@ struct Context
     {
         ImGui::CreateContext();
         auto &io       = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.DisplaySize = {960, 640};
         io.DeltaTime   = 1.0f / 60;
         io.IniFilename = nullptr;
@@ -226,6 +228,87 @@ TEST_CASE("canvas buttons emit previous and next on release with stable translat
         io.AddMouseButtonEvent(0, false);
         CHECK(context.frame(value, Language::chinese) == (previous ? MenuAction::previous : MenuAction::next));
         CHECK(context.frame(value) == MenuAction::none);
+    }
+}
+
+TEST_CASE("zoom shortcuts do not focus canvas arrows or show their tooltips", "[navigation_buttons][ui][shortcut]")
+{
+    for (const bool previous : {true, false})
+    {
+        Context context;
+        const auto value = snapshot(2, 3);
+        const auto point = center(previous ? navigation_button_layout(Context::min, Context::max, 1).previous :
+                                             navigation_button_layout(Context::min, Context::max, 1).next);
+        context.frame(value);
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent(point.x, point.y);
+        io.AddMouseButtonEvent(0, true);
+        context.frame(value);
+        io.AddMouseButtonEvent(0, false);
+        CHECK(context.frame(value) == (previous ? MenuAction::previous : MenuAction::next));
+        io.AddMousePosEvent(480, 320);
+        context.frame(value);
+        CHECK(ImGui::GetCurrentContext()->NavId == 0);
+        for (const auto key : {ImGuiKey_UpArrow, ImGuiKey_DownArrow})
+        {
+            io.AddKeyEvent(ImGuiMod_Ctrl, true);
+            io.AddKeyEvent(key, true);
+            CHECK(context.frame(value) == MenuAction::none);
+            CHECK(context.frame(value) == MenuAction::none);
+            for (const auto *tooltip : ImGui::GetCurrentContext()->Windows)
+                if (tooltip->Flags & ImGuiWindowFlags_Tooltip)
+                    CHECK_FALSE(tooltip->Active);
+            CHECK(ImGui::GetCurrentContext()->NavId == 0);
+            io.AddKeyEvent(key, false);
+            io.AddKeyEvent(ImGuiMod_Ctrl, false);
+            context.frame(value);
+        }
+        io.AddMousePosEvent(point.x, point.y);
+        context.frame(value);
+        bool hovered_tooltip = false;
+        for (const auto *tooltip : ImGui::GetCurrentContext()->Windows)
+            hovered_tooltip |= (tooltip->Flags & ImGuiWindowFlags_Tooltip) && tooltip->Active;
+        CHECK(hovered_tooltip);
+    }
+}
+
+TEST_CASE("canvas arrow clicks preserve left and right shortcut repeats", "[navigation_buttons][ui][shortcut]")
+{
+    for (const bool previous : {true, false})
+    {
+        CAPTURE(previous);
+        Context context;
+        const auto value  = snapshot(2, 3);
+        const auto layout = navigation_button_layout(Context::min, Context::max, 1);
+        const auto point  = center(previous ? layout.previous : layout.next);
+        context.frame(value);
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent(point.x, point.y);
+        io.AddMouseButtonEvent(0, true);
+        context.frame(value);
+        io.AddMouseButtonEvent(0, false);
+        REQUIRE(context.frame(value) == (previous ? MenuAction::previous : MenuAction::next));
+        io.AddMousePosEvent(480, 320);
+        context.frame(value);
+
+        const auto menu = build_menu(Settings{}, Language::english, true, false, true, true, value.can_previous, value.can_next);
+        for (const auto key : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+        {
+            CAPTURE(key);
+            io.AddKeyEvent(key, true);
+            for (unsigned frame = 0; frame < 3; ++frame)
+            {
+                CHECK(context.frame(value) == MenuAction::none);
+                CHECK(ImGui::GetCurrentContext()->NavId == 0);
+                CHECK_FALSE(io.WantTextInput);
+            }
+            const bool left = key == ImGuiKey_LeftArrow;
+            for (const bool repeat : {false, true})
+                CHECK(menu_action_for_input(menu, {left ? "Left" : "Right"}, repeat, {io.WantTextInput, false, false}) ==
+                      (left ? MenuAction::previous : MenuAction::next));
+            io.AddKeyEvent(key, false);
+            context.frame(value);
+        }
     }
 }
 
