@@ -61,20 +61,20 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
     catch_discover_tests(liltview_core_tests TEST_PREFIX "core."
         PROPERTIES TIMEOUT 30 SKIP_REGULAR_EXPRESSION "${liltview_skip_marker}")
     if(TARGET LiltView::app_model)
-        add_executable(liltview_app_tests app/window_chrome_tests.cpp app/image_details_tests.cpp app/information_shell_tests.cpp app/navigation_button_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
+        add_executable(liltview_app_tests app/live_resize_tests.cpp app/window_chrome_tests.cpp app/image_details_tests.cpp app/information_shell_tests.cpp app/navigation_button_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
         target_link_libraries(liltview_app_tests PRIVATE liltview_cli LiltView::logging spdlog::spdlog LiltView::app_model
-            liltview_fonts LiltView::renderer LiltView::ui SDL3::SDL3-static liltview_test_main)
+            liltview_fonts LiltView::renderer LiltView::ui liltview_sdl_platform SDL3::SDL3-static liltview_test_main)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
         liltview_configure_cxx_target(liltview_app_tests)
         if(WIN32)
-            target_sources(liltview_app_tests PRIVATE app/windows_resources_tests.cpp app/windows_window_tests.cpp
+            target_sources(liltview_app_tests PRIVATE app/windows_resources_tests.cpp app/windows_window_tests.cpp app/windows_live_resize_tests.cpp
                 "${PROJECT_SOURCE_DIR}/app/platform/window_shape.cpp" "${PROJECT_SOURCE_DIR}/app/platform/window_theme.cpp")
             target_include_directories(liltview_app_tests PRIVATE "${PROJECT_BINARY_DIR}/app/generated")
             target_compile_definitions(liltview_app_tests PRIVATE
                 LILTVIEW_TEST_APP_PATH="$<TARGET_FILE:liltview>"
                 LILTVIEW_TEST_GUI=$<IF:$<CONFIG:Release>,1,0>
                 LILTVIEW_TEST_DEBUG=$<IF:$<CONFIG:Debug>,1,0>)
-            target_link_libraries(liltview_app_tests PRIVATE version dwmapi)
+            target_link_libraries(liltview_app_tests PRIVATE version dwmapi comctl32)
             add_dependencies(liltview_app_tests liltview)
         endif()
         catch_discover_tests(liltview_app_tests TEST_PREFIX "app."

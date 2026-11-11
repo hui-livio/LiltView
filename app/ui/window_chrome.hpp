@@ -66,10 +66,11 @@ struct WindowSpan
 std::vector<WindowSpan> rounded_window_spans(int width, int height, float radius);
 bool window_chrome_contains(const WindowChromeMetrics &, ImVec2 point);
 WindowHit window_chrome_hit(const WindowChromeMetrics &, ImVec2 point);
-ImVec4 window_border_color(bool dark);
+ImVec4 window_border_color();
 MenuAction draw_window_titlebar(const WindowChromeMetrics &, const WindowChromeState &, Language, render::Renderer &,
                                 render::Image icon);
-void draw_window_border(const WindowChromeMetrics &, bool dark);
+void draw_window_background(const WindowChromeMetrics &);
+void draw_window_border(const WindowChromeMetrics &);
 } // namespace liltview
 
 #endif

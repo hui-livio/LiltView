@@ -2,6 +2,7 @@
 #include <SDL3/SDL_opengl.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <imgui.h>
@@ -236,6 +237,32 @@ void verify_magnification(liltview::render::Renderer &renderer)
     renderer.destroy_image(image);
 }
 
+void verify_opaque_background(liltview::render::Renderer &renderer, SDL_Window *window)
+{
+    check((SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) == 0, "Opaque clear test needs an opaque surface");
+    check(SDL_SetWindowBordered(window, false), SDL_GetError());
+    for (const std::array<float, 3> color : {std::array<float, 3>{0.08f, 0.31f, 0.68f}, {0.38f, 0.70f, 1.0f}})
+    {
+        renderer.set_opaque_background(color);
+        renderer.begin_frame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        // Leave the top-left pixel untouched to inspect the RGB/alpha clear.
+        ImGui::GetBackgroundDrawList()->AddRectFilled({20, 20}, {40, 40}, IM_COL32_WHITE);
+        ImGui::Render();
+        renderer.render_frame(ImGui::GetDrawData());
+        const auto frame = renderer.readback();
+        check(frame.rgb.size() >= 3 && !frame.alpha.empty(), "Missing opaque clear readback");
+        for (unsigned channel = 0; channel < 3; ++channel)
+            check(std::abs(static_cast<int>(frame.rgb[channel]) - static_cast<int>(std::lround(color[channel] * 255))) <= 1,
+                  "Opaque borderless clear did not use the supplied border color");
+        check(frame.alpha[0] == 0, "Opaque clear lost rounded-corner diagnostic alpha");
+        renderer.present();
+    }
+    check(SDL_SetWindowBordered(window, true), SDL_GetError());
+    std::puts("PASS opaque borderless clear follows application color changes without a background halo");
+}
+
 void verify_decoration_switch(liltview::render::Renderer &renderer, SDL_Window *window)
 {
     using namespace liltview::render;
@@ -295,6 +322,7 @@ int main(int argc, char **)
         verify_magnification(*renderer);
         verify_staging(*renderer, argc == 1);
         verify_decoration_switch(*renderer, window);
+        verify_opaque_background(*renderer, window);
         renderer.reset();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();

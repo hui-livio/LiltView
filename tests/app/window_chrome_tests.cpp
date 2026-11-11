@@ -17,7 +17,7 @@ TEST_CASE("borderless hit testing supports every resize edge and corner at displ
         state.line_height = 17 * scale;
         const auto m      = window_chrome_metrics({1120, 760}, state);
         CHECK(m.custom);
-        CHECK(m.border == 2 * scale);
+        CHECK(m.border == scale);
         CHECK(m.title_height == 36 * scale);
         CHECK(window_chrome_hit(m, {m.radius - 1, m.radius - 1}) == WindowHit::top_left);
         CHECK(window_chrome_hit(m, {1, 1}) == WindowHit::normal);
@@ -77,7 +77,7 @@ TEST_CASE("maximized borderless windows remain draggable but cannot be edge resi
     WindowChromeState state;
     state.maximized = true;
     const auto m    = window_chrome_metrics({1120, 760}, state);
-    CHECK(window_chrome_hit(m, {1, 1}) == WindowHit::normal);
+    CHECK(window_chrome_hit(m, {m.border * 0.5f, m.border * 0.5f}) == WindowHit::normal);
     CHECK(window_chrome_hit(m, {1, 380}) == WindowHit::normal);
     CHECK(window_chrome_hit(m, {1119, 759}) == WindowHit::normal);
     CHECK(window_chrome_hit(m, {100, 20}) == WindowHit::drag);
@@ -85,25 +85,6 @@ TEST_CASE("maximized borderless windows remain draggable but cannot be edge resi
     CHECK(window_chrome_hit(m, {1050, 20}) == WindowHit::normal);
 }
 
-TEST_CASE("window borders have strong contrast in light and dark themes", "[chrome]")
-{
-    const auto luminance = [](ImVec4 color)
-    {
-        const auto linear = [](float v)
-        {
-            return v <= 0.04045f ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
-        };
-        return 0.2126 * linear(color.x) + 0.7152 * linear(color.y) + 0.0722 * linear(color.z);
-    };
-    for (const bool dark : {false, true})
-    {
-        const auto color        = window_border_color(dark);
-        const double border     = luminance(color);
-        const double background = luminance(dark ? ImVec4{0.075f, 0.085f, 0.10f, 1} : ImVec4{0.94f, 0.94f, 0.94f, 1});
-        CHECK(color.w == 1);
-        CHECK((std::max(border, background) + 0.05) / (std::min(border, background) + 0.05) >= 4.5);
-    }
-}
 
 namespace
 {
@@ -189,6 +170,68 @@ struct TitleContext
     }
 };
 } // namespace
+
+TEST_CASE("window borders follow the active theme with strong contrast against every adjacent surface", "[chrome][theme]")
+{
+    TitleContext context;
+    const auto luminance = [](ImVec4 color)
+    {
+        const auto linear = [](float v)
+        {
+            return v <= 0.04045f ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * linear(color.x) + 0.7152 * linear(color.y) + 0.0722 * linear(color.z);
+    };
+    ImVec4 light_border{};
+    for (const bool dark : {false, true, false})
+        for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+        {
+            CAPTURE(dark, scale);
+            apply_style(dark, scale);
+            const auto color = window_border_color();
+            const auto &style = ImGui::GetStyle();
+            const double border = luminance(color);
+            CHECK(color.w == 1);
+            // Test the quantized color actually sent to the GPU as well.
+            const auto packed = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(color));
+            for (const auto background : {style.Colors[ImGuiCol_WindowBg], style.Colors[ImGuiCol_ChildBg],
+                                          style.Colors[ImGuiCol_MenuBarBg],
+                                          dark ? ImVec4{0.10f, 0.12f, 0.16f, 1} : ImVec4{0.95f, 0.96f, 0.98f, 1}})
+            {
+                const double surface = luminance(background);
+                CHECK((std::max(border, surface) + 0.05) / (std::min(border, surface) + 0.05) >= 4.5);
+                const double quantized = luminance(packed);
+                CHECK((std::max(quantized, surface) + 0.05) / (std::min(quantized, surface) + 0.05) >= 4.5);
+                CHECK((dark ? border > surface : border < surface));
+            }
+            if (dark)
+            {
+                CHECK(border > luminance(light_border));
+                CHECK(color.z - color.x > 0.25f); // Light blue, not a neutral gray or white.
+                CHECK(color.y > color.x);
+            }
+            else
+            {
+                light_border = color;
+                CHECK(color.x < 0.4f); // Deep gray, not a pale low-contrast silver.
+                CHECK(color.z - color.x < 0.15f);
+            }
+        }
+    // Theme selection comes from the current background, not a stale enum or
+    // the foreground text color, which should not tint the chrome independently.
+    const auto original = window_border_color();
+    ImGui::GetStyle().Colors[ImGuiCol_Text] = {0.12f, 0.08f, 0.04f, 0.5f};
+    CHECK(window_border_color().x == original.x);
+    CHECK(window_border_color().w == 1);
+    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = {0.075f, 0.085f, 0.10f, 0.2f};
+    const auto blue = window_border_color();
+    CHECK(blue.x > original.x);
+    CHECK(blue.z - blue.x > 0.25f);
+    CHECK(blue.w == 1);
+    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = {0.94f, 0.94f, 0.94f, 1};
+    CHECK(window_border_color().x == original.x);
+    CHECK(window_border_color().z == original.z);
+}
 
 TEST_CASE("custom caption buttons produce minimize maximize restore and close actions", "[chrome][ui]")
 {

@@ -111,6 +111,13 @@ struct Readback
 class Renderer
 {
 public:
+    // RGB base for opaque borderless surfaces, whose native region supplies
+    // clipping but cannot composite per-pixel alpha (e.g. X11 Shape).
+    // Transparent surfaces always clear to transparent black instead.
+    void set_opaque_background(std::array<float, 3> rgb)
+    {
+        opaque_background_ = rgb;
+    }
     virtual ~Renderer()                       = default;
     virtual Capabilities capabilities() const = 0;
     virtual Size framebuffer_size() const     = 0;
@@ -152,6 +159,9 @@ public:
     virtual void render_frame(ImDrawData *)                                                                                 = 0;
     virtual void present()                                                                                                  = 0;
     virtual Readback readback() = 0; // test/tooling, before present; synchronous
+
+protected:
+    std::array<float, 3> opaque_background_{0.055f, 0.063f, 0.075f};
 };
 
 // Exactly one backend is selected at configure time; no silent fallback.

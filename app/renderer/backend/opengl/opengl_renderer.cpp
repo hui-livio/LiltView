@@ -301,11 +301,10 @@ public:
             glClearColor(0, 0, 0, 0);
         else if ((flags & SDL_WINDOW_BORDERLESS) != 0)
         {
-            // X11 Shape clips the opaque visual. Give antialiased edge pixels
-            // a theme-matching RGB base instead of a black fringe; retain alpha
+            // X11 Shape clips an opaque visual: its RGB base must match the
+            // outer border, not the lighter content background. Keep alpha zero
             // for rounded-corner screenshot diagnostics.
-            const auto color = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
-            glClearColor(color.x, color.y, color.z, 0);
+            glClearColor(opaque_background_[0], opaque_background_[1], opaque_background_[2], 0);
         }
         else
             glClearColor(0.055f, 0.063f, 0.075f, 1.0f);

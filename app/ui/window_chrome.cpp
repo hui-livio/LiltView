@@ -12,7 +12,7 @@ WindowChromeMetrics window_chrome_metrics(ImVec2 size, const WindowChromeState &
     const float scale = std::max(state.scale, 1.0f);
     return {size.x,
             size.y,
-            custom ? 2 * scale : 0,
+            custom ? scale : 0,
             custom ? 36 * scale : 0,
             state.line_height + 8 * scale,
             custom ? 6 * scale : 0,
@@ -102,9 +102,15 @@ WindowHit window_chrome_hit(const WindowChromeMetrics &m, ImVec2 point)
     return WindowHit::normal;
 }
 
-ImVec4 window_border_color(bool dark)
+ImVec4 window_border_color()
 {
-    return dark ? ImVec4{0.38f, 0.70f, 1.0f, 1.0f} : ImVec4{0.08f, 0.31f, 0.68f, 1.0f};
+    // Use the resolved, applied style so explicit and system-following themes
+    // share the same palette, including immediately after a live theme change.
+    const auto background = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+    const bool dark = background.x + background.y + background.z < 1.5f;
+    // Cool deep gray on light surfaces; soft light blue on dark surfaces.
+    // Both remain opaque and strongly contrasted even at a 1-DIP thickness.
+    return ImGui::ColorConvertU32ToFloat4(dark ? IM_COL32(143, 185, 227, 255) : IM_COL32(80, 91, 104, 255));
 }
 
 namespace
@@ -189,20 +195,28 @@ MenuAction draw_window_titlebar(const WindowChromeMetrics &m, const WindowChrome
     return result;
 }
 
-void draw_window_border(const WindowChromeMetrics &m, bool dark)
+void draw_window_background(const WindowChromeMetrics &m)
+{
+    if (!m.custom)
+        return;
+    const auto o = ImGui::GetWindowPos();
+    // ImGui already drew the border-colored outer silhouette in Begin(). Keep
+    // the content background inset so it cannot leak into the outer AA fringe.
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        {o.x + m.border, o.y + m.border}, {o.x + m.width - m.border, o.y + m.height - m.border},
+        ImGui::GetColorU32(ImGuiCol_WindowBg), std::max(0.0f, m.radius - m.border));
+}
+
+void draw_window_border(const WindowChromeMetrics &m)
 {
     if (!m.custom)
         return;
     const auto o     = ImGui::GetWindowPos();
     auto *list       = ImGui::GetWindowDrawList();
-    const auto color = ImGui::GetColorU32(window_border_color(dark));
-    if (m.radius > 0)
-    {
-        const float half = m.border * 0.5f;
-        list->AddRect({o.x + half, o.y + half}, {o.x + m.width - half, o.y + m.height - half}, color, m.radius - half, 0,
-                      m.border);
-    }
-    // Keep straight segments fully opaque/high-contrast. Only curved arcs need AA.
+    const auto color = ImGui::GetColorU32(window_border_color());
+    // The background already supplies the rounded ring. A stroked AddRect
+    // would add a half-pixel inset/inner fringe and make a 1-DIP line look thick.
+    // Preserve foreground straight segments without doubling the curved outline.
     const float inset = m.radius;
     list->AddRectFilled({o.x + inset, o.y}, {o.x + m.width - inset, o.y + m.border}, color);
     list->AddRectFilled({o.x + inset, o.y + m.height - m.border}, {o.x + m.width - inset, o.y + m.height}, color);

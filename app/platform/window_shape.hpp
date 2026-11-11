@@ -6,7 +6,9 @@ namespace liltview
 {
 // Native regions are O(radius), not full-window RGBA masks on Linux / Windows.
 // Native frames clear custom regions so DWM can draw the non-client area.
-// Must be destroyed before SDL tears down its display connection.
+// Guards only custom Win32 NC painting; native frames have no guard installed.
+// Does not intercept native move/resize.
+// Must be destroyed before SDL tears down its window/display connection.
 class WindowShape
 {
 public:
