@@ -182,7 +182,7 @@ private:
     Viewport viewport_, presented_viewport_;
     std::optional<Viewport> failed_restore_;
     lv_request_id scene_id_ = 0, pending_scene_id_ = 0, presented_scene_id_ = 0;
-    Tiles scene_, pending_scene_, retired_scene_;
+    Tiles scene_, pending_scene_;
     bool visible_pending_     = false;
     lv_event *preview_anchor_ = nullptr, *pending_anchor_ = nullptr;
 

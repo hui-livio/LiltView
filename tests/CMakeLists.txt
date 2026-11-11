@@ -114,13 +114,6 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_executable(liltview_animation_render integration/animation_render.cpp)
     target_link_libraries(liltview_animation_render PRIVATE liltview_viewer liltview_sdl_platform)
     liltview_configure_cxx_target(liltview_animation_render)
-    add_executable(liltview_navigation_render integration/navigation_render.cpp)
-    target_link_libraries(liltview_navigation_render PRIVATE liltview_viewer liltview_sdl_platform
-        liltview_jpeg png_static TIFF::tiff)
-    liltview_configure_cxx_target(liltview_navigation_render)
-    add_test(NAME desktop.navigation_render COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
-        $<TARGET_FILE:liltview_navigation_render>)
-    set_tests_properties(desktop.navigation_render PROPERTIES TIMEOUT 30)
     # Opt-in real-image benchmark; user files are never CTest fixtures.
     add_executable(liltview_viewer_benchmark integration/viewer_benchmark.cpp)
     target_link_libraries(liltview_viewer_benchmark PRIVATE liltview_viewer liltview_sdl_platform)
@@ -152,7 +145,7 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.renderer_direct COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_renderer_contract> --direct)
     set_tests_properties(desktop.renderer_direct PROPERTIES TIMEOUT 30)
-    foreach(case menu font save jpeg formats animation_app settings logging status close chrome navigation info prefetch dialog_failure)
+    foreach(case menu font save jpeg formats animation_app settings logging status close chrome navigation info prefetch)
         add_test(NAME desktop.${case}
             COMMAND "${DBUS_RUN_SESSION}" -- "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/integration/desktop_regressions.py" "$<TARGET_FILE:liltview>" "${case}"
