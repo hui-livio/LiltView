@@ -46,7 +46,8 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
     renderer_(renderer),
     camera_policy_(policy),
     scene_(renderer, wake_core),
-    pending_scene_(renderer, wake_core)
+    pending_scene_(renderer, wake_core),
+    retired_scene_(renderer, wake_core)
 {
     lv_core_config config;
     lv_core_config_init(&config);
@@ -135,6 +136,7 @@ void Viewer::shutdown()
     discard_pending();
     scene_.clear();
     pending_scene_.clear();
+    retired_scene_.clear();
     lv_event_release(preview_anchor_);
     preview_anchor_ = nullptr;
     renderer_.destroy_image(display_);
@@ -181,6 +183,11 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
     close_animation();
     if (request_)
         lv_core_cancel(core_, request_);
+    // Canvas buttons navigate after draw commands have been built. Keep the
+    // progressive scene's textures alive until that frame has been submitted.
+    // Further navigation before pump has no new pending scene to retire.
+    if (!pending_scene_.empty())
+        pending_scene_.swap(retired_scene_);
     discard_pending();
     playback_.reset();
     playback_.suspend(suspended_, Playback::Clock::now());
@@ -333,6 +340,7 @@ void Viewer::pump()
 {
     if (closing_)
         return;
+    retired_scene_.clear(); // The previous frame no longer references these textures.
     navigation_->pump();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(4);
     lv_event *raw       = nullptr;
