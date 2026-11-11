@@ -1,6 +1,6 @@
 # Core 接口与生命周期契约
 
-更新：2026-11-10。正式声明以 [core.h](../core/include/liltview/core.h) 为准，模块关系见 [架构文档](ARCHITECTURE.md)，显示与缓存见 [渲染说明](RENDERING.md)，本轮验证见[开发计划](DEVELOPMENT_PLAN.md)。
+文档核对：2026-11-11。正式声明以 [core.h](../core/include/liltview/core.h) 为准，模块关系见 [架构文档](ARCHITECTURE.md)，显示与缓存见 [渲染说明](RENDERING.md)，按日期区分的验证记录见[开发计划](DEVELOPMENT_PLAN.md)。
 
 ## 1. 当前能力与 ABI
 
@@ -8,12 +8,14 @@ Core 使用 C23（MSVC 为 C17 与私有 C23 写法兼容层），向 C / C++20 
 
 | 能力 | 当前实现 |
 | --- | --- |
-| 静态 DISPLAY / FIT / NATIVE | JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 首帧、TIFF 首页 |
+| 静态 DISPLAY / FIT / NATIVE | JPEG、PNG、基础 SVG（复杂 SVG 不支持）、静态 WebP、BMP、GIF 首帧、TIFF 首页 |
 | 静态 DISPLAY / REGION | JPEG、PNG、未压缩 BMP / bitfields、TIFF；顺序格式仍可能扫描源文件 |
 | 动画会话 | 普通 GIF，顺序 NEXT / RESET；完整帧合成由 Core 负责 |
 | 内容缓存 / PREFETCH | 完整静态结果的有界内存 LRU；预读真实解码入缓存，后续同目标显示重放像素 |
 | 调度 | 单 worker；待执行任务按优先级、同级请求 ID 排序，不保证抢占正在解码的任务 |
 | 尚未实现 | Core 磁盘内容缓存、多 worker、Windows UTF-16 路径输入、其他动画后端及动画会话缓存 |
+
+SVG 的 `LV_CAP_VECTOR_RASTERIZE` 仅表示可对已支持的基础静态 profile 栅格化，不是完整 SVG/SVG2 或浏览器兼容声明。复杂特性、资源限额与失败分类以[SVG 兼容说明](IMAGE_FORMATS.md#4-svg-静态-profile)为准。
 
 `lv_core_query_format()` 返回构建能力上限，具体文件的 INFO 再收窄；枚举和能力位存在不表示所有格式变体可用。完整兼容子集见 [格式表](IMAGE_FORMATS.md)。app 的匿名 tile / LOD 缓存与 Core 跨请求内存内容缓存分别计账。
 
@@ -41,7 +43,7 @@ Core 使用 C23（MSVC 为 C17 与私有 C23 写法兼容层），向 C / C++20 
 
 队列预算不得超过 CPU 预算，且至少容纳 `tile_edge × tile_edge × 4`；创建还要容纳基础对象、控制记录和最小输出块。预算关系非法返回 `LV_INVALID_ARGUMENT`，真实分配失败返回 `LV_OUT_OF_MEMORY`。应用设置的预算和 tile 尺寸见 [渲染说明](RENDERING.md)，它们不是 Core 初始化默认值。
 
-路径携带编码、指针和字节长度，不要求 NUL 结尾。当前接受绝对路径的 `LV_PATH_UTF8` 或 `LV_PATH_POSIX_BYTES`，禁止内嵌零；UTF-8 必须合法。Windows UTF-16 当前返回 `LV_UNSUPPORTED`。 Windows 输入应使用带盘符的绝对 UTF-8 路径或 UNC 路径，由 worker 内部转换为 UTF-16；符号链接与 `..` 的解析遵循各自系统语义，不承诺 Windows 复现 POSIX 的目录穿越顺序。
+路径携带编码、指针和字节长度，不要求 NUL 结尾。当前接受绝对路径的 `LV_PATH_UTF8` 或 `LV_PATH_POSIX_BYTES`，禁止内嵌零；UTF-8 必须合法。Windows UTF-16 当前返回 `LV_UNSUPPORTED`。Windows 输入应使用带盘符的绝对 UTF-8 路径或 UNC 路径，由 worker 内部转换为 UTF-16；符号链接与 `..` 的解析遵循各自系统语义，不承诺 Windows 复现 POSIX 的目录穿越顺序。
 
 submit 仅做参数校验、路径复制和有界资源受理，不做文件 I/O、stat 或 realpath。成功后调用方可释放原路径。worker 按内容识别格式，扩展名不决定解码器；允许符号链接指向常规文件，目录、设备、FIFO、socket 等拒绝为异步 I/O 错误。
 

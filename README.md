@@ -6,11 +6,12 @@
 
 ## 当前状态
 
-以 2026-11-10 工作区源码为基线，功能按实际子集声明：
+文档核对日期：2026-11-11，功能按当前源码的实际子集声明；历史验证与本次核对范围见[开发记录](docs/DEVELOPMENT_PLAN.md)。
 
 - **已实现**：JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 自动播放、TIFF 首页；命令行 / 菜单 / Ctrl+O / 拖放打开，同目录自然排序导航（裸 `←` / `→`、菜单、首尾禁用的边缘悬浮按钮）、适应窗口、100%、缩放平移、`I` 图片信息面板、全屏、中英、主题与窗口外观设置。
+- **明确不支持**：复杂 SVG；当前仅支持基础静态 SVG，不提供浏览器级 SVG 兼容。文字 / 字体、CSS stylesheet / class、裁剪、遮罩、滤镜、`use` / `symbol` 和嵌入图片等均不在当前 profile 内，具体范围见[SVG 兼容说明](docs/IMAGE_FORMATS.md#4-svg-静态-profile)。
 - **部分实现**：静态大图已有一次原始分辨率解码、行带显示、tile / LOD 场景缓存和 GPU 恢复；首次缓存生成、冷区域响应及强缩小质量仍需优化。已有 16K / 32K 回归用例，实际限制由格式和资源预算决定。
-- **已接入相邻预读**：静态邻居复用 Core 内存内容缓存；普通 GIF 已实现按内容识别的会话 / 首帧预热，切换前重新核验版本，再按源时长继续播放。后台不上传 GPU、当前图片优先；第五轮最终验证记录见[开发计划](docs/DEVELOPMENT_PLAN.md)。
+- **已接入相邻预读**：静态邻居复用 Core 内存内容缓存；普通 GIF 已实现按内容识别的会话 / 首帧预热，切换前重新核验版本，再按源时长继续播放。后台不上传 GPU、当前图片优先；历史验证记录见[开发计划](docs/DEVELOPMENT_PLAN.md#7-历史功能开发与验证记录2026-11-10)。
 - **待实现**：动画手动控制、扩展格式 / 原始像素、ICC / HDR、D3D11、Windows 完整桌面适配与实机验收、更新检测。
 
 静态图片加载完成后，缩放和平移复用已生成内容，不重新解码源文件。app 场景缓存与 Core 跨请求内存缓存分别有界管理；Core 磁盘内容缓存和通用完整动画缓存仍未实现。完整状态、`Shift+方向键` 平移及其他交互见[产品与设计](docs/PRODUCT_DESIGN.md)，格式边界见[兼容表](docs/IMAGE_FORMATS.md)。
@@ -88,7 +89,16 @@ python3 scripts/register_desktop.py
 | [命令行与配置](docs/CONFIGURATION.md) | 参数、YAML、默认值和保存语义 |
 | [开发计划](docs/DEVELOPMENT_PLAN.md) | 未完成工作、原始像素 / 接口扩展和验收条件 |
 
-配套说明：[性能测试方法](benchmarks/TEST_PLAN.md)、[输入样本](benchmarks/inputs/README.md)、[第三方依赖](third_party/README.md)、[字体来源](assets/fonts/README.md)。历史设计、阶段审查与零散待办已合并；后续直接更新上述文档。
+配套文档按用途索引：
+
+| 用途 | 入口 |
+| --- | --- |
+| 源码导航 | [应用](app/README.md)、[Core](core/src/README.md) |
+| 构建产物与部署 | [打包说明](packaging/README.md)、[Arch Linux 部署](packaging/arch/README.md) |
+| 性能与测试输入 | [性能入口](benchmarks/README.md)、[性能测试计划](benchmarks/TEST_PLAN.md)、[性能样本清单](benchmarks/inputs/README.md)、[正确性测试样本](tests/fixtures/README.md) |
+| 依赖、资源与许可 | [第三方源码](third_party/README.md)、[字体来源](assets/fonts/README.md) |
+
+文档维护约定：格式子集以兼容表为准，公共接口以源码头文件和 Core 契约为准，模块 / 构建以架构文档为准，未来工作和决策集中在开发计划。源码入口 README 只做导航，不维护另一份功能状态。历史测试数量、包体与耗时必须保留日期和环境，不能当作当前版本的验证；性能样本的完整性核验不等于应用支持或性能达标。上游许可证、来源清单和自动生成数据不随文案整理改写。
 
 ## 许可证
 

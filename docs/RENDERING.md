@@ -1,6 +1,6 @@
 # 渲染与大图实现
 
-更新：2026-11-10，按当前源码核对。模块全景见[架构](ARCHITECTURE.md)，接口声明以 [`renderer.hpp`](../app/renderer/renderer.hpp) 为准；未完成工作集中在[开发计划](DEVELOPMENT_PLAN.md)。
+文档核对：2026-11-11，按当前源码声明实现边界。模块全景见[架构](ARCHITECTURE.md)，接口声明以 [`renderer.hpp`](../app/renderer/renderer.hpp) 为准；未完成工作集中在[开发计划](DEVELOPMENT_PLAN.md)。
 
 ## 1. 当前显示链路
 
@@ -16,6 +16,7 @@ GIF：动画会话 → 完整 FIT 帧 → 候选纹理 → deadline 到达后整
 - 静态 viewer 不先生成 FIT 缩略图，也不因平移、缩放或窗口变化重新提交 REGION。core 的 FIT / REGION 仍是独立可调用能力。
 - JPEG、非交错 PNG、未压缩 BMP、TIFF 可在每个原始行带完整、版本检查通过后发布，先完成的行带先显示；未解码区域仍为空白。
 - 应用 tile 默认边长为 512px，按设备上限缩小；core 公共默认是 256px。事件队列背压使 core 只保留有界活动行带，不要求整幅 RGBA 常驻。
+- SVG 仅对[基础静态 profile](IMAGE_FORMATS.md#4-svg-静态-profile)栅格化，复杂 SVG 不支持。当前与其他完整输出静态图一样，按自然尺寸生成像素后进入 tile / LOD 路径；放大不重新执行矢量渲染，没有独立 SVG 文档渲染通道，也不保证任意放大保持矢量清晰。
 - Progressive JPEG 仍需系数工作集，Adam7 PNG 仍需合并缓冲；静态 WebP、SVG、RLE BMP 等走各自完整工作集路径，不承诺首行带时延。
 - 加载完成后，相机操作只选择已有像素 / LOD、改变坐标和 UV。GPU 已驻留内容不重复上传；缺失内容从场景缓存恢复，不重新读取源文件解码。
 
@@ -61,7 +62,7 @@ GIF：动画会话 → 完整 FIT 帧 → 候选纹理 → deadline 到达后整
 
 core 最终输出到事件交接使用引用转移 / 共享 backing，不深拷贝整幅像素。但缓存编码、LOD 生成及 PBO 有明确工作缓冲，GPU 上传也有主存到设备传输，不宣称全链路零拷贝。
 
-帧顺序：`begin_frame → platform NewFrame → ImGui NewFrame → 布局 / draw list → ImGui Render → render_frame → 可选 readback → present`。图片最后一次绘制提交后才销毁；viewer 图片先于 renderer、ImGui context 和原生窗口释放。
+帧顺序：`begin_frame → platform NewFrame → ImGui NewFrame → 布局 / draw list → ImGui Render → render_frame → 可选 readback → present`。图片最后一次绘制提交后才销毁；画布箭头动作发生在 draw list 构建之后，切图时将 pending scene 转入 retired scene，保留到本帧提交，下一次 `pump()` 再清理，连续切图不能提前销毁被引用纹理。退出显式清理 retired scene；viewer 图片先于 renderer、ImGui context 和原生窗口释放。
 
 ## 5. 有界 PBO 上传
 
