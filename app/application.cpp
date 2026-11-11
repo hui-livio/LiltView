@@ -4,6 +4,7 @@
 
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
+#include "platform/live_resize.hpp"
 #include "platform/sdl_render_host.hpp"
 #include "platform/window_shape.hpp"
 #include "platform/window_theme.hpp"
@@ -73,7 +74,7 @@ class Application
 public:
     ~Application()
     {
-        window_shape_.reset(); // Own Wayland proxies must go before SDL's display connection.
+        window_shape_.reset(); // Native subclass/proxies must go before SDL's window/display connection.
         // 先撤销原生命中测试，后续窗口 / ImGui 析构期间不再访问 Application 状态。
         if (window_ != nullptr)
             SDL_SetWindowHitTest(window_, nullptr, nullptr);
@@ -298,7 +299,25 @@ private:
             if (options.smoke_test)
                 inject_smoke_events(shell);
 
-            process_events(options.smoke_test, shell, mode_changed);
+            {
+                // Windows' modal move/resize loop does not return to this outer
+                // loop until release. Redraw on SDL's live expose notification,
+                // not by pumping events recursively or changing native hit tests.
+                LiveResizeRedraw live_resize(SDL_GetWindowID(window_), [&]
+                {
+                    if (quit_ || (SDL_GetWindowFlags(window_) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0)
+                        return;
+                    // SDL holds its event-watch lock here. Do not drain or
+                    // retire image work: retirement may join a worker waiting
+                    // to post an SDL wakeup. Redraw the current scene only;
+                    // normal viewer pumping resumes after the native loop.
+                    update_visual_style();
+                    update_window_shape(); // Match the native region to this frame's current dimensions.
+                    render_frame(options, shell, global_menu.active(), true);
+                });
+                process_events(options.smoke_test, shell, mode_changed);
+                live_resize.rethrow_if_failed();
+            }
             // 系统菜单动作由刚收到的 SDL 唤醒事件触发，不延后到下一帧。
             if (!quit_)
                 dispatch_global_menu_actions(global_menu, shell);
@@ -745,13 +764,22 @@ private:
         menu_has_image_info_   = viewer_->has_visible_image();
     }
 
-    void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu)
+    void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu, bool live_resize = false)
     {
         renderer_->begin_frame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
         const auto action   = shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_, current_chrome_state());
+        if (live_resize)
+        {
+            // Only present during the native loop. Window/menu actions, dialogs
+            // and mode switches stay on the normal outer-loop dispatch path.
+            ImGui::Render();
+            present_frame(options, false);
+            ++rendered_frames_;
+            return;
+        }
         auto &context       = *ImGui::GetCurrentContext();
         auto timing = (action == MenuAction::quit || action == MenuAction::close_window) ? close_inputs_.activation(context) :
                                                                                            CloseTiming{};
@@ -771,10 +799,13 @@ private:
         ++rendered_frames_;
     }
 
-    void present_frame(const LaunchOptions &options)
+    void present_frame(const LaunchOptions &options, bool capture = true)
     {
+        const auto border = window_border_color();
+        renderer_->set_opaque_background({border.x, border.y, border.z});
         renderer_->render_frame(ImGui::GetDrawData());
-        capture_smoke_frame(options);
+        if (capture)
+            capture_smoke_frame(options);
         renderer_->present();
     }
 

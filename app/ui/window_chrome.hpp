@@ -63,13 +63,16 @@ struct WindowSpan
 {
     int x, y, width, height;
 };
-std::vector<WindowSpan> rounded_window_spans(int width, int height, float radius);
+// fringe is visual coverage padding in the same units as radius. Leave it at
+// zero for input-only or opaque shapes; alpha compositing needs the AA fringe.
+std::vector<WindowSpan> rounded_window_spans(int width, int height, float radius, float fringe = 0);
 bool window_chrome_contains(const WindowChromeMetrics &, ImVec2 point);
 WindowHit window_chrome_hit(const WindowChromeMetrics &, ImVec2 point);
-ImVec4 window_border_color(bool dark);
+ImVec4 window_border_color();
 MenuAction draw_window_titlebar(const WindowChromeMetrics &, const WindowChromeState &, Language, render::Renderer &,
                                 render::Image icon);
-void draw_window_border(const WindowChromeMetrics &, bool dark);
+void draw_window_background(const WindowChromeMetrics &);
+void draw_window_border(const WindowChromeMetrics &);
 } // namespace liltview
 
 #endif

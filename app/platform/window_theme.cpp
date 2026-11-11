@@ -18,6 +18,19 @@ bool apply_native_window_theme(SDL_Window *window, bool dark)
         static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     if (!hwnd) // e.g. SDL's offscreen backend has no native caption.
         return true;
+    const bool native_frame =
+        (SDL_GetWindowFlags(window) & (SDL_WINDOW_BORDERLESS | SDL_WINDOW_FULLSCREEN)) == 0;
+    if (native_frame)
+    {
+        // A dark-mode color attribute does not re-enable a disabled NC policy.
+        // Returning from custom chrome must explicitly restore DWM ownership,
+        // before recalculating or activating the real system caption. Never
+        // apply this policy to borderless windows with app-owned decoration.
+        const auto policy = DWMNCRP_ENABLED;
+        const auto result = DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy));
+        if (FAILED(result))
+            return SDL_SetError("Cannot restore DWM native frame (0x%08lx)", static_cast<unsigned long>(result));
+    }
     BOOL enabled      = dark ? TRUE : FALSE;
     const auto result = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &enabled, sizeof(enabled));
     if (FAILED(result))
@@ -53,7 +66,7 @@ bool apply_native_window_theme(SDL_Window *window, bool dark)
         return SDL_SetError("Cannot refresh Win32 window frame: %lu", GetLastError());
     // SDL retains WS_CAPTION in borderless mode for taskbar animations; use
     // SDL flags rather than Win32 style bits to identify a real native frame.
-    if ((SDL_GetWindowFlags(window) & (SDL_WINDOW_BORDERLESS | SDL_WINDOW_FULLSCREEN)) == 0)
+    if (native_frame)
     {
         // Windows 10 can keep the old active/inactive caption cached even after
         // SWP_FRAMECHANGED + RDW_FRAME. Refresh that visual state explicitly,

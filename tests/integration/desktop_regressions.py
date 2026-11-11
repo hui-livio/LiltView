@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Optional Linux integration tests: private D-Bus session + SDL offscreen.
+"""Optional desktop integration tests: Linux D-Bus/SDL offscreen or Windows pixels.
+
+The chrome_pixels case also runs on Windows with its native OpenGL backend
+at 100% display scale (fractional scales are covered by the headless C++ tests).
 
 No real desktop settings, compositor configuration or launcher files are changed.
 SPDX-License-Identifier: Apache-2.0
 """
+import math
 import os
 from pathlib import Path
 import re
@@ -331,12 +335,12 @@ def test_status(executable, folder):
             assert all(abs(a - b) <= 3 for a, b in zip(*ink_bounds)), (theme, language, "status baselines differ", ink_bounds)
 
 
-def test_chrome(executable, folder):
+def test_chrome_pixels(executable, folder):
     for theme in ("light", "dark"):
         for square in (False, True):
             directory = folder / f"{theme}-{square}"
             directory.mkdir()
-            (directory / "settings.yaml").write_text(f"theme: {theme}\nlanguage: en-US\ndisable_rounding: {str(square).lower()}\n")
+            (directory / "settings.yaml").write_text(f"theme: {theme}\nlanguage: en-US\nlog_level: debug\ndisable_rounding: {str(square).lower()}\n")
             screenshot = directory / "chrome.ppm"
             result = subprocess.run([str(executable), "--smoke-test", "--config-dir", str(directory), "--screenshot", str(screenshot)],
                                     text=True, capture_output=True, timeout=10)
@@ -351,15 +355,46 @@ def test_chrome(executable, folder):
                 offset = (y * width + x) * 3
                 return pixels[offset:offset + 3]
 
-            border = bytes((97, 179, 255) if theme == "dark" else (20, 79, 173))
+            # Check both the approved theme tokens and their visible geometry.
+            border = pixel(width // 2, 0)
             start, end = (0, 0) if square else (14, 14)
-            for y in (0, 1, height - 2, height - 1):
+            for y in (0, height - 1):
                 assert all(pixel(x, y) == border for x in range(start, width - end)), (theme, "incomplete horizontal border", y)
-            for x in (0, 1, width - 2, width - 1):
+            for x in (0, width - 1):
                 assert all(pixel(x, y) == border for y in range(start, height - end)), (theme, "incomplete vertical border", x)
+            assert pixel(width // 2, 1) != border, (theme, "top outline is thicker than one pixel")
+            assert pixel(width // 2, height - 2) != border, (theme, "bottom outline is thicker than one pixel")
+            assert pixel(1, height // 2) != border, (theme, "left outline is thicker than one pixel")
+            assert pixel(width - 2, height // 2) != border, (theme, "right outline is thicker than one pixel")
             corners = (0, width - 1, (height - 1) * width, width * height - 1)
             assert all(alpha[index] == (255 if square else 0) for index in corners), (theme, square, "incorrect corner alpha")
             assert alpha[(height // 2) * width + width // 2] == 255
+            if not square:
+                # Pixel-center samples around the entire outer AA fringe, not
+                # just the fully transparent corner or straight border pixels.
+                # Transparent framebuffers contain premultiplied RGB; opaque
+                # X11 visuals must instead retain the border-colored clear RGB.
+                transparent = "transparent=true" in result.stdout
+                radius = 12  # This offscreen/smoke fixture uses 100% display scale.
+                for corner in range(4):
+                    checked = 0
+                    for y in range(radius):
+                        for x in range(radius):
+                            distance = math.hypot(radius - x - 0.5, radius - y - 0.5)
+                            if not radius - 0.25 <= distance <= radius + 0.75:
+                                continue
+                            px = width - 1 - x if corner & 1 else x
+                            py = height - 1 - y if corner & 2 else y
+                            coverage = alpha[py * width + px]
+                            if coverage < 8:
+                                continue
+                            factor = coverage / 255 if transparent else 1
+                            expected = [round(channel * factor) for channel in border]
+                            actual = pixel(px, py)
+                            assert all(abs(a - b) <= 2 for a, b in zip(actual, expected)), (
+                                theme, corner, x, y, "background halo", actual, expected, coverage)
+                            checked += 1
+                    assert checked > 0, (theme, corner, "missing rounded edge pixels")
             _, _, _, about_alpha = (directory / "chrome-about-alpha.pgm").read_bytes().split(b"\n", 3)
             assert all(about_alpha[index] == (255 if square else 0) for index in corners), (theme, square, "modal painted transparent corners")
             title = pixel(width // 2, 20)
@@ -369,6 +404,27 @@ def test_chrome(executable, folder):
             assert pixel(2, 69) == canvas and pixel(width - 3, 69) == canvas, (theme, "padded canvas")
             footer = pixel(width // 2, height - 3)
             assert footer != border and footer != canvas, (theme, "missing status bar")
+            def luminance(color):
+                rgb = [v / 255 for v in color]
+                linear = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in rgb]
+                return sum(a * b for a, b in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+            assert tuple(border) == ((111, 130, 151) if theme == "dark" else (129, 137, 148)), (theme, border)
+            border_light = luminance(border)
+            # Stay clear of the foreground stroke's inner AA fringe.
+            status_background = pixel(width // 2, height - 8)
+            for index, surface in enumerate((title, menu, canvas, status_background)):
+                surface_light = luminance(surface)
+                contrast = (max(border_light, surface_light) + 0.05) / (min(border_light, surface_light) + 0.05)
+                # Palette A deliberately softens the non-text outline. The
+                # darker light-menu strip has a separate 2.5:1 design budget.
+                minimum = 4.0 if theme == "dark" else (2.5 if index == 1 else 3.0)
+                assert contrast >= minimum, (theme, "low-contrast outline", border, surface, contrast)
+                assert (border_light > surface_light) == (theme == "dark"), (theme, "wrong outline polarity")
+
+
+def test_chrome(executable, folder):
+    test_chrome_pixels(executable, folder)
 
     # Native -> custom -> native must retain the same process, menu and loaded image.
     directory = folder / "toggle"
@@ -649,11 +705,13 @@ def test_logging(executable, folder):
 def main():
     executable = Path(sys.argv[1]).resolve()
     case = sys.argv[2]
-    os.environ["SDL_VIDEODRIVER"] = "offscreen"
+    if sys.platform != "win32":
+        os.environ["SDL_VIDEODRIVER"] = "offscreen"
     with tempfile.TemporaryDirectory(prefix="liltview-desktop-regression-") as temporary:
         {"menu": test_menu, "font": test_font, "save": test_save_failure, "jpeg": test_jpeg_render,
          "settings": test_settings_yaml, "logging": test_logging, "formats": test_formats_render,
          "animation_app": test_animation_app, "status": test_status, "close": test_close, "chrome": test_chrome,
+         "chrome_pixels": test_chrome_pixels,
          "navigation": test_navigation, "info": test_info, "prefetch": test_prefetch,
          "dialog_failure": test_dialog_failure}[case](executable, Path(temporary))
     print(f"PASS desktop regression: {case}")

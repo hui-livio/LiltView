@@ -64,12 +64,36 @@ Text image_error_text(lv_error_code code)
     }
 }
 
+// Keep small chrome arcs smooth at fractional UI scales and dense framebuffers.
+// This also applies to the root silhouette drawn inside Begin(). Restore shared
+// ImGui data afterwards so this does not change other windows' drawing policy.
+struct ChromeCurveQuality
+{
+    ImDrawListSharedData &data = *ImGui::GetDrawListSharedData();
+    float saved_error          = data.CircleSegmentMaxError;
+    explicit ChromeCurveQuality(bool rounded)
+    {
+        if (rounded)
+        {
+            const auto density = ImGui::GetIO().DisplayFramebufferScale;
+            data.SetCircleTessellationMaxError(std::min(saved_error, 0.1f / std::max({1.0f, density.x, density.y})));
+        }
+    }
+    ~ChromeCurveQuality()
+    {
+        data.SetCircleTessellationMaxError(saved_error);
+    }
+};
+
 void begin_main_window(bool system_menu, bool custom_titlebar, float radius)
 {
     const auto *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
-    // 原生窗口边框内铺满矩形内容，避免自绘圆角外露出清屏底色；仅影响主窗口。
+    // Preserve the original main-window flags and ImGui background behavior.
+    // Only tint its outer silhouette; the content background is drawn inset.
+    if (custom_titlebar)
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, window_border_color());
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0f, 0.0f});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, radius);
     ImGui::Begin("LiltView###main", nullptr,
@@ -77,6 +101,8 @@ void begin_main_window(bool system_menu, bool custom_titlebar, float radius)
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
                      ((system_menu || custom_titlebar) ? 0 : ImGuiWindowFlags_MenuBar));
     ImGui::PopStyleVar(2);
+    if (custom_titlebar)
+        ImGui::PopStyleColor();
 }
 
 void rounded_modal_dim(float radius, ImVec4 color)
@@ -186,8 +212,10 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
 {
     // 按区域组织一帧；窗口、子画布和弹窗的 Begin/End 在对应函数中配对。
     const auto metrics = window_chrome_metrics(ImGui::GetMainViewport()->Size, chrome);
-    MenuAction action  = MenuAction::none;
+    const ChromeCurveQuality quality(metrics.custom && metrics.radius > 0);
+    MenuAction action = MenuAction::none;
     begin_main_window(system_menu, metrics.custom, metrics.radius);
+    draw_window_background(metrics);
     if (metrics.custom)
     {
         action = draw_window_titlebar(metrics, chrome, language, renderer, icon);
@@ -217,7 +245,7 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
     if (canvas_action != MenuAction::none)
         action = canvas_action;
     draw_status(language, viewer, metrics);
-    draw_window_border(metrics, chrome.dark);
+    draw_window_border(metrics);
     draw_about(language, renderer, icon, metrics.radius);
     ImGui::End();
     return action;
