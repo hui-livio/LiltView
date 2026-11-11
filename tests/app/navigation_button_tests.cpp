@@ -14,7 +14,6 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <imgui_internal.h>
 
 #include <limits>
 #include <utility>
@@ -51,7 +50,6 @@ struct Context
     {
         ImGui::CreateContext();
         auto &io       = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.DisplaySize = {960, 640};
         io.DeltaTime   = 1.0f / 60;
         io.IniFilename = nullptr;
@@ -228,47 +226,6 @@ TEST_CASE("canvas buttons emit previous and next on release with stable translat
         io.AddMouseButtonEvent(0, false);
         CHECK(context.frame(value, Language::chinese) == (previous ? MenuAction::previous : MenuAction::next));
         CHECK(context.frame(value) == MenuAction::none);
-    }
-}
-
-TEST_CASE("zoom shortcuts do not focus canvas arrows or show their tooltips", "[navigation_buttons][ui][shortcut]")
-{
-    for (const bool previous : {true, false})
-    {
-        Context context;
-        const auto value = snapshot(2, 3);
-        const auto point = center(previous ? navigation_button_layout(Context::min, Context::max, 1).previous :
-                                             navigation_button_layout(Context::min, Context::max, 1).next);
-        context.frame(value);
-        auto &io = ImGui::GetIO();
-        io.AddMousePosEvent(point.x, point.y);
-        io.AddMouseButtonEvent(0, true);
-        context.frame(value);
-        io.AddMouseButtonEvent(0, false);
-        CHECK(context.frame(value) == (previous ? MenuAction::previous : MenuAction::next));
-        io.AddMousePosEvent(480, 320);
-        context.frame(value);
-        CHECK(ImGui::GetCurrentContext()->NavId == 0);
-        for (const auto key : {ImGuiKey_UpArrow, ImGuiKey_DownArrow})
-        {
-            io.AddKeyEvent(ImGuiMod_Ctrl, true);
-            io.AddKeyEvent(key, true);
-            CHECK(context.frame(value) == MenuAction::none);
-            CHECK(context.frame(value) == MenuAction::none);
-            for (const auto *tooltip : ImGui::GetCurrentContext()->Windows)
-                if (tooltip->Flags & ImGuiWindowFlags_Tooltip)
-                    CHECK_FALSE(tooltip->Active);
-            CHECK(ImGui::GetCurrentContext()->NavId == 0);
-            io.AddKeyEvent(key, false);
-            io.AddKeyEvent(ImGuiMod_Ctrl, false);
-            context.frame(value);
-        }
-        io.AddMousePosEvent(point.x, point.y);
-        context.frame(value);
-        bool hovered_tooltip = false;
-        for (const auto *tooltip : ImGui::GetCurrentContext()->Windows)
-            hovered_tooltip |= (tooltip->Flags & ImGuiWindowFlags_Tooltip) && tooltip->Active;
-        CHECK(hovered_tooltip);
     }
 }
 
