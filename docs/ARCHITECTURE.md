@@ -1,6 +1,6 @@
 # 开发架构
 
-状态基线：2026-11-10。本文说明当前模块、运行链路与开发入口；本轮验证与分次提交记录见[开发计划](DEVELOPMENT_PLAN.md)。
+文档核对：2026-11-11。本文说明当前模块、运行链路与开发入口；按日期区分的历史记录与本次验证范围见[开发计划](DEVELOPMENT_PLAN.md)。
 
 ## 1. 技术边界
 
@@ -68,9 +68,9 @@ CLI / 打开 / 拖放 → Viewer.open → generation 更新、取消旧请求
 
 JPEG、非交错 PNG、未压缩 BMP、TIFF 可逐原始行带交付并提前显示。progressive JPEG / Adam7 PNG 仍受系数或合并工作集限制；WebP、SVG、RLE BMP 等保留各自有界路径，不能由 NATIVE 枚举推导出所有格式均可流式大图显示。
 
-大场景由 `Tiles` 在首次接收像素时生成各级 LOD，压缩到打开后立即 unlink 的本地临时文件；场景关闭时释放。当前每场景缓存上限 16 GiB，tile 描述表另有限额。它是应用场景缓存，不是 Core 的跨请求/跨进程缓存。
+大场景由 `Tiles` 在首次接收像素时生成各级 LOD，压缩到场景持有的本地临时文件；Linux 创建后 unlink，Windows 使用删除即回收的临时文件，场景关闭时释放。当前每场景缓存上限 16 GiB，tile 描述表另有限额。它是应用场景缓存，不是 Core 的跨请求/跨进程缓存。
 
-`TileReader` 使用独立 fd / `pread` 和 CPU worker 读取、解压已生成结果；默认 RAM LRU 为 32 MiB，排队上限 64，最新视口替换过期排队项。UI 的 `find` 不执行磁盘 I/O 或等待；完成后投递唤醒。
+`TileReader` 使用独立文件描述符、平台偏移读取适配器（Linux `pread` / Windows 文件偏移读取）和 CPU worker 读取、解压已生成结果；默认 RAM LRU 为 32 MiB，排队上限 64，最新视口替换过期排队项。UI 的 `find` 不执行磁盘 I/O 或等待；完成后投递唤醒。
 
 FIT 通过共享 atlas 减少 draw 数；细节按可见网格查询，GPU LRU 按驻留集合淘汰，预热邻居及 FIT 中心区域。默认 covered-motion 策略只在已有足够清晰且完整覆盖的纹理范围内推进相机，目标恢复后准确到达；冷跳转仍可能暂留最近完整画面。
 
@@ -168,7 +168,7 @@ ctest --preset dev -L large
 | --- | --- |
 | `tests/contract/` | C23 / C++20 / C++23 调用、公共结构布局及初始化器 |
 | `tests/core/` | 格式边界、预算、版本、取消、区域、动画与像素所有权 |
-| `tests/app/` | 设置/CLI、菜单、Viewport/Playback、Viewer 与 TileReader |
+| `tests/app/` | 设置/CLI、菜单、Viewport/Playback、Viewer、TileReader，以及无需图形窗口的延迟提交纹理 / 导航焦点回归 |
 | `tests/integration/` | 真实 OpenGL 回读、stride/PBO、清晰度、相机推进、源文件删除后恢复与应用回归 |
 | 大图可选测试 | 16K/32K、受限单纹理/GPU 预算与边界像素 |
 
@@ -179,7 +179,7 @@ ctest --preset dev -L large
 | 能力 | 状态 | 尚缺内容 |
 | --- | --- | --- |
 | C ABI 2、单 worker、有界事件/引用、取消/关闭 | 已实现 | 多 worker 与更细公平调度 |
-| 七类格式、四类静态区域 codec、NATIVE 行带 | 已实现（格式子集） | 扫描中 refinement、更多格式与高位深输出 |
+| 七类格式、四类静态区域 codec、NATIVE 行带 | 已实现（格式子集） | 扫描中 refinement、更多格式与高位深输出；SVG 仅基础静态 profile，复杂 SVG 不支持 |
 | GIF 会话、双纹理与时钟播放 | 已实现（普通尺寸） | APNG / 动画 WebP、seek 及播放控制 |
 | 后台目录导航、边缘按钮、序号 | 已实现 | 仅当前支持后缀及显式目标；首尾不循环，重新打开刷新目录 |
 | 图片信息面板、可见场景值快照 | 已实现 | 尚无相机 EXIF / ICC 元数据解析；已提供文件 / 输出 / 方向 / 动画与实时缩放信息 |

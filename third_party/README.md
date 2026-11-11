@@ -21,6 +21,8 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `spdlog/` | v1.15.3 | `6fa36017cfd5731d617e1a934f0e5ea9c4445b13` | submodule、编译库 |
 | `Catch2/` | v3.8.1 | `2b60af89e23d28eefc081bc930831ee9d45ea58b` | submodule、仅测试 |
 | `SDL/` | release-3.4.0 | `a962f40bbba175e9716557a25d5d7965f134a3d3` | submodule、窗口 / 输入 |
+| `giflib/` | 6.1.3 | `edff4aed17f857442ab0cac31566572ba08f93d3` | submodule、静态解码库，编码库仅测试 |
+| `libtiff/` | v4.7.2 | `d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d` | submodule、裁剪版静态库 |
 | `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
 | `iguana/` | 2026-08-12 快照 | `2c05e011942c652d020a6782d026c2378c42008a` | YAML 及传递头文件直接保存 |
 
@@ -30,11 +32,12 @@ libjpeg-turbo 使用本地 ExternalProject 独立构建 jpeg-static，因为上�
 
 PNG 使用本地 libpng / zlib 静态 target；WebP 应用仅链接 decoder，测试才构建编码器。
 PlutoSVG / PlutoVG 关闭示例、FreeType 集成和系统字体缓存读取，按固定嵌套源码构建，不探测系统 PlutoVG。安装同时保留 PlutoVG bundled stb 的 MIT 署名、FreeType FTL 和原始版权声明，汇总在 `PlutoVG-NOTICES.txt`。
-上游源码保持原样，BMP 由项目 C23 实现。功能边界与验证见[格式说明](../docs/IMAGE_FORMATS.md)。
+SVG 当前只使用上述 PlutoSVG / PlutoVG 基础静态 profile，复杂 SVG 不支持。没有新增 SVG 后端、Rust 工具链或浏览器运行时；后续选型受轻量 C/C++、无重型框架及无 V8 约束，见[技术决策](../docs/DEVELOPMENT_PLAN.md#8-复杂-svg-范围与技术决策)。
+编译型依赖保持上游源码原样；纯头文件 iguana 的受控补丁见下文及其来源清单。BMP 由项目 C23 实现。功能边界与验证见[格式说明](../docs/IMAGE_FORMATS.md)。
 
 ## 首次注册
 
-九个直接 submodule 及嵌套 PlutoVG 已注册并取得源码，gitlink 与 `dependencies.json` 的固定提交一致，`--check` 校验通过。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、OpenGL 和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。系统 OpenGL、Fontconfig 和窗口系统运行库仍按动态方式使用，这不是完整静态应用。
+当前声明 11 个直接 submodule 及 PlutoSVG 嵌套的 PlutoVG；版本以 `dependencies.json`、gitlink 和实际 checkout 为准，使用 `python3 scripts/init_submodules.py --check` 检查。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、OpenGL 和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。系统 OpenGL 和平台运行库仍按动态方式使用，Linux 还依赖 Fontconfig 等桌面组件，这不是完整静态应用。
 
 `plasma-wayland-protocols/` 保存 KDE appmenu 协议描述、原 MIT 许可和带 SHA-256 的来源清单。它是构建时生成 Wayland C 接口所需的协议数据，不是完整第三方库；没有复制 Qt 实现或链接 Qt。生成工具 wayland-scanner、GIO / GLib、Wayland 和 X11 由系统开发环境提供。
 
