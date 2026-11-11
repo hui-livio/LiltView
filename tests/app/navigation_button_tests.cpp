@@ -272,6 +272,46 @@ TEST_CASE("zoom shortcuts do not focus canvas arrows or show their tooltips", "[
     }
 }
 
+TEST_CASE("canvas arrow clicks preserve left and right shortcut repeats", "[navigation_buttons][ui][shortcut]")
+{
+    for (const bool previous : {true, false})
+    {
+        CAPTURE(previous);
+        Context context;
+        const auto value  = snapshot(2, 3);
+        const auto layout = navigation_button_layout(Context::min, Context::max, 1);
+        const auto point  = center(previous ? layout.previous : layout.next);
+        context.frame(value);
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent(point.x, point.y);
+        io.AddMouseButtonEvent(0, true);
+        context.frame(value);
+        io.AddMouseButtonEvent(0, false);
+        REQUIRE(context.frame(value) == (previous ? MenuAction::previous : MenuAction::next));
+        io.AddMousePosEvent(480, 320);
+        context.frame(value);
+
+        const auto menu = build_menu(Settings{}, Language::english, true, false, true, true, value.can_previous, value.can_next);
+        for (const auto key : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+        {
+            CAPTURE(key);
+            io.AddKeyEvent(key, true);
+            for (unsigned frame = 0; frame < 3; ++frame)
+            {
+                CHECK(context.frame(value) == MenuAction::none);
+                CHECK(ImGui::GetCurrentContext()->NavId == 0);
+                CHECK_FALSE(io.WantTextInput);
+            }
+            const bool left = key == ImGuiKey_LeftArrow;
+            for (const bool repeat : {false, true})
+                CHECK(menu_action_for_input(menu, {left ? "Left" : "Right"}, repeat, {io.WantTextInput, false, false}) ==
+                      (left ? MenuAction::previous : MenuAction::next));
+            io.AddKeyEvent(key, false);
+            context.frame(value);
+        }
+    }
+}
+
 TEST_CASE("unavailable canvas navigation buttons never activate", "[navigation_buttons][ui]")
 {
     for (unsigned mode = 0; mode < 5; ++mode)
