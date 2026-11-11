@@ -66,6 +66,7 @@ class Application
         std::mutex mutex;
         std::atomic<bool> ready{false};
         std::string path;
+        std::string error;
         bool failed = false;
     };
 
@@ -537,6 +538,9 @@ private:
             if (files && files[0])
                 result->path = files[0];
             result->failed = !files;
+            // SDL errors belong to the callback thread; save them before returning.
+            if (result->failed)
+                result->error = SDL_GetError();
         } catch (...)
         {
             result->failed = true;
@@ -560,12 +564,14 @@ private:
         if (!dialog_ || !dialog_->ready.load())
             return;
         std::string path;
+        std::string error;
         {
             std::lock_guard lock(dialog_->mutex);
-            path = dialog_->path;
+            path  = dialog_->path;
+            error = dialog_->error;
         }
         if (dialog_->failed)
-            spdlog::warn("File dialog failed");
+            spdlog::warn("File dialog failed: {}", error.empty() ? "unknown SDL error" : error);
         dialog_.reset();
         if (!path.empty())
             viewer_->open(utf8_path(path));
@@ -802,9 +808,9 @@ private:
             return;
         if (rendered_frames_ == 5)
         {
-            const auto filename = utf8_path(options.screenshot);
-            auto about          = filename.parent_path() / filename.stem();
-            about              += "-about.ppm";
+            const auto filename  = utf8_path(options.screenshot);
+            auto about           = filename.parent_path() / filename.stem();
+            about               += "-about.ppm";
             save_screenshot(platform::path_bytes(about));
         }
         if (rendered_frames_ >= 10 && viewer_->settled() && !smoke_captured_)
@@ -898,9 +904,9 @@ private:
             throw std::runtime_error("Cannot save screenshot: " + filename);
         if (!pixels.alpha.empty())
         {
-            const auto image      = utf8_path(filename);
-            auto alpha_path       = image.parent_path() / image.stem();
-            alpha_path           += "-alpha.pgm";
+            const auto image  = utf8_path(filename);
+            auto alpha_path   = image.parent_path() / image.stem();
+            alpha_path       += "-alpha.pgm";
             std::ofstream alpha(alpha_path, std::ios::binary);
             alpha << "P5\n" << pixels.size.width << ' ' << pixels.size.height << "\n255\n";
             alpha.write(reinterpret_cast<const char *>(pixels.alpha.data()), static_cast<std::streamsize>(pixels.alpha.size()));
