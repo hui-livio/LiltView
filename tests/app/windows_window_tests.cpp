@@ -18,11 +18,12 @@ namespace
 struct NativeWindow
 {
     SDL_Window *window = nullptr;
-    explicit NativeWindow(bool transparent = true)
+    explicit NativeWindow(bool transparent = true, SDL_WindowFlags extra_flags = 0)
     {
         if (SDL_Init(SDL_INIT_VIDEO))
             window = SDL_CreateWindow("LiltView native frame test", 640, 480,
-                                      SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | (transparent ? SDL_WINDOW_TRANSPARENT : 0));
+                                      SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | (transparent ? SDL_WINDOW_TRANSPARENT : 0) |
+                                          extra_flags);
     }
     ~NativeWindow()
     {
@@ -218,6 +219,86 @@ TEST_CASE("Windows square custom corners stay complete through theme resize and 
                 CHECK(rendering);
             }
         }
+    }
+}
+
+TEST_CASE("Windows maximized custom regions cover the offset client area and restore correctly",
+          "[windows][chrome][rounding][maximize]")
+{
+    for (const bool transparent : {false, true})
+    {
+        CAPTURE(transparent);
+        // Real maximization is required: a hidden window or just setting the
+        // chrome.maximized flag does not exercise the native client offset.
+        NativeWindow native(transparent, SDL_WINDOW_NOT_FOCUSABLE);
+        REQUIRE(native.window);
+        const auto hwnd = native.hwnd();
+        REQUIRE(hwnd);
+        REQUIRE(SDL_SetWindowBordered(native.window, false));
+        liltview::WindowShape shape;
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        SDL_PumpEvents();
+        const auto check_region = [&](float radius)
+        {
+            RECT frame{}, client{};
+            POINT origin{};
+            REQUIRE(GetWindowRect(hwnd, &frame));
+            REQUIRE(GetClientRect(hwnd, &client));
+            REQUIRE(ClientToScreen(hwnd, &origin));
+            const LONG dx = origin.x - frame.left, dy = origin.y - frame.top;
+            CAPTURE(radius, dx, dy, client.right, client.bottom);
+            const auto region = CreateRectRgn(0, 0, 0, 0);
+            REQUIRE(region);
+            const auto kind = GetWindowRgn(hwnd, region);
+            RECT bounds{};
+            GetRgnBox(region, &bounds);
+            CHECK(kind == (radius == 0 ? SIMPLEREGION : COMPLEXREGION));
+            CHECK(bounds.left == dx);
+            CHECK(bounds.top == dy);
+            CHECK(bounds.right == dx + client.right);
+            CHECK(bounds.bottom == dy + client.bottom);
+            const std::array corners{POINT{0, 0}, POINT{client.right - 1, 0}, POINT{0, client.bottom - 1},
+                                     POINT{client.right - 1, client.bottom - 1}};
+            for (std::size_t i = 0; i < corners.size(); ++i)
+            {
+                CAPTURE(i);
+                CHECK((PtInRegion(region, dx + corners[i].x, dy + corners[i].y) != FALSE) == (radius == 0));
+            }
+            DeleteObject(region);
+        };
+        for (const bool rounded : {false, true})
+            for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+                for (const bool dark : {false, true})
+                {
+                    CAPTURE(rounded, scale, dark);
+                    liltview::WindowChromeState chrome;
+                    chrome.rounded = rounded;
+                    chrome.scale   = scale;
+                    REQUIRE(SDL_MaximizeWindow(native.window));
+                    REQUIRE(SDL_SyncWindow(native.window));
+                    SDL_PumpEvents();
+                    REQUIRE(IsZoomed(hwnd));
+                    REQUIRE((SDL_GetWindowFlags(native.window) & SDL_WINDOW_MAXIMIZED) != 0);
+                    chrome.maximized     = true;
+                    const auto maximized = liltview::window_chrome_metrics({640, 480}, chrome);
+                    REQUIRE(maximized.radius == 0);
+                    REQUIRE(shape.apply(native.window, maximized.radius));
+                    REQUIRE(liltview::apply_native_window_theme(native.window, dark));
+                    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+                    SendMessageW(hwnd, WM_NCPAINT, 1, 0);
+                    check_region(maximized.radius);
+
+                    REQUIRE(SDL_RestoreWindow(native.window));
+                    REQUIRE(SDL_SyncWindow(native.window));
+                    SDL_PumpEvents();
+                    REQUIRE_FALSE(IsZoomed(hwnd));
+                    chrome.maximized    = false;
+                    const auto restored = liltview::window_chrome_metrics({640, 480}, chrome);
+                    REQUIRE(shape.apply(native.window, restored.radius));
+                    REQUIRE(liltview::apply_native_window_theme(native.window, dark));
+                    check_region(restored.radius);
+                }
+        REQUIRE(SDL_HideWindow(native.window));
     }
 }
 
