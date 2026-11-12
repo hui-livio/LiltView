@@ -1,9 +1,11 @@
 #include "i18n/translator.hpp"
 #include "menu/menu_model.hpp"
 #include "settings/settings.hpp"
+#include "viewer/viewport.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <set>
 
 using namespace liltview;
@@ -186,6 +188,85 @@ TEST_CASE("Shift arrows pan and Control up down zoom with key repeat", "[menu][s
             CHECK(menu_action_for_shortcut(menu, {"Down"}) == MenuAction::none);
             CHECK(menu_action_for_shortcut(menu, {"Control", "Shift", "Up"}) == MenuAction::none);
         }
+}
+
+TEST_CASE("Shift arrows move the viewport in arrow direction rather than image content", "[menu][shortcut][viewport][pan_direction]")
+{
+    struct Direction
+    {
+        const char *key;
+        MenuAction action;
+        render::Point viewport_step;
+    };
+    const Direction directions[]{
+        {"Left", MenuAction::pan_left, {-64, 0}},
+        {"Right", MenuAction::pan_right, {64, 0}},
+        {"Up", MenuAction::pan_up, {0, -64}},
+        {"Down", MenuAction::pan_down, {0, 64}},
+    };
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool repeat : {false, true})
+            for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+                for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+                    for (const auto &direction : directions)
+                    {
+                        CAPTURE(language, repeat, density, orientation, direction.key);
+                        const auto menu = build_menu(Settings{}, language, true, false, true);
+                        const auto action = menu_action_for_input(menu, {"Shift", direction.key}, repeat, {});
+                        REQUIRE(action == direction.action);
+                        const auto delta = menu_pan_delta(action);
+                        Viewport view;
+                        view.update({17, 31}, {529, 543}, density, {8192, 4096}, orientation);
+                        const auto fitted = view;
+                        view.pan(delta[0], delta[1]);
+                        CHECK(view.same_view(fitted)); // A fitted image has no room to move the viewport.
+                        view.actual_size();
+                        const auto before = view.quad({0, 0, 8192, 4096}, {8192, 4096});
+                        view.pan(delta[0], delta[1]);
+                        const auto after = view.quad({0, 0, 8192, 4096}, {8192, 4096});
+                        // Moving the viewport right/down must move image content left/up by 64 logical pixels.
+                        CHECK(std::abs(before[0].x - after[0].x - direction.viewport_step.x) < 0.001f);
+                        CHECK(std::abs(before[0].y - after[0].y - direction.viewport_step.y) < 0.001f);
+                        CHECK(view.scale() == 1);
+                        view.pan(delta[0] * 1000000, delta[1] * 1000000);
+                        const auto edge = view;
+                        view.pan(delta[0], delta[1]);
+                        CHECK(view.same_view(edge)); // Holding the shortcut cannot move past an image boundary.
+                    }
+}
+
+TEST_CASE("unavailable and blocked Shift arrows do not produce viewport movement", "[menu][shortcut][viewport]")
+{
+    for (const bool has_image : {false, true})
+        for (const bool blocked : {false, true})
+            for (const bool repeat : {false, true})
+                for (const auto *key : {"Left", "Right", "Up", "Down"})
+                {
+                    if (has_image && !blocked)
+                        continue;
+                    CAPTURE(has_image, blocked, repeat, key);
+                    const auto menu = build_menu(Settings{}, Language::english, true, false, has_image);
+                    const auto action = menu_action_for_input(menu, {"Shift", key}, repeat, {blocked, false, false});
+                    CHECK(action == MenuAction::none);
+                    CHECK(menu_pan_delta(action) == std::array<double, 2>{0, 0});
+                }
+}
+
+TEST_CASE("non-panning menu actions have no viewport pan delta", "[menu][shortcut]")
+{
+    const auto menu = build_menu(Settings{}, Language::english, true, false, true, true, true, true);
+    const auto check = [&](const auto &self, const MenuItem &item) -> void
+    {
+        if (item.action != MenuAction::pan_left && item.action != MenuAction::pan_right &&
+            item.action != MenuAction::pan_up && item.action != MenuAction::pan_down)
+        {
+            CAPTURE(item.id, item.action);
+            CHECK(menu_pan_delta(item.action) == std::array<double, 2>{0, 0});
+        }
+        for (const auto &child : item.children)
+            self(self, child);
+    };
+    check(check, menu);
 }
 
 TEST_CASE("application shortcut routing gives blocked input and information Escape precedence over fullscreen",

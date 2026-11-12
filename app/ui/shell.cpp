@@ -153,6 +153,14 @@ MenuAction draw_menu(const MenuItem &root)
                     shortcut += "+";
                 if (key == "Control")
                     shortcut += "Ctrl";
+                else if (key == "Up")
+                    shortcut += "↑";
+                else if (key == "Down")
+                    shortcut += "↓";
+                else if (key == "Left")
+                    shortcut += "←";
+                else if (key == "Right")
+                    shortcut += "→";
                 else if (key.size() == 1 && key[0] >= 'a' && key[0] <= 'z')
                     shortcut += static_cast<char>(key[0] - 'a' + 'A');
                 else
