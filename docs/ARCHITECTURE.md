@@ -149,7 +149,7 @@ ctest --preset dev
 
 `debug` / `compat20` 默认构建 Core 与语言/ABI 契约检查；`release` 默认仅构建优化 Core。应用发布使用 `app-release`，`dev` 同时开启应用组件与单元测试。x86 安装 NASM 可启用 libjpeg-turbo SIMD；构建不覆盖系统 JPEG / SDL 库。
 
-Windows 使用 `msvc-dev` / `msvc-release`，在 VS 2022 或 VS 2026 的 x64 Developer Shell 中执行相同的 configure / build / test 预设命令，具体用法见 [README](../README.md#windows--msvc--ninja-预设)。两套 VS 的构建目录应分开。MSVC 使用 C17 与私有 C23 写法兼容头、C11 原子/线程特性检查；不改变第三方源文件的语言标准，也不将 C 源文件改作 C++ 编译。两项 POSIX 符号链接 + `..` 专项测试在 Windows 跳过。
+Windows 使用 `msvc-dev` / `msvc-release`，在 VS 2022 或 VS 2026 的 x64 Developer Shell 中执行相同的 configure / build / test 预设命令，具体用法见 [构建说明](BUILDING.md#windows--msvc--ninja-预设)。两套 VS 的构建目录应分开。MSVC 使用 C17 与私有 C23 写法兼容头、C11 原子/线程特性检查；不改变第三方源文件的语言标准，也不将 C 源文件改作 C++ 编译。两项 POSIX 符号链接 + `..` 专项测试在 Windows 跳过。
 
 单元测试统一使用项目自有 Catch2 入口：仅将“所选测试全部跳过”的退出码转换为 0，便于 VS Code 等直接运行测试的插件处理；CTest 通过独立 stderr 标记继续显示 Skipped。真实断言失败、参数错误和未匹配到测试仍返回非零，不使用放宽空测试检测的选项。
 
