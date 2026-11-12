@@ -1,5 +1,6 @@
 #include "ui/image_information.hpp"
 #include "ui/shell.hpp"
+#include "ui/theme.hpp"
 #include "viewer/viewer.hpp"
 
 #include <SDL3/SDL.h>
@@ -169,45 +170,65 @@ TEST_CASE("full information shell keeps the image navigation panel and footer di
     for (const auto language : {Language::english, Language::chinese})
         for (const float scale : {1.0f, 1.25f, 2.0f})
             for (const bool native_titlebar : {false, true})
-            {
-                CAPTURE(scale, native_titlebar);
-                apply_style(false, scale);
-                auto &io                   = ImGui::GetIO();
-                io.DisplaySize             = {640, 480};
-                io.DisplayFramebufferScale = {scale, scale};
-                ImGui::NewFrame();
-                WindowChromeState chrome;
-                chrome.system_titlebar = native_titlebar;
-                chrome.scale           = scale;
-                chrome.line_height     = ImGui::GetTextLineHeight();
-                const auto metrics     = window_chrome_metrics(io.DisplaySize, chrome);
-                const auto menu        = build_menu(Settings{}, language, true, false, true, true, false, false, true, true);
-                CHECK(shell.draw(language, menu, false, renderer, {}, viewer, chrome) == MenuAction::none);
-                ImGuiWindow *canvas = nullptr, *panel = nullptr;
-                for (auto *window : ImGui::GetCurrentContext()->Windows)
+                for (const bool dark : {false, true})
                 {
-                    const auto name = std::string_view(window->Name);
-                    if (window->Active && name.find("/canvas_") != std::string_view::npos)
-                        canvas = window;
-                    if (window->Active && name.find("/image_information_") != std::string_view::npos)
-                        panel = window;
+                    CAPTURE(scale, native_titlebar, dark);
+                    apply_style(dark, scale);
+                    auto &io                   = ImGui::GetIO();
+                    io.DisplaySize             = {640, 480};
+                    io.DisplayFramebufferScale = {scale, scale};
+                    ImGui::NewFrame();
+                    WindowChromeState chrome;
+                    chrome.system_titlebar = native_titlebar;
+                    chrome.dark            = dark;
+                    chrome.scale           = scale;
+                    chrome.line_height     = ImGui::GetTextLineHeight();
+                    const auto metrics     = window_chrome_metrics(io.DisplaySize, chrome);
+                    const auto menu        = build_menu(Settings{}, language, true, false, true, true, false, false, true, true);
+                    CHECK(shell.draw(language, menu, false, renderer, {}, viewer, chrome) == MenuAction::none);
+                    ImGuiWindow *canvas = nullptr, *panel = nullptr;
+                    for (auto *window : ImGui::GetCurrentContext()->Windows)
+                    {
+                        const auto name = std::string_view(window->Name);
+                        if (window->Active && name.find("/canvas_") != std::string_view::npos)
+                            canvas = window;
+                        if (window->Active && name.find("/image_information_") != std::string_view::npos)
+                            panel = window;
+                    }
+                    REQUIRE(canvas);
+                    REQUIRE(panel);
+                    CHECK(canvas->Size.x > 0);
+                    CHECK(canvas->Pos.x + canvas->Size.x <= panel->Pos.x + 1);
+                    CHECK(panel->Pos.x + panel->Size.x <= 640);
+                    CHECK(canvas->Pos.y + canvas->Size.y <= metrics.status_top() + 1);
+                    CHECK(panel->Pos.y + panel->Size.y <= metrics.status_top() + 1);
+                    const auto buttons = navigation_button_layout(canvas->InnerRect.Min, canvas->InnerRect.Max, scale);
+                    REQUIRE(buttons.valid);
+                    CHECK(buttons.next.max.x <= panel->Pos.x + 1);
+                    CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
+                    ImGui::Render();
+                    CHECK(ImGui::GetDrawData()->TotalVtxCount > 0);
+                    // Sample blank margins (no text/icons) to verify custom-drawn surfaces
+                    // use the applied palette in native and custom chrome modes alike.
+                    const auto &p = current_ui_palette();
+                    const auto &data = *ImGui::GetDrawData();
+                    const auto check_color = [](ImVec4 actual, ImVec4 expected)
+                    {
+                        CHECK(std::abs(actual.x - expected.x) < 0.005f);
+                        CHECK(std::abs(actual.y - expected.y) < 0.005f);
+                        CHECK(std::abs(actual.z - expected.z) < 0.005f);
+                        CHECK(actual.w > 0.99f);
+                    };
+                    check_color(corner_pixel(data, {panel->Pos.x + 5.371f * scale, panel->Pos.y + 80.213f * scale}), p.surface);
+                    check_color(corner_pixel(data, {canvas->Pos.x + 5.371f * scale,
+                                                   canvas->Pos.y + canvas->Size.y - 8.213f * scale}), p.canvas);
+                    check_color(corner_pixel(data, {320.371f, metrics.status_top() + 2.213f * scale}), p.chrome);
+                    // The panel's ChildBg override must not leak into the next frame/canvas.
+                    CHECK(ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_ChildBg]) ==
+                          ImGui::ColorConvertFloat4ToU32(p.canvas));
+                    REQUIRE(viewer.image_details());
+                    CHECK(viewer.image_details()->path == source.path);
                 }
-                REQUIRE(canvas);
-                REQUIRE(panel);
-                CHECK(canvas->Size.x > 0);
-                CHECK(canvas->Pos.x + canvas->Size.x <= panel->Pos.x + 1);
-                CHECK(panel->Pos.x + panel->Size.x <= 640);
-                CHECK(canvas->Pos.y + canvas->Size.y <= metrics.status_top() + 1);
-                CHECK(panel->Pos.y + panel->Size.y <= metrics.status_top() + 1);
-                const auto buttons = navigation_button_layout(canvas->InnerRect.Min, canvas->InnerRect.Max, scale);
-                REQUIRE(buttons.valid);
-                CHECK(buttons.next.max.x <= panel->Pos.x + 1);
-                CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
-                ImGui::Render();
-                CHECK(ImGui::GetDrawData()->TotalVtxCount > 0);
-                REQUIRE(viewer.image_details());
-                CHECK(viewer.image_details()->path == source.path);
-            }
 }
 
 TEST_CASE("rounded shell corners have only border-colored antialiasing without background halos", "[chrome][rounding][shell]")
@@ -283,6 +304,59 @@ TEST_CASE("rounded shell corners have only border-colored antialiasing without b
                     }
                 }
             }
+}
+
+TEST_CASE("square shell corners remain opaque and have uninterrupted borders", "[chrome][rounding][shell]")
+{
+    using namespace liltview;
+    Gui gui;
+    LayoutRenderer renderer;
+    Viewer viewer(renderer);
+    Shell shell;
+    for (const bool dark : {false, true})
+        for (const bool maximized : {false, true})
+            for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+                for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+                {
+                    CAPTURE(dark, maximized, scale, density);
+                    apply_style(dark, scale);
+                    ImGui::GetStyle().AntiAliasedLinesUseTex = false;
+                    auto &io                                 = ImGui::GetIO();
+                    io.DisplaySize                           = {640, 480};
+                    io.DisplayFramebufferScale               = {density, density};
+                    ImGui::NewFrame();
+                    WindowChromeState chrome;
+                    chrome.dark  = dark;
+                    chrome.scale = scale;
+                    // Maximizing must also give square corners with rounding enabled.
+                    chrome.rounded     = maximized;
+                    chrome.maximized   = maximized;
+                    chrome.line_height = ImGui::GetTextLineHeight();
+                    const auto metrics = window_chrome_metrics(io.DisplaySize, chrome);
+                    REQUIRE(metrics.radius == 0);
+                    const auto menu =
+                        build_menu(Settings{}, Language::english, true, false, true, true, false, false, true, true);
+                    shell.draw(Language::english, menu, false, renderer, {}, viewer, chrome);
+                    ImGui::Render();
+                    const auto &data  = *ImGui::GetDrawData();
+                    const auto border = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(window_border_color()));
+                    for (unsigned corner = 0; corner < 4; ++corner)
+                        for (int y = 0; y < 6; ++y)
+                            for (int x = 0; x < 6; ++x)
+                            {
+                                CAPTURE(corner, x, y);
+                                const float px = (x + 0.501f) / density, py = (y + 0.502f) / density;
+                                const auto pixel =
+                                    corner_pixel(data, {(corner & 1) ? 640 - px : px, (corner & 2) ? 480 - py : py});
+                                CHECK(std::abs(pixel.w - 1) < 0.001f);
+                                if (px < metrics.border || py < metrics.border)
+                                {
+                                    CHECK(std::abs(pixel.x - border.x) < 0.01f);
+                                    CHECK(std::abs(pixel.y - border.y) < 0.01f);
+                                    CHECK(std::abs(pixel.z - border.z) < 0.01f);
+                                }
+                            }
+                }
 }
 
 TEST_CASE("main window keeps its original flags and resize regions through resize and theme changes", "[chrome][resize][shell]")

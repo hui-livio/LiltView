@@ -1,4 +1,5 @@
 #include "ui/shell.hpp"
+#include "ui/theme.hpp"
 #include "ui/window_chrome.hpp"
 
 #include <algorithm>
@@ -200,7 +201,7 @@ TEST_CASE("window borders use palette A with the designed contrast against adjac
             const auto packed = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(color));
             const std::array surfaces{style.Colors[ImGuiCol_WindowBg], style.Colors[ImGuiCol_ChildBg],
                                       style.Colors[ImGuiCol_MenuBarBg],
-                                      dark ? ImVec4{0.10f, 0.12f, 0.16f, 1} : ImVec4{0.95f, 0.96f, 0.98f, 1}};
+                                      current_ui_palette().chrome};
             for (std::size_t index = 0; index < surfaces.size(); ++index)
             {
                 CAPTURE(index);

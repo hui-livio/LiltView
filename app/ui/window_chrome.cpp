@@ -1,4 +1,5 @@
 #include "window_chrome.hpp"
+#include "theme.hpp"
 
 #include <algorithm>
 #include <array>
@@ -128,15 +129,13 @@ MenuAction title_button(const char *id, Text tooltip, MenuAction action, ImVec2 
     const bool hovered = ImGui::IsItemHovered();
     if (hovered)
     {
-        const ImVec4 hover = glyph == 2 ? ImVec4{0.83f, 0.14f, 0.19f, 1} :
-            state.dark                  ? ImVec4{0.22f, 0.28f, 0.36f, 1} :
-                                          ImVec4{0.83f, 0.87f, 0.93f, 1};
+        const auto &p = current_ui_palette();
+        const bool held = ImGui::IsItemActive();
+        const ImVec4 hover = glyph == 2 ? (held ? p.close_pressed : p.close_hover) : (held ? p.pressed : p.hover);
         list->AddRectFilled(min, max, ImGui::GetColorU32(hover), glyph == 2 ? radius : 0, ImDrawFlags_RoundCornersTopRight);
         ImGui::SetTooltip("%s", translate(language, tooltip));
     }
-    const auto color = ImGui::GetColorU32(hovered && glyph == 2 ? ImVec4{1, 1, 1, 1} :
-                                              state.dark        ? ImVec4{0.94f, 0.96f, 1, 1} :
-                                                                  ImVec4{0.10f, 0.13f, 0.18f, 1});
+    const auto color = ImGui::GetColorU32(hovered && glyph == 2 ? ImVec4{1, 1, 1, 1} : current_ui_palette().text);
     const ImVec2 center{std::round((min.x + max.x) * 0.5f), std::round((min.y + max.y) * 0.5f)};
     const float r = 5 * state.scale, stroke = std::max(1.0f, state.scale);
     if (glyph == 0)
@@ -173,14 +172,14 @@ MenuAction draw_window_titlebar(const WindowChromeMetrics &m, const WindowChrome
     const ImVec2 min{origin.x + m.border, origin.y + m.border};
     const float bottom = origin.y + m.title_bottom();
     list->AddRectFilled(min, {origin.x + m.width - m.border, bottom},
-                        ImGui::GetColorU32(state.dark ? ImVec4{0.10f, 0.12f, 0.16f, 1} : ImVec4{0.95f, 0.96f, 0.98f, 1}),
+                        ImGui::GetColorU32(current_ui_palette().chrome),
                         std::max(0.0f, m.radius - m.border), ImDrawFlags_RoundCornersTop);
     const float icon_size = 22 * state.scale;
     const ImVec2 icon_min{min.x + 12 * state.scale, min.y + (m.title_height - icon_size) * 0.5f};
     list->PushClipRect(min, {origin.x + m.controls_left(), bottom}, true);
     renderer.add_image(list, icon, {icon_min.x, icon_min.y}, {icon_min.x + icon_size, icon_min.y + icon_size});
     list->AddText({icon_min.x + icon_size + 10 * state.scale, min.y + (m.title_height - ImGui::GetTextLineHeight()) * 0.5f},
-                  ImGui::GetColorU32(state.dark ? ImVec4{0.94f, 0.96f, 1, 1} : ImVec4{0.10f, 0.13f, 0.18f, 1}), "LiltView");
+                  ImGui::GetColorU32(current_ui_palette().text), "LiltView");
     list->PopClipRect();
     const auto button = [&](unsigned index, const char *id, Text tooltip, MenuAction action)
     {

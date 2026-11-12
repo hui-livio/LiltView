@@ -17,9 +17,12 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <imgui_internal.h>
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 using namespace liltview;
 
@@ -55,6 +58,7 @@ struct Context
         io.DisplaySize = {800, 500};
         io.DeltaTime   = 1.0f / 60;
         io.IniFilename = io.LogFilename = nullptr;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.Fonts->AddFontDefault();
         unsigned char *pixels = nullptr;
         int width = 0, height = 0;
@@ -72,12 +76,25 @@ struct Context
         ImGui::SetNextWindowSize({800, 500});
         ImGui::Begin("information_test", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
         const bool closed = draw_image_information(language, details, {300, 20}, {640, 460});
+        panel = nullptr;
+        for (auto *window : ImGui::GetCurrentContext()->Windows)
+            if (window->Active && std::string_view(window->Name).find("/image_information_") != std::string_view::npos)
+                panel = window;
+        REQUIRE(panel);
+        close_id = panel->GetID("###close_image_information");
+        const float size = std::min(28.0f * ImGui::GetStyle().FontScaleDpi,
+                                    std::max(1.0f, panel->WorkRect.GetWidth()));
+        close_rect = {{panel->WorkRect.Max.x - size, panel->DC.CursorStartPos.y},
+                      {panel->WorkRect.Max.x, panel->DC.CursorStartPos.y + size}};
         CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
         ImGui::End();
         ImGui::Render();
         REQUIRE(ImGui::GetDrawData()->TotalVtxCount > 0);
         return closed;
     }
+    ImGuiWindow *panel = nullptr;
+    ImGuiID close_id = 0;
+    ImRect close_rect;
 };
 } // namespace
 
@@ -189,13 +206,90 @@ TEST_CASE("information panel renders literal long paths and closes through a sta
     auto details = example();
     details.path = std::filesystem::path(std::u8string(u8"/a/") + std::u8string(500, u8'x') + u8"-中文-%s-%d-100%.png");
     CHECK_FALSE(context.frame(details, Language::english));
+    CHECK_FALSE(context.frame(details, Language::english)); // Let the new content reserve its scrollbar.
     auto &io = ImGui::GetIO();
-    io.AddMousePosEvent(315, 35);
+    const auto center = context.close_rect.GetCenter();
+    io.AddMousePosEvent(center.x, center.y);
     io.AddMouseButtonEvent(0, true);
     CHECK_FALSE(context.frame(details, Language::english));
     io.AddMouseButtonEvent(0, false);
     CHECK(context.frame(details, Language::chinese));
     CHECK_FALSE(context.frame(details, Language::chinese));
+}
+
+TEST_CASE("information close icon stays right aligned and mouse activation survives language changes", "[image_details][ui][theme]")
+{
+    for (const bool dark : {false, true})
+        for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+        {
+            CAPTURE(dark, scale);
+            Context context;
+            apply_style(dark, scale);
+            // Warm up the child window and reserve its scrollbar width.
+            CHECK_FALSE(context.frame(example(), Language::english));
+            CHECK_FALSE(context.frame(example(), Language::english));
+            const auto rect = context.close_rect;
+            CHECK(rect.GetWidth() == 28 * scale);
+            CHECK(rect.GetHeight() == 28 * scale);
+            CHECK(rect.Min.x > context.panel->Pos.x + context.panel->Size.x / 2);
+            CHECK(rect.Max.x <= context.panel->Pos.x + context.panel->Size.x);
+            CHECK(rect.Min.y >= context.panel->Pos.y);
+            const auto id = context.close_id;
+            auto &io = ImGui::GetIO();
+            const auto point = rect.GetCenter();
+            io.AddMousePosEvent(point.x, point.y);
+            io.AddMouseButtonEvent(0, true);
+            CHECK_FALSE(context.frame(example(), Language::english));
+            CHECK(ImGui::GetCurrentContext()->ActiveId == id);
+            io.AddMouseButtonEvent(0, false);
+            CHECK(context.frame(example(), Language::chinese));
+            CHECK(context.close_id == id);
+            CHECK_FALSE(context.frame(example(), Language::chinese));
+        }
+}
+
+TEST_CASE("information close icon cancels a dragged-away click and ignores title clicks", "[image_details][ui]")
+{
+    Context context;
+    apply_style(false, 1);
+    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+    auto &io = ImGui::GetIO();
+    const auto center = context.close_rect.GetCenter();
+    io.AddMousePosEvent(center.x, center.y);
+    io.AddMouseButtonEvent(0, true);
+    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+    io.AddMousePosEvent(330, center.y);
+    io.AddMouseButtonEvent(0, false);
+    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+    io.AddMouseButtonEvent(0, true);
+    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+    io.AddMouseButtonEvent(0, false);
+    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+}
+
+TEST_CASE("information close icon supports keyboard activation without repeated dismissals", "[image_details][ui][shortcut]")
+{
+    for (const auto key : {ImGuiKey_Enter, ImGuiKey_Space})
+    {
+        CAPTURE(key);
+        Context context;
+        apply_style(true, 1);
+        CHECK_FALSE(context.frame(std::nullopt, Language::english));
+        CHECK_FALSE(context.frame(std::nullopt, Language::english));
+        ImGui::FocusWindow(context.panel);
+        auto rect = context.close_rect;
+        rect.Translate({-context.panel->Pos.x, -context.panel->Pos.y});
+        ImGui::SetNavID(context.close_id, ImGuiNavLayer_Main, context.panel->NavRootFocusScopeId, rect);
+        ImGui::GetCurrentContext()->NavCursorVisible = true;
+        ImGui::GetCurrentContext()->NavHighlightItemUnderNav = true;
+        auto &io = ImGui::GetIO();
+        io.AddKeyEvent(key, true);
+        CHECK(context.frame(std::nullopt, Language::english));
+        CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+        io.AddKeyEvent(key, false);
+        CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
+    }
 }
 
 TEST_CASE("information shell toggle and dismiss retain a one-action Escape contract", "[image_details][ui]")
