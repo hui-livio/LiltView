@@ -433,6 +433,11 @@ private:
                 viewer_->pan(delta[0], delta[1]);
             }
             break;
+        case MenuAction::rotate_left:
+        case MenuAction::rotate_right:
+            if (viewer_->has_image())
+                viewer_->rotate(action == MenuAction::rotate_left ? -1 : 1);
+            break;
         case MenuAction::zoom_in:
             if (viewer_->has_image())
                 viewer_->zoom(1);

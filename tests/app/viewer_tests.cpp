@@ -781,6 +781,7 @@ TEST_CASE("native scenes retain every decoded tile across camera changes", "[vie
     {
         viewer.actual_size();
         viewer.pan(-20, 10);
+        viewer.rotate(i % 2 == 0 ? -1 : 1);
         if (i % 2 == 0)
             viewer.zoom(-2); // Keyboard/menu zoom shares the decode-free camera path.
         else
@@ -1227,6 +1228,54 @@ TEST_CASE("image details remain empty after an initial failed open", "[viewer][i
     loop.settle(viewer);
     CHECK(viewer.failed());
     CHECK_FALSE(viewer.image_details());
+}
+
+TEST_CASE("resident scene rotation draws transformed quads without decoding allocating or uploading pixels",
+          "[viewer][rotation][native]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    TestRenderer renderer;
+    renderer.max_edge = 128;
+    const auto file   = directory.path / "board.png";
+    liltview::test::checkerboard(file, 512, 384, 17);
+    liltview::Viewer viewer(renderer);
+    viewer.open(file);
+    loop.settle(viewer);
+    InformationGui gui;
+    gui.frame(viewer, 1);
+    const auto original       = viewer.presented_view();
+    const auto original_reads = viewer.last_source_bytes_read();
+    const auto uploads        = renderer.uploads;
+    const auto creates        = renderer.creates;
+    const auto textures       = renderer.textures.size();
+    std::filesystem::remove(file);
+    for (unsigned turn = 0; turn < 4; ++turn)
+    {
+        viewer.rotate(1);
+        gui.frame(viewer, 1);
+        CHECK_FALSE(viewer.failed());
+        CHECK_FALSE(viewer.detail_loading());
+        CHECK(renderer.uploads == uploads);
+        CHECK(renderer.creates == creates);
+        CHECK(renderer.textures.size() == textures);
+        CHECK(viewer.last_source_bytes_read() == original_reads);
+        if (turn < 3)
+            CHECK_FALSE(viewer.presented_view().same_view(original));
+    }
+    CHECK(viewer.presented_view().same_view(original));
+    viewer.rotate(-1);
+    gui.frame(viewer, 1);
+    CHECK_FALSE(viewer.presented_view().same_view(original));
+    // Opening another image resets manual rotation even for the same dimensions.
+    const auto next = directory.path / "next.png";
+    liltview::test::checkerboard(next, 512, 384, 17);
+    viewer.open(next);
+    loop.settle(viewer);
+    gui.frame(viewer, 1);
+    CHECK(viewer.presented_view().same_view(original));
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
 }
 
 TEST_CASE("image details report physical displayed zoom while a cold target is still restoring",

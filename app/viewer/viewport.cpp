@@ -13,13 +13,14 @@ bool Viewport::same_view(const Viewport &other) const
 {
     return min_.x == other.min_.x && min_.y == other.min_.y && max_.x == other.max_.x && max_.y == other.max_.y &&
         source_.width == other.source_.width && source_.height == other.source_.height && orientation_ == other.orientation_ &&
-        density_ == other.density_ && scale_ == other.scale_ && center_x_ == other.center_x_ && center_y_ == other.center_y_;
+        rotation_ == other.rotation_ && density_ == other.density_ && scale_ == other.scale_ && center_x_ == other.center_x_ &&
+        center_y_ == other.center_y_;
 }
 bool Viewport::same_layout(const Viewport &other) const
 {
     return min_.x == other.min_.x && min_.y == other.min_.y && max_.x == other.max_.x && max_.y == other.max_.y &&
         source_.width == other.source_.width && source_.height == other.source_.height && orientation_ == other.orientation_ &&
-        density_ == other.density_;
+        rotation_ == other.rotation_ && density_ == other.density_;
 }
 Viewport Viewport::toward(const Viewport &other, double fraction) const
 {
@@ -76,6 +77,46 @@ void Viewport::actual_size()
     zoom_ = scale_ = 1;
     clamp();
 }
+lv_orientation Viewport::display_orientation() const
+{
+    // Compose screen-space quarter turns with all eight EXIF orientations,
+    // including mirrored sources. Pixel and UV storage remain unchanged.
+    static constexpr lv_orientation orientations[4][8]{
+        {1, 2, 3, 4, 5, 6, 7, 8},
+        {6, 7, 8, 5, 2, 3, 4, 1},
+        {3, 4, 1, 2, 7, 8, 5, 6},
+        {8, 5, 6, 7, 4, 1, 2, 3},
+    };
+    return orientations[rotation_][orientation_ >= 1 && orientation_ <= 8 ? orientation_ - 1 : 0];
+}
+void Viewport::rotate(int quarter_turns)
+{
+    const auto turns = static_cast<unsigned>((quarter_turns % 4 + 4) % 4);
+    if (!turns || !source_.width || !source_.height)
+        return;
+    const double width  = display_orientation() >= 5 ? source_.height : source_.width;
+    const double height = display_orientation() >= 5 ? source_.width : source_.height;
+    const double x = center_x_, y = center_y_;
+    switch (turns)
+    {
+    case 1:
+        center_x_ = height - y;
+        center_y_ = x;
+        break;
+    case 2:
+        center_x_ = width - x;
+        center_y_ = height - y;
+        break;
+    case 3:
+        center_x_ = y;
+        center_y_ = width - x;
+        break;
+    }
+    rotation_ = (rotation_ + turns) % 4;
+    // FIT recomputes the scale for swapped bounds; manual zoom preserves its
+    // physical scale and source-space center, subject to the usual edge clamp.
+    update(min_, max_, static_cast<float>(density_), source_, orientation_);
+}
 void Viewport::update(render::Point min, render::Point max, float density, lv_size_u32 source, lv_orientation orientation)
 {
     min_         = min;
@@ -85,8 +126,8 @@ void Viewport::update(render::Point min, render::Point max, float density, lv_si
     orientation_ = orientation;
     if (!source.width || !source.height)
         return;
-    const double width  = orientation_ >= 5 ? source.height : source.width,
-                 height = orientation_ >= 5 ? source.width : source.height;
+    const double width  = display_orientation() >= 5 ? source.height : source.width,
+                 height = display_orientation() >= 5 ? source.width : source.height;
     fit_scale_          = std::min(
         {static_cast<double>(max.x - min.x) * density_ / width, static_cast<double>(max.y - min.y) * density_ / height, 1.0});
     fit_scale_ = std::max(fit_scale_, 1e-12);
@@ -103,8 +144,8 @@ void Viewport::clamp()
 {
     if (!source_.width || !source_.height)
         return;
-    const double width  = orientation_ >= 5 ? source_.height : source_.width,
-                 height = orientation_ >= 5 ? source_.width : source_.height;
+    const double width  = display_orientation() >= 5 ? source_.height : source_.width,
+                 height = display_orientation() >= 5 ? source_.width : source_.height;
     const double half_w = std::max(0.0, static_cast<double>(max_.x - min_.x)) * density_ / (2 * scale_);
     const double half_h = std::max(0.0, static_cast<double>(max_.y - min_.y)) * density_ / (2 * scale_);
     center_x_           = width > 2 * half_w ? std::clamp(center_x_, half_w, width - half_w) : width / 2;
@@ -128,7 +169,10 @@ void Viewport::zoom(double wheel, render::Point anchor)
         return;
     const double cx = (min_.x + max_.x) / 2, cy = (min_.y + max_.y) / 2;
     const double x = center_x_ + (anchor.x - cx) * density_ / scale_, y = center_y_ + (anchor.y - cy) * density_ / scale_;
-    zoom_     = std::clamp(scale_ * std::pow(1.25, wheel), fit_scale_, 32.0);
+    // Rotation can preserve a manual scale below the new FIT minimum.
+    // Zooming out (or by zero) must never raise that preserved scale.
+    const double minimum = std::min(fit_scale_, scale_);
+    zoom_     = std::clamp(scale_ * std::pow(1.25, wheel), minimum, 32.0);
     fit_      = false;
     scale_    = zoom_;
     center_x_ = x - (anchor.x - cx) * density_ / scale_;
@@ -138,7 +182,7 @@ void Viewport::zoom(double wheel, render::Point anchor)
 std::array<double, 2> Viewport::orient(double x, double y) const
 {
     const double w = source_.width, h = source_.height;
-    switch (orientation_)
+    switch (display_orientation())
     {
     case 2:
         return {w - x, y};
@@ -161,7 +205,7 @@ std::array<double, 2> Viewport::orient(double x, double y) const
 std::array<double, 2> Viewport::unorient(double x, double y) const
 {
     const double w = source_.width, h = source_.height;
-    switch (orientation_)
+    switch (display_orientation())
     {
     case 2:
         return {w - x, y};

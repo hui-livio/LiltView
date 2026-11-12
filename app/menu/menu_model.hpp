@@ -26,6 +26,8 @@ enum class MenuAction
     pan_down,
     zoom_in,
     zoom_out,
+    rotate_left,
+    rotate_right,
     about,
     language_system,
     language_english,

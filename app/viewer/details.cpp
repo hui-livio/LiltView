@@ -45,6 +45,11 @@ void Viewer::actual_size()
             error_ = 0; // A failed replacement does not invalidate the cached scene.
     }
 }
+void Viewer::rotate(int quarter_turns)
+{
+    retry_restore();
+    viewport_.rotate(quarter_turns);
+}
 void Viewer::set_viewport(render::Point min, render::Point max, float density)
 {
     const auto &image = loading_ && !pending_scene_.empty() ? pending_info_ : info_;

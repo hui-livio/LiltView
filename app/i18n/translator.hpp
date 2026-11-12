@@ -42,6 +42,8 @@ enum class Text
     pan_down,
     zoom_in,
     zoom_out,
+    rotate_left,
+    rotate_right,
     tagline,
     empty_title,
     empty_hint,

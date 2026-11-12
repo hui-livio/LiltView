@@ -149,7 +149,7 @@ TEST_CASE("shortcuts use the menu definitions and ignore unavailable actions", "
     CHECK(menu_action_for_shortcut(menu, {"Control", "o"}) == MenuAction::none);
 }
 
-TEST_CASE("Shift arrows pan and Control up down zoom with key repeat", "[menu][shortcut]")
+TEST_CASE("Shift arrows pan and Control arrows zoom or rotate with key repeat", "[menu][shortcut]")
 {
     struct Control
     {
@@ -161,6 +161,7 @@ TEST_CASE("Shift arrows pan and Control up down zoom with key repeat", "[menu][s
         {50, MenuAction::pan_left, {"Shift", "Left"}}, {51, MenuAction::pan_right, {"Shift", "Right"}},
         {52, MenuAction::pan_up, {"Shift", "Up"}},     {53, MenuAction::pan_down, {"Shift", "Down"}},
         {54, MenuAction::zoom_in, {"Control", "Up"}},  {55, MenuAction::zoom_out, {"Control", "Down"}},
+        {58, MenuAction::rotate_left, {"Control", "Left"}}, {59, MenuAction::rotate_right, {"Control", "Right"}},
     };
     for (const auto language : {Language::english, Language::chinese})
         for (const bool has_image : {false, true})
@@ -181,9 +182,6 @@ TEST_CASE("Shift arrows pan and Control up down zoom with key repeat", "[menu][s
                     CHECK(menu_action_for_shortcut(menu, control.shortcut, repeat) ==
                           (has_image ? control.action : MenuAction::none));
             }
-            // The superseded Control+Left/Right bindings must not pan or navigate.
-            CHECK(menu_action_for_shortcut(menu, {"Control", "Left"}) == MenuAction::none);
-            CHECK(menu_action_for_shortcut(menu, {"Control", "Right"}) == MenuAction::none);
             CHECK(menu_action_for_shortcut(menu, {"Up"}) == MenuAction::none);
             CHECK(menu_action_for_shortcut(menu, {"Down"}) == MenuAction::none);
             CHECK(menu_action_for_shortcut(menu, {"Control", "Shift", "Up"}) == MenuAction::none);
@@ -531,4 +529,25 @@ TEST_CASE("loading blocks every application shortcut and repeat until completion
                 CHECK(menu_action_for_input(menu, {"Escape"}, false, {false, fullscreen, info, false}) == escape);
                 CHECK(menu_action_for_input(menu, {"Control", "q"}, false, {true, fullscreen, info, false}) == MenuAction::none);
             }
+}
+
+TEST_CASE("rotation shortcuts honor blocked and loading input without navigation or pan conflicts", "[menu][shortcut][rotation]")
+{
+    const auto menu = build_menu(Settings{}, Language::english, true, false, true, true, true, true);
+    for (const bool blocked : {false, true})
+        for (const bool loading : {false, true})
+            for (const bool repeat : {false, true})
+            {
+                const ShortcutContext context{blocked, false, false, loading};
+                CHECK(menu_action_for_input(menu, {"Control", "Left"}, repeat, context) ==
+                      (blocked || loading ? MenuAction::none : MenuAction::rotate_left));
+                CHECK(menu_action_for_input(menu, {"Control", "Right"}, repeat, context) ==
+                      (blocked || loading ? MenuAction::none : MenuAction::rotate_right));
+                CHECK(menu_action_for_input(menu, {"Control", "Shift", "Left"}, repeat, context) == MenuAction::none);
+                CHECK(menu_action_for_input(menu, {"Control", "Alt", "Right"}, repeat, context) == MenuAction::none);
+            }
+    CHECK(menu_action_for_shortcut(menu, {"Left"}) == MenuAction::previous);
+    CHECK(menu_action_for_shortcut(menu, {"Right"}) == MenuAction::next);
+    CHECK(menu_action_for_shortcut(menu, {"Shift", "Left"}) == MenuAction::pan_left);
+    CHECK(menu_action_for_shortcut(menu, {"Shift", "Right"}) == MenuAction::pan_right);
 }
