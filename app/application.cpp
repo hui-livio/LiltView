@@ -518,10 +518,10 @@ private:
 
     void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell, const CloseTiming &timing)
     {
-        // 文本输入和弹窗优先处理按键，避免应用快捷键抢走编辑操作。
+        // 文本输入和弹窗优先处理按键；图片尚未加载完成时不执行应用快捷键。
         const ShortcutContext context{dialog_ || ImGui::GetIO().WantTextInput ||
                                           ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
-                                      is_fullscreen(), shell.image_info_open()};
+                                      is_fullscreen(), shell.image_info_open(), !viewer_->settled()};
         // 使用菜单模型中的同一份快捷键定义；禁用菜单项不会响应按键。
         std::vector<std::string> shortcut;
         if ((key.mod & SDL_KMOD_CTRL) != 0)

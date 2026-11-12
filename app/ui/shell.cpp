@@ -216,6 +216,27 @@ MenuAction draw_menu(const MenuItem &root)
     }
     return result;
 }
+
+MenuAction draw_canvas_menu(const MenuItem &menu, bool enabled)
+{
+    // The stable View ID and renderer are shared with the menu bar, including
+    // shortcuts, separators, checked state and per-action availability.
+    const auto *view     = find_menu_item(menu, 2);
+    enabled              = enabled && view && view->enabled;
+    constexpr auto popup = "canvas_view_menu";
+    if (enabled && ImGui::IsWindowHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+        ImGui::OpenPopup(popup);
+    MenuAction action = MenuAction::none;
+    if (ImGui::BeginPopup(popup))
+    {
+        if (enabled)
+            action = draw_menu(*view);
+        else
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    return action;
+}
 } // namespace
 
 void apply_style(bool dark, float scale)
@@ -279,7 +300,7 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
         return action;
     }
 
-    const auto canvas_action = draw_canvas(language, renderer, icon, viewer, metrics);
+    const auto canvas_action = draw_canvas(language, menu, renderer, icon, viewer, metrics);
     if (canvas_action != MenuAction::none)
         action = canvas_action;
     draw_status(language, viewer, metrics);
@@ -300,8 +321,8 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
     return selected;
 }
 
-MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer,
-                              const WindowChromeMetrics &chrome)
+MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::Renderer &renderer, render::Image icon,
+                              Viewer &viewer, const WindowChromeMetrics &chrome)
 {
     // 画布填满无内边距的主窗口，仅为底部状态栏预留高度。
     const auto t = [language](Text text)
@@ -327,7 +348,10 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
                                    ImGui::IsMouseDown(ImGuiMouseButton_Left));
     const auto finish = [&]
     {
-        const auto selected = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        auto selected         = draw_canvas_menu(menu, viewer.settled() && viewer.has_visible_image() && !viewer.failed());
+        const auto navigation = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        if (navigation != MenuAction::none)
+            selected = navigation;
         // Navigation restores the cursor after the reason text. Submit its
         // trailing spacing explicitly rather than extending child bounds via SetCursorPos.
         ImGui::Dummy({0, 0});

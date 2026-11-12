@@ -502,3 +502,33 @@ TEST_CASE("rounded borderless corners default on and can be independently disabl
     apply_menu_setting(MenuAction::disable_rounding, settings);
     CHECK_FALSE(settings.disable_rounding);
 }
+
+TEST_CASE("loading blocks every application shortcut and repeat until completion", "[menu][shortcut][loading]")
+{
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool fullscreen : {false, true})
+            for (const bool info : {false, true})
+            {
+                const auto menu  = build_menu(Settings{}, language, true, fullscreen, true, true, true, true, info, true);
+                const auto check = [&](const auto &self, const MenuItem &item) -> void
+                {
+                    if (!item.shortcut.empty())
+                        for (const bool repeat : {false, true})
+                        {
+                            const ShortcutContext loading{false, fullscreen, info, true};
+                            CHECK(menu_action_for_input(menu, item.shortcut, repeat, loading) == MenuAction::none);
+                            const ShortcutContext ready{false, fullscreen, info, false};
+                            CHECK(menu_action_for_input(menu, item.shortcut, repeat, ready) ==
+                                  menu_action_for_shortcut(menu, item.shortcut, repeat));
+                        }
+                    for (const auto &child : item.children)
+                        self(self, child);
+                };
+                check(check, menu);
+                for (const bool repeat : {false, true})
+                    CHECK(menu_action_for_input(menu, {"Escape"}, repeat, {false, fullscreen, info, true}) == MenuAction::none);
+                const auto escape = info ? MenuAction::image_info : fullscreen ? MenuAction::fullscreen : MenuAction::none;
+                CHECK(menu_action_for_input(menu, {"Escape"}, false, {false, fullscreen, info, false}) == escape);
+                CHECK(menu_action_for_input(menu, {"Control", "q"}, false, {true, fullscreen, info, false}) == MenuAction::none);
+            }
+}

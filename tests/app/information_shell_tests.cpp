@@ -496,3 +496,252 @@ TEST_CASE("failed replacement shows a failure illustration and its reason below 
                         }
     }
 }
+
+namespace
+{
+struct CanvasMenuContext
+{
+    Source source;
+    Gui gui;
+    LayoutRenderer renderer;
+    liltview::Viewer viewer{renderer};
+    liltview::Shell shell;
+    liltview::Language language = liltview::Language::english;
+    bool native = true, dark = false, fullscreen = false;
+    float scale = 1;
+    std::string text;
+    liltview::MenuItem menu;
+
+    CanvasMenuContext()
+    {
+        ImGui::GetIO().DisplaySize  = {960, 900};
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        std::filesystem::copy_file(source.path, source.directory / "a.bmp");
+    }
+    void settle()
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!viewer.settled() || viewer.navigation().scanning)
+        {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            viewer.pump();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    void load()
+    {
+        viewer.open(source.path);
+        settle();
+        REQUIRE_FALSE(viewer.failed());
+        frame();
+    }
+    liltview::MenuAction frame()
+    {
+        using namespace liltview;
+        apply_style(dark, scale);
+        ImGui::NewFrame();
+        WindowChromeState chrome;
+        chrome.system_titlebar = native;
+        chrome.dark            = dark;
+        chrome.scale           = scale;
+        chrome.line_height     = ImGui::GetTextLineHeight();
+        menu                   = build_menu(Settings{}, language, true, fullscreen, viewer.has_image(), viewer.can_actual_size(),
+                                            viewer.navigation().can_previous, viewer.navigation().can_next, shell.image_info_open(),
+                                            viewer.has_visible_image());
+        ImGui::LogToBuffer();
+        ImGui::GetCurrentContext()->LogWindow = nullptr;
+        const auto action                     = shell.draw(language, menu, false, renderer, {}, viewer, chrome);
+        text                                  = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
+        ImGui::Render();
+        return action;
+    }
+    ImGuiWindow *canvas() const
+    {
+        for (auto *window : ImGui::GetCurrentContext()->Windows)
+            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
+                return window;
+        return nullptr;
+    }
+    ImGuiWindow *popup() const
+    {
+        auto *window = canvas();
+        if (window)
+            for (const auto &entry : ImGui::GetCurrentContext()->OpenPopupStack)
+                if (entry.PopupId == window->GetID("canvas_view_menu"))
+                    return entry.Window;
+        return nullptr;
+    }
+    liltview::MenuAction right_click(ImVec2 point)
+    {
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent(point.x, point.y);
+        frame();
+        io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+        CHECK(frame() == liltview::MenuAction::none);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+        const auto action = frame();
+        frame(); // Popup sizing and hover settle on the next frame.
+        return action;
+    }
+    ImVec2 center() const
+    {
+        const auto *window = canvas();
+        REQUIRE(window);
+        return window->InnerRect.GetCenter();
+    }
+    void close()
+    {
+        shell.dismiss_transient_menus();
+        frame();
+    }
+};
+} // namespace
+
+TEST_CASE("canvas right click shares View entries shortcuts and actions in both themes and languages", "[shell][canvas_menu]")
+{
+    using namespace liltview;
+    CanvasMenuContext context;
+    context.load();
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool dark : {false, true})
+            for (const bool native : {false, true})
+                for (const float scale : {1.0f, 1.5f})
+                {
+                    CAPTURE(language, dark, native, scale);
+                    context.language = language;
+                    context.dark     = dark;
+                    context.native   = native;
+                    context.scale    = scale;
+                    context.frame();
+                    // Blank space around the small image belongs to the canvas too.
+                    auto point  = context.center();
+                    point.x    -= 100;
+                    REQUIRE(context.right_click(point) == MenuAction::none);
+                    auto *popup = context.popup();
+                    REQUIRE(popup);
+                    const auto *view = find_menu_item(context.menu, 2);
+                    REQUIRE(view);
+                    std::size_t previous = 0;
+                    for (const auto &item : view->children)
+                        if (!item.separator)
+                        {
+                            const auto position = context.text.find(item.label, previous);
+                            REQUIRE(position != std::string::npos);
+                            previous = position + item.label.size();
+                        }
+                    CHECK(context.text.find("Ctrl+↑") != std::string::npos);
+                    CHECK(context.text.find("Shift+←") != std::string::npos);
+                    CHECK(context.text.find("F11") != std::string::npos);
+                    // The first enabled row dispatches exactly the same action
+                    // as the corresponding View entry (the current file is last).
+                    REQUIRE(find_menu_item(*view, 21)->enabled);
+                    const auto first = popup->DC.CursorStartPos;
+                    auto &io         = ImGui::GetIO();
+                    io.AddMousePosEvent(first.x + 8, first.y + 4);
+                    context.frame();
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+                    CHECK(context.frame() == MenuAction::none);
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+                    CHECK(context.frame() == MenuAction::previous);
+                    CHECK_FALSE(context.popup());
+                    context.frame();
+                }
+}
+
+TEST_CASE("canvas menu rejects empty queued loading and failed images and closes stale popups", "[shell][canvas_menu][loading]")
+{
+    using namespace liltview;
+    CanvasMenuContext context;
+    context.frame();
+    context.right_click(context.center());
+    CHECK_FALSE(context.popup());
+    context.viewer.open(context.source.path);
+    REQUIRE_FALSE(context.viewer.settled());
+    // No pump: deterministically exercise queued/initial loading, even with
+    // worker threads that can decode the tiny fixture almost immediately.
+    context.right_click(context.center());
+    CHECK_FALSE(context.popup());
+    context.settle();
+    context.frame();
+    context.right_click(context.center());
+    REQUIRE(context.popup());
+    // Loading a replacement invalidates an already-open popup, even when the
+    // previous scene remains visible. No shortcut can move that cached scene.
+    context.viewer.open(context.source.directory / "a.bmp");
+    REQUIRE_FALSE(context.viewer.settled());
+    REQUIRE(context.viewer.has_visible_image());
+    context.frame();
+    CHECK_FALSE(context.popup());
+    context.right_click(context.center());
+    CHECK_FALSE(context.popup());
+    const ShortcutContext loading{false, false, false, !context.viewer.settled()};
+    CHECK(menu_action_for_input(context.menu, {"Shift", "Right"}, false, loading) == MenuAction::none);
+    context.settle();
+    context.frame();
+    context.right_click(context.center());
+    REQUIRE(context.popup());
+    CHECK(menu_action_for_input(context.menu, {"Shift", "Right"}, false, {false, false, false, !context.viewer.settled()}) ==
+          MenuAction::pan_right);
+    context.viewer.open(context.source.directory / "missing.png");
+    context.settle();
+    REQUIRE(context.viewer.failed());
+    REQUIRE(context.viewer.has_visible_image());
+    context.frame();
+    CHECK_FALSE(context.popup());
+    context.right_click(context.center());
+    CHECK_FALSE(context.popup());
+    // Failure must not permanently disable the next successful load.
+    context.load();
+    context.right_click(context.center());
+    CHECK(context.popup());
+}
+
+TEST_CASE("canvas menu does not open from chrome information panel or over a modal", "[shell][canvas_menu]")
+{
+    CanvasMenuContext context;
+    context.load();
+    context.shell.toggle_image_info();
+    context.frame();
+    for (const auto point : {ImVec2{20, 8}, ImVec2{400, 894}, ImVec2{940, 400}})
+    {
+        CAPTURE(point.x, point.y);
+        context.right_click(point);
+        CHECK_FALSE(context.popup());
+    }
+    context.shell.show_about();
+    context.frame();
+    context.right_click(context.center());
+    CHECK_FALSE(context.popup());
+}
+
+TEST_CASE("canvas menu preserves disabled View actions and dismisses without dispatch", "[shell][canvas_menu]")
+{
+    using namespace liltview;
+    CanvasMenuContext context;
+    context.viewer.open(context.source.directory / "a.bmp");
+    context.settle();
+    context.frame();
+    context.right_click(context.center());
+    auto *popup = context.popup();
+    REQUIRE(popup);
+    REQUIRE_FALSE(find_menu_item(context.menu, 21)->enabled);
+    const auto first = popup->DC.CursorStartPos;
+    auto &io         = ImGui::GetIO();
+    io.AddMousePosEvent(first.x + 8, first.y + 4);
+    context.frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    CHECK(context.frame() == MenuAction::none);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    CHECK(context.frame() == MenuAction::none);
+    REQUIRE(context.popup());
+    io.AddKeyEvent(ImGuiKey_Escape, true);
+    CHECK(context.frame() == MenuAction::none);
+    io.AddKeyEvent(ImGuiKey_Escape, false);
+    context.frame();
+    CHECK_FALSE(context.popup());
+    context.right_click(context.center());
+    REQUIRE(context.popup());
+    context.close();
+    CHECK_FALSE(context.popup());
+}
