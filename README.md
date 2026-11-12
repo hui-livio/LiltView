@@ -1,109 +1,184 @@
 # LiltView
 
-轻量桌面图片浏览器，首发目标平台为 Arch Linux。C23 核心负责后台解码，C++23 / SDL3 / Dear ImGui 提供界面，Linux 使用 OpenGL 3.3。
+**English** | [简体中文](README.zh-CN.md)
 
-<img src="assets/icons/png/liltview-color-256.png" alt="LiltView 彩色应用图标" width="96" height="96">
+<img src="assets/icons/png/liltview-color-256.png" alt="LiltView application icon" width="96" height="96">
 
-## 当前状态
+A lightweight desktop image viewer for local images, original-pixel detail, everyday GIF playback, and large static images.
 
-文档核对日期：2026-11-11，功能按当前源码的实际子集声明；历史验证与本次核对范围见[开发记录](docs/DEVELOPMENT_PLAN.md)。
+Validated on Windows 10, Arch Linux with a Wayland desktop, and Arch Linux in WSL2 on Windows 10. English and Simplified Chinese interfaces, with light and dark themes, keep the focus on your images.
 
-- **已实现**：JPEG、PNG、基础 SVG、静态 WebP、BMP、GIF 自动播放、TIFF 首页；命令行 / 菜单 / Ctrl+O / 拖放打开，同目录自然排序导航（裸 `←` / `→`、菜单、首尾禁用的边缘悬浮按钮）、适应窗口、100%、缩放平移、`I` 图片信息面板、全屏、中英、主题与窗口外观设置。
-- **明确不支持**：复杂 SVG；当前仅支持基础静态 SVG，不提供浏览器级 SVG 兼容。文字 / 字体、CSS stylesheet / class、裁剪、遮罩、滤镜、`use` / `symbol` 和嵌入图片等均不在当前 profile 内，具体范围见[SVG 兼容说明](docs/IMAGE_FORMATS.md#4-svg-静态-profile)。
-- **部分实现**：静态大图已有一次原始分辨率解码、行带显示、tile / LOD 场景缓存和 GPU 恢复；首次缓存生成、冷区域响应及强缩小质量仍需优化。已有 16K / 32K 回归用例，实际限制由格式和资源预算决定。
-- **已接入相邻预读**：静态邻居复用 Core 内存内容缓存；普通 GIF 已实现按内容识别的会话 / 首帧预热，切换前重新核验版本，再按源时长继续播放。后台不上传 GPU、当前图片优先；历史验证记录见[开发计划](docs/DEVELOPMENT_PLAN.md#7-历史功能开发与验证记录2026-11-10)。
-- **待实现**：动画手动控制、扩展格式 / 原始像素、ICC / HDR、D3D11、Windows 完整桌面适配与实机验收、更新检测。
+## Screenshots
 
-静态图片加载完成后，缩放和平移复用已生成内容，不重新解码源文件。app 场景缓存与 Core 跨请求内存缓存分别有界管理；Core 磁盘内容缓存和通用完整动画缓存仍未实现。完整状态、`Shift+方向键` 平移及其他交互见[产品与设计](docs/PRODUCT_DESIGN.md)，格式边界见[兼容表](docs/IMAGE_FORMATS.md)。
+The image information panel, status bar, and both themes. Both screenshots display the same PNG; changing the theme only changes the interface colors.
 
-## 构建与运行
+| Light theme | Dark theme |
+| --- | --- |
+| ![LiltView light theme with the English image information panel and status bar](assets/preview/image-information-light-en-us.jpg) | ![LiltView dark theme with the English image information panel and status bar](assets/preview/image-information-dark-en-us.jpg) |
 
-需要 CMake 3.30+、Ninja，以及满足项目特性检查的工具链：Linux 使用 C23 / C++23；MSVC 使用 C17 兼容实现 / C++23。先初始化固定依赖；CMake 只使用本地源码，不自动下载：
+## Features
+
+- **Open your way**: use the File menu, `Ctrl+O`, drag a single file into the window, or open an image from the command line.
+- **Browse a folder**: images in the same directory use natural filename ordering. Navigate with `←` / `→`, the menu, or the buttons at the canvas edges. Navigation stops at the first and last image instead of wrapping around.
+- **Inspect the details**: fit to window, view at 100% original-pixel scale, zoom with the mouse wheel, drag to pan, use keyboard zoom and viewport movement, or go fullscreen.
+- **View large static images**: tiled display and detail restoration let you explore large images. Once a static image finishes loading, zooming and panning do not decode the source file again. Actual size limits depend on the format and available resources.
+- **Play GIFs automatically**: ordinary-size GIFs follow their source frame durations and loop information, including transparency and frame compositing. Playback scheduling pauses when the window is hidden or minimized.
+- **See image information**: the status bar shows the filename, folder position, original format, source dimensions, and zoom. Press `I` for more details.
+- **Understand loading and failures**: the status bar distinguishes ready, loading, and restoring states. If loading fails, a central illustration and a reason below it explain the problem instead of presenting the old image as a successful load.
+- **Use the canvas context menu**: after an image loads successfully, right-click the central viewing area for the same actions as the View menu.
+- **Make it yours**: English or Simplified Chinese, light / dark / system theme, system or custom title bar, and optional rounded corners. Your preferences are saved.
+
+## Image Formats and Scope
+
+| Format | Supported today | Limits |
+| --- | --- | --- |
+| JPEG (`.jpg` / `.jpeg`) | Common 8-bit RGB and grayscale images, including progressive JPEG and EXIF orientation | No CMYK / YCCK, 12-bit JPEG, or progressive scan previews |
+| PNG (`.png`) | Color, grayscale, indexed color, transparency, and Adam7 interlacing | 16-bit input is converted to 8-bit display; APNG is not supported |
+| WebP (`.webp`) | Static lossy / lossless images and transparency | Animated WebP is not supported |
+| BMP (`.bmp`) | Palettes, common true-color layouts, bitfields, and RLE4 / RLE8 | No embedded JPEG / PNG or some extended compression variants |
+| SVG (`.svg`) | Basic static paths, geometry, gradients, transforms, and transparency | Complex SVG is not supported; zooming reuses rasterized pixels rather than providing unlimited vector sharpness |
+| GIF (`.gif`) | Automatic playback of ordinary-size GIFs, including transparency, compositing, and loops | No oversized animations, manual pause, frame stepping, or seeking |
+| TIFF (`.tif` / `.tiff`) | First page of Classic TIFF / BigTIFF, with common compression, orientation, and transparency | First page only; no page selection, floating-point, or CMYK images |
+
+**Supporting a format does not mean supporting every encoding variant.** Files are identified by their contents; folder browsing filters by the extensions listed above. See the [format compatibility table](docs/IMAGE_FORMATS.md) for bit depths, transparency, orientation, and resource limits.
+
+- **SVG scope**: text / fonts, CSS stylesheets / classes, clipping, masks, filters, `use` / `symbol`, and embedded images are outside the supported subset. Scripts are not executed, and external resources are not loaded. Export complex files to PNG before viewing them; see the [SVG compatibility notes](docs/IMAGE_FORMATS.md#4-svg-静态-profile).
+- **Color scope**: display output is currently 8-bit RGBA, without full ICC color management or HDR output. Reading a high-bit-depth image does not mean preserving high precision for display.
+- **File scope**: LiltView opens local images, not specialized design source files such as CAD, PSD / PSB, AI, CDR, or Sketch. Standard images exported from those tools are handled according to their actual format.
+- **Product scope**: browsing, not image editing, a photo-library database, tag management, or batch processing.
+
+## Getting Started
+
+1. Launch LiltView and choose an image from the File menu or with `Ctrl+O`. You can also drag a single file into the window.
+2. Use `←` / `→` to browse the same folder, or use the buttons that appear at the left and right edges of the canvas.
+3. Scroll to zoom and drag with the left mouse button to inspect static-image details. Press `F` to fit to the window or `Ctrl+1` for original-pixel scale.
+4. Press `I` for image information or `F11` to toggle fullscreen. Once an image loads successfully, you can also right-click for the View menu actions.
+
+You can also open an image directly from the command line:
 
 ```bash
-git submodule update --init --recursive
-cmake --preset dev
-cmake --build --preset dev
-ctest --preset dev
-./build/dev/app/liltview /path/to/image.png
+liltview "path/to/photo.png"
 ```
 
-`dev` 构建应用与单元测试，`app-release` 构建发布应用；`debug` / `release` 默认仅构建核心及相应检查，`compat20` 为显式 C++20 核心兼容配置。可选桌面 / 大图回归、C++20 应用和依赖要求见[架构文档](docs/ARCHITECTURE.md)。x86 建议安装 NASM 以启用 JPEG SIMD。
+The status bar shows only the filename, not the full path. Open the image information panel when you need the full path.
 
-### Windows / MSVC + Ninja 预设
+Application shortcuts are temporarily disabled during loading and image restoration, then become available again when the operation finishes. The system window-close button remains available. The canvas context menu does not open with no image, during loading, or after a load failure. After a failure, you can still open or navigate to another image.
 
-新增的 `msvc-dev` / `msvc-release` 使用 x64 MSVC (`cl.exe`) 和 Ninja，分别继承 `dev` / `app-release` 的构建选项，输出到 `build/msvc-dev` / `build/msvc-release`，不与原有工具链混用构建缓存。
+## Controls
 
-命令行需先打开 **x64 Native Tools Command Prompt for VS** 或初始化 x64 Developer PowerShell，并确保 CMake 3.30+、Ninja 在 `PATH` 中。预设不会自行调用 `VsDevCmd.bat`；支持 CMake Presets 的 IDE 可使用预设中的 `external` 架构 / 工具集信息初始化 MSVC 环境。
-
-```powershell
-# 开发：Debug 应用 + 单元测试
-cmake --preset msvc-dev
-cmake --build --preset msvc-dev
-ctest --preset msvc-dev
-
-# 发布：Release 应用，不构建测试
-cmake --preset msvc-release
-cmake --build --preset msvc-release
-```
-
-VS 2022 / VS 2026 共用这两个预设，由当前 Developer Shell 或 IDE 选择工具链，不硬编码 VS 安装目录。更换 VS 工具链应使用独立构建目录，避免复用另一个编译器的缓存，例如：
-
-```powershell
-# 在对应 VS 的 x64 Developer Shell 中执行
-cmake --preset msvc-dev -B build/msvc-dev-vs2022
-cmake --build build/msvc-dev-vs2022
-ctest --test-dir build/msvc-dev-vs2022 --output-on-failure
-# VS 2026 可对应使用 build/msvc-dev-vs2026
-```
-
-Windows 应用通过 `app/resources/liltview.rc.in` 嵌入现有多尺寸 ICO 和文件 / 产品版本信息。CMake 配置时从 `project(VERSION)` 生成构建目录中的 `app/generated/liltview.rc`；更新版本号或 RC 模板后重新配置即可，无需维护第二份版本号。Windows Release 通过目标属性 `WIN32_EXECUTABLE` 构建为窗口程序，不弹控制台；Debug 保留控制台用于诊断。默认仅有控制台日志 sink，不创建日志文件，`log_level` 只控制过滤等级。
-
-MSVC 的 Core 明确使用 `/std:c17`、`/experimental:c11atomics`，并只对项目自有 C 目标启用私有 C23 写法兼容头；CMake 实际编译 / 链接检查 C11 原子与线程支持，不把 MSVC 声明为完整 C23 编译器。其他工具链保留原 C23 检查；公共 C ABI 不变。Windows 文件适配使用 UTF-8 到 UTF-16 的内部转换和 Win32 文件版本信息，tile 缓存使用删除即回收的临时文件和独立偏移读取。
-
-**当前边界：Windows 使用现有 SDL3 + OpenGL3 后端，D3D11 尚未实现，完整桌面与大图实机验收仍待完成。** UTF-16 Core 路径输入仍返回 `LV_UNSUPPORTED`；Windows 调用方应传绝对 UTF-8 路径。两项依赖 POSIX 特有“目录符号链接后接 `..`”解析语义的回归在 Windows 上明确跳过，其余常规测试保持启用。
-
-CLI11 解析命令行，iguana 读写 `settings.yaml`；可用 `--language zh-CN`、`--language en-US` 或 `--config-dir PATH`，完整参数见[配置说明](docs/CONFIGURATION.md)。
-
-Linux 使用静态 SDL3 和 codec，仍需系统 OpenGL、Fontconfig 及窗口运行库；默认全局菜单另需 GIO / GLib 和 `wayland-scanner`。`-DLILTVIEW_ENABLE_GLOBAL_MENU=OFF` 可构建窗口内菜单版本。开发桌面注册：
-
-```bash
-python3 scripts/register_desktop.py
-```
-
-文件选择器通过 SDL 调用桌面 Portal，需要 `xdg-desktop-portal` 和提供 FileChooser 的桌面后端（KDE 为 `xdg-desktop-portal-kde`）；也可用 Zenity 作为备用后端。如果无法打开，查看日志中的具体 SDL 错误，并检查用户会话的 Portal 服务。KDE 可执行 `systemctl --user restart plasma-xdg-desktop-portal-kde.service xdg-desktop-portal.service` 后重启应用。
-
-应用 ID 为 `io.github.hui_livio.LiltView`。安装 / pacman / paru 部署见[打包说明](packaging/README.md)和[Arch 指南](packaging/arch/README.md)。
-
-## 文档入口
-
-主文档各自维护产品和开发视角；细节只在对应参考中维护，避免重复状态与过时测试计数。
-
-| 文档 | 内容 |
+| Action | Shortcut / mouse |
 | --- | --- |
-| [产品与设计](docs/PRODUCT_DESIGN.md) | 定位、界面、交互、功能状态与建议优先级 |
-| [开发架构](docs/ARCHITECTURE.md) | 模块、依赖、数据流、线程、预算、构建与验证 |
-| [Core 契约](docs/CORE_CONTRACTS.md) | ABI、请求 / 动画、事件、引用、取消和关闭 |
-| [渲染与大图](docs/RENDERING.md) | 当前场景缓存、清晰度、上传契约与性能复现 |
-| [格式兼容表](docs/IMAGE_FORMATS.md) | 已支持的具体子集和限制 |
-| [命令行与配置](docs/CONFIGURATION.md) | 参数、YAML、默认值和保存语义 |
-| [开发计划](docs/DEVELOPMENT_PLAN.md) | 未完成工作、原始像素 / 接口扩展和验收条件 |
+| Open an image | `Ctrl+O` / drag a single file into the window |
+| Previous / next image | `←` / `→` |
+| Fit to window | `F` |
+| 100% original-pixel scale | `Ctrl+1`, when available |
+| Zoom a static image | Mouse wheel |
+| Zoom in / out | `Ctrl+↑` / `Ctrl+↓` |
+| Pan a static image | Drag with the left mouse button |
+| Move the viewport | `Shift+↑` / `Shift+↓` / `Shift+←` / `Shift+→` |
+| Show / hide image information | `I` |
+| Toggle fullscreen | `F11` |
+| Close image information / leave fullscreen | `Esc`; closes the information panel first |
+| View actions | Right-click the central viewing area after an image loads successfully |
+| Quit | `Ctrl+Q` / window-close button |
 
-配套文档按用途索引：
+Moving the viewport moves the image in the opposite direction. Panning stops at image bounds and is unavailable when the image fits inside the canvas. GIFs play using fit-to-window frames, without the same free zooming and dragging as static images.
 
-| 用途 | 入口 |
+## Appearance and Language
+
+Choose from the Settings menu:
+
+- **Language**: system, English, or Simplified Chinese.
+- **Theme**: system, light, or dark. Changing the interface theme does not change image pixels.
+- **Window appearance**: a system or custom title bar, with rounded or square corners in custom mode.
+
+Language, theme, window size, and appearance settings are saved for the next launch. Whether the image information panel is open is remembered only for the current session.
+
+## Validated Platforms and Installation
+
+The following environments have been confirmed to run LiltView:
+
+| Environment | Validated scope |
 | --- | --- |
-| 源码导航 | [应用](app/README.md)、[Core](core/src/README.md) |
-| 构建产物与部署 | [打包说明](packaging/README.md)、[Arch Linux 部署](packaging/arch/README.md) |
-| 性能与测试输入 | [性能入口](benchmarks/README.md)、[性能测试计划](benchmarks/TEST_PLAN.md)、[性能样本清单](benchmarks/inputs/README.md)、[正确性测试样本](tests/fixtures/README.md) |
-| 依赖、资源与许可 | [第三方源码](third_party/README.md)、[字体来源](assets/fonts/README.md) |
+| Windows 10 | Native desktop on Pro 22H2 (64-bit) |
+| Arch Linux | KDE Plasma Wayland desktop |
+| Windows 10 + WSL2 | Arch Linux running graphical applications through WSLg |
 
-文档维护约定：格式子集以兼容表为准，公共接口以源码头文件和 Core 契约为准，模块 / 构建以架构文档为准，未来工作和决策集中在开发计划。源码入口 README 只做导航，不维护另一份功能状态。历史测试数量、包体与耗时必须保留日期和环境，不能当作当前版本的验证；性能样本的完整性核验不等于应用支持或性能达标。上游许可证、来源清单和自动生成数据不随文案整理改写。
+These are validated environments, not a guarantee that every Windows version, Linux distribution, desktop, or WSL graphics setup has been tested. Other environments do not carry the same compatibility assurance.
 
-## 许可证
+### Validated Windows 10 Environment
 
-Copyright 2026 LiltView contributors. 项目采用 [Apache License 2.0](LICENSE)，第三方组件遵循各自许可证，署名见 [NOTICE](NOTICE)。
+Native Windows desktop configuration recorded on November 12, 2026. This is a validated configuration snapshot, not a minimum specification.
 
-JPEG 使用 libjpeg-turbo。This software is based in part on the work of the Independent JPEG Group.
+| Item | Validated configuration |
+| --- | --- |
+| Operating system | Windows 10 Pro (64-bit) |
+| Version | 22H2 |
+| OS build | 19045.5965 |
+| System language | Simplified Chinese |
+| Memory | 32 GB |
+| Physical memory available to Windows | Approximately 28.78 GB |
+| Dedicated GPU | NVIDIA GeForce RTX 3060 |
+| Dedicated video memory | 12 GB GDDR (reported by the tool as 12288 MiB) |
+| NVIDIA driver version | 596.36 |
+| Windows driver version | 32.0.15.9636 |
+| Driver date | 2026-04-23 |
+| DirectX version | DirectX 12 |
+| Direct3D feature level | Highest listed: `12_1` |
+| Driver model | WDDM 2.7 |
 
-随包 HarmonyOS Sans SC 字体版权归 Huawei Device Co., Ltd.，适用[字体原始许可](assets/fonts/LICENSE.HarmonyOS-Sans.txt)。
+DirectX, feature-level, and WDDM information describes this machine's graphics environment; it does not mean LiltView uses the corresponding rendering backend.
+
+### Validated Arch Linux Environment
+
+Environment versions recorded on November 12, 2026. This is a validated desktop snapshot, not a minimum version requirement, and it does not describe the WSL2 environment below.
+
+| Component | Validated version |
+| --- | --- |
+| System | Arch Linux (rolling release) |
+| Linux kernel | 7.2.15-arch1-1 |
+| KDE Plasma | 6.8.2 |
+| KDE Frameworks (as reported by kcoreaddons) | 6.31.0 |
+| Qt | 6.12.0 |
+| Wayland library | 1.26.0 |
+
+### Validated WSL2 Arch Linux Environment
+
+Environment snapshot recorded on November 12, 2026, with Windows 10 as the host. This setup uses WSLg and is listed separately from the KDE Plasma Wayland desktop above. These versions are not minimum requirements either.
+
+| Item | Validated environment |
+| --- | --- |
+| Linux distribution | Arch Linux |
+| Release model | Rolling release, with no fixed distribution version number |
+| Linux kernel | 6.18.54.1-microsoft-standard-WSL2 |
+| Architecture | x86_64 (64-bit) |
+| Runtime environment | WSL2 |
+| Linux graphics support | WSLg 1.0.79 |
+| Desktop environment | No installed packages or running sessions for common desktops such as KDE Plasma, GNOME, or Xfce were detected |
+| Display interfaces | `DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0` |
+| Wayland package | 1.26.0-1 |
+| Mesa package | 1:26.2.6-1 |
+| systemd | 262.2-1 |
+| glibc | 2.44+r50+g1848099f063e-1 |
+
+### Installation
+
+- **Arch Linux**: see the [Arch Linux installation guide](packaging/arch/README.md) for installation and desktop integration.
+- **Windows 10**: no installer is currently provided. See [installation and deployment](packaging/README.md) for the application and resource directory layout.
+- **WSL2 Arch Linux**: the validated setup is Arch Linux + WSLg in WSL2 on Windows 10. This does not imply compatibility with every WSL distribution or graphics environment.
+
+## User Documentation
+
+- [Image format compatibility](docs/IMAGE_FORMATS.md)
+- [Command line and settings](docs/CONFIGURATION.md)
+- [Interface and interaction guide](docs/PRODUCT_DESIGN.md)
+
+The linked guides are currently in Simplified Chinese.
+
+## License
+
+Copyright 2026 LiltView contributors. LiltView is licensed under [Apache License 2.0](LICENSE). Third-party acknowledgments and licenses are listed in [NOTICE](NOTICE).
+
+JPEG decoding uses libjpeg-turbo. This software is based in part on the work of the Independent JPEG Group.
+
+The bundled HarmonyOS Sans SC font is copyright Huawei Device Co., Ltd. and is distributed under its [original font license](assets/fonts/LICENSE.HarmonyOS-Sans.txt).
