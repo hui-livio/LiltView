@@ -61,7 +61,7 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
     catch_discover_tests(liltview_core_tests TEST_PREFIX "core."
         PROPERTIES TIMEOUT 30 SKIP_REGULAR_EXPRESSION "${liltview_skip_marker}")
     if(TARGET LiltView::app_model)
-        add_executable(liltview_app_tests app/live_resize_tests.cpp app/window_chrome_tests.cpp app/image_details_tests.cpp app/information_shell_tests.cpp app/navigation_button_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
+        add_executable(liltview_app_tests app/live_resize_tests.cpp app/window_chrome_tests.cpp app/theme_tests.cpp app/image_details_tests.cpp app/information_shell_tests.cpp app/navigation_button_tests.cpp app/close_timing_tests.cpp app/model_tests.cpp app/resource_tests.cpp app/renderer_tests.cpp app/cli_tests.cpp app/logging_tests.cpp)
         target_link_libraries(liltview_app_tests PRIVATE liltview_cli LiltView::logging spdlog::spdlog LiltView::app_model
             liltview_fonts LiltView::renderer LiltView::ui liltview_sdl_platform SDL3::SDL3-static liltview_test_main)
         target_compile_definitions(liltview_app_tests PRIVATE LILTVIEW_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")

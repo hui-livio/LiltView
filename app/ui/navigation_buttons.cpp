@@ -1,4 +1,5 @@
 #include "navigation_buttons.hpp"
+#include "theme.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -71,12 +72,12 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
     const bool pressed      = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_NoNavFocus);
     const bool hovered      = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
     const bool held         = ImGui::IsItemActive();
-    const ImVec4 background = held ? ImVec4{0.24f, 0.30f, 0.38f, 0.92f} :
-        hovered                    ? ImVec4{0.20f, 0.24f, 0.29f, 0.82f} :
-                                     ImVec4{0.12f, 0.14f, 0.16f, 0.60f};
+    const auto &p = current_ui_palette();
+    const ImVec4 background = held ? p.overlay_pressed : hovered ? p.overlay_hover : p.overlay;
     auto *draw              = ImGui::GetWindowDrawList();
     const float rounding    = std::min({8 * scale, size.x / 2, size.y / 2});
     draw->AddRectFilled(rect.min, rect.max, ImGui::GetColorU32(background), rounding);
+    draw->AddRect(rect.min, rect.max, ImGui::GetColorU32(p.overlay_border), rounding, 0, std::max(1.0f, scale));
     const ImVec2 center{rect.min.x + size.x / 2, rect.min.y + size.y / 2};
     const float half_height = std::min(9 * scale, size.y / 4);
     const float half_width  = std::min(4.5f * scale, size.x / 4);
@@ -85,7 +86,7 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
                          {center.x + sign * half_width, center.y},
                          {center.x - sign * half_width, center.y + half_height}};
     const float thickness = std::min({2 * scale, size.x / 8, size.y / 8});
-    draw->AddPolyline(arrow, 3, ImGui::GetColorU32(ImVec4{1, 1, 1, 0.95f}), ImDrawFlags_None, thickness);
+    draw->AddPolyline(arrow, 3, ImGui::GetColorU32(p.overlay_text), ImDrawFlags_None, thickness);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_NoNavOverride))
         ImGui::SetTooltip("%s", translate(language, previous ? Text::previous : Text::next));
     ImGui::EndDisabled();

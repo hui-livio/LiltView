@@ -51,7 +51,7 @@ struct WindowShape::Impl
         else if ((SDL_GetWindowFlags(self->window) & (SDL_WINDOW_BORDERLESS | SDL_WINDOW_FULLSCREEN)) != 0)
         {
             // SDL keeps WS_CAPTION for native move/resize/taskbar behavior.
-            // A rounded HRGN disables DWM NC rendering, so DefWindowProc may
+            // A custom HRGN disables DWM NC rendering, so DefWindowProc may
             // otherwise paint a CLASSIC caption on the first activation/drag.
             if (message == WM_NCPAINT)
                 return 0;
@@ -225,9 +225,10 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
     // first NC activation/paint must not fall back to a second, native caption.
     else if (!impl_->attach(window, hwnd))
         return false;
-    // A rectangular HRGN still disables DWM non-client rendering. Native frames
-    // (and square/maximized custom windows) must remove the region, not fill one.
-    if (!custom || radius <= 0)
+    // Only native frames may hand the silhouette back to DWM. Square custom
+    // windows still need an explicit rectangle: SDL retains WS_CAPTION, whose
+    // default native silhouette can clip a few pixels from both top corners.
+    if (!custom)
     {
         if (SetWindowRgn(hwnd, nullptr, TRUE))
             return true;
@@ -267,7 +268,7 @@ bool WindowShape::apply(SDL_Window *window, float radius, bool opaque)
     const auto error = GetLastError();
     if (region)
         DeleteObject(region);
-    return SDL_SetError("Cannot set Win32 rounded window region: %lu", error);
+    return SDL_SetError("Cannot set Win32 window region: %lu", error);
 #else
     int pixel_width = 0, pixel_height = 0;
     if (!SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height))

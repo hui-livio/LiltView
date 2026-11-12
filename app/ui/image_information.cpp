@@ -1,4 +1,5 @@
 #include "image_information.hpp"
+#include "theme.hpp"
 #include "platform/path.hpp"
 
 #include <algorithm>
@@ -45,6 +46,46 @@ const char *format_name(lv_format format)
     default:
         return nullptr;
     }
+}
+
+// Keep the dismiss action separate from the title: a quiet, square icon
+// target at the right edge, with normal ImGui keyboard activation/focus.
+bool draw_information_header(Language language)
+{
+    const auto &style    = ImGui::GetStyle();
+    const auto &palette  = current_ui_palette();
+    const auto origin    = ImGui::GetCursorScreenPos();
+    const float width    = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+    const float size     = std::min(28.0f * style.FontScaleDpi, width);
+    const float right    = origin.x + width - size;
+    const float baseline = std::max(0.0f, (size - ImGui::GetTextLineHeight()) * 0.5f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {0, baseline});
+    ImGui::AlignTextToFramePadding();
+    // At high DPI/narrow widths the title must not paint underneath the icon.
+    ImGui::PushClipRect(origin, {std::max(origin.x, right - style.ItemSpacing.x), origin.y + size}, true);
+    ImGui::TextUnformatted(translate(language, Text::image_info));
+    ImGui::PopClipRect();
+    ImGui::SameLine(0, 0);
+    ImGui::SetCursorScreenPos({right, origin.y});
+    ImGui::PushStyleColor(ImGuiCol_Button, {0, 0, 0, 0});
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, palette.hover);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, palette.pressed);
+    const bool closed = ImGui::Button("###close_image_information", {size, size});
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    const bool keyboard_focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    const bool highlighted      = ImGui::IsItemHovered() || keyboard_focused;
+    const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+    const ImVec2 center{(min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f};
+    const float radius = std::min(4.0f * style.FontScaleDpi, size * 0.25f);
+    const float stroke = std::max(1.0f, 1.5f * style.FontScaleDpi);
+    const auto color   = ImGui::GetColorU32(highlighted ? palette.accent : palette.secondary);
+    auto *draw         = ImGui::GetWindowDrawList();
+    draw->AddLine({center.x - radius, center.y - radius}, {center.x + radius, center.y + radius}, color, stroke);
+    draw->AddLine({center.x + radius, center.y - radius}, {center.x - radius, center.y + radius}, color, stroke);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) || keyboard_focused)
+        ImGui::SetTooltip("%s (Esc)", translate(language, Text::close));
+    return closed;
 }
 } // namespace
 
@@ -123,12 +164,12 @@ bool draw_image_information(Language language, const std::optional<ImageDetails>
     if (max.x <= min.x || max.y <= min.y)
         return false;
     ImGui::SetCursorScreenPos(min);
+    // A raised reading surface, separate from the neutral image stage.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, current_ui_palette().surface);
     ImGui::BeginChild("image_information", {max.x - min.x, max.y - min.y}, ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_NoSavedSettings);
-    const auto close  = std::string(translate(language, Text::close)) + "###close_image_information";
-    const bool closed = ImGui::SmallButton(close.c_str());
-    ImGui::SameLine();
-    ImGui::TextUnformatted(translate(language, Text::image_info));
+    ImGui::PopStyleColor();
+    const bool closed = draw_information_header(language);
     ImGui::Separator();
     ImGui::PushTextWrapPos(0);
     if (!details)

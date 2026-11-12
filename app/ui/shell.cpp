@@ -1,4 +1,5 @@
 #include "shell.hpp"
+#include "theme.hpp"
 
 #include "version.hpp"
 #include "viewer/viewer.hpp"
@@ -190,21 +191,7 @@ void apply_style(bool dark, float scale)
     style.PopupRounding    = 7.0f;
     style.WindowBorderSize = 0.0f;
     style.FrameBorderSize  = 0.0f;
-    if (dark)
-    {
-        style.Colors[ImGuiCol_WindowBg]     = {0.075f, 0.085f, 0.10f, 1.0f};
-        style.Colors[ImGuiCol_ChildBg]      = {0.055f, 0.063f, 0.075f, 1.0f};
-        style.Colors[ImGuiCol_MenuBarBg]    = {0.10f, 0.11f, 0.13f, 1.0f};
-        style.Colors[ImGuiCol_PopupBg]      = {0.095f, 0.105f, 0.12f, 1.0f};
-        style.Colors[ImGuiCol_Button]       = {0.15f, 0.17f, 0.20f, 1.0f};
-        style.Colors[ImGuiCol_Text]         = {0.91f, 0.93f, 0.95f, 1.0f};
-        style.Colors[ImGuiCol_TextDisabled] = {0.54f, 0.58f, 0.64f, 1.0f};
-    }
-    else
-    {
-        style.Colors[ImGuiCol_ChildBg] = {0.95f, 0.96f, 0.97f, 1.0f};
-        style.Colors[ImGuiCol_PopupBg] = {0.98f, 0.98f, 0.98f, 1.0f};
-    }
+    apply_theme_colors(dark);
     style.ScaleAllSizes(scale);
     style.FontSizeBase = 17.0f;
     style.FontScaleDpi = scale;
@@ -373,6 +360,10 @@ void Shell::draw_status(Language language, const Viewer &viewer, const WindowChr
     const float right         = origin.x + size.x - chrome.border - style.WindowPadding.x - ImGui::CalcTextSize(language_name).x;
     const auto color          = ImGui::GetColorU32(ImGuiCol_TextDisabled);
     auto *list                = ImGui::GetWindowDrawList();
+    list->AddRectFilled({origin.x + chrome.border, top},
+                        {origin.x + size.x - chrome.border, origin.y + size.y - chrome.border},
+                        ImGui::GetColorU32(current_ui_palette().chrome), std::max(0.0f, chrome.radius - chrome.border),
+                        ImDrawFlags_RoundCornersBottom);
     // 两侧共用居中的文字基线；长文件名裁切在语言标签之前，不撑高或覆盖状态栏。
     list->PushClipRect({left, top}, {std::max(left, right - style.ItemSpacing.x), origin.y + size.y - chrome.border}, true);
     list->AddText({left, text_y}, color, text.c_str());

@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 #include <windows.h>
@@ -152,19 +153,71 @@ TEST_CASE("Windows native titlebar follows explicit dark and light application t
     }
 }
 
-TEST_CASE("Windows square custom windows clear regions and can become rounded again", "[windows][chrome]")
+TEST_CASE("Windows square custom corners stay complete through theme resize and decoration changes",
+          "[windows][chrome][rounding]")
 {
-    NativeWindow native;
-    REQUIRE(native.window);
-    REQUIRE(SDL_SetWindowBordered(native.window, false));
-    liltview::WindowShape shape;
-    for (int cycle = 0; cycle < 3; ++cycle)
+    for (const bool transparent : {false, true})
     {
-        CAPTURE(cycle);
-        REQUIRE(shape.apply(native.window, 10));
-        CHECK(window_region(native.hwnd()) == COMPLEXREGION);
-        REQUIRE(shape.apply(native.window, 0));
-        CHECK(window_region(native.hwnd()) == ERROR);
+        CAPTURE(transparent);
+        NativeWindow native(transparent);
+        REQUIRE(native.window);
+        liltview::WindowShape shape;
+        for (int cycle = 0; cycle < 2; ++cycle)
+        {
+            CAPTURE(cycle);
+            REQUIRE(SDL_SetWindowBordered(native.window, false));
+            for (const float radius : {0.0f, 12.0f, 0.0f})
+                for (const bool dark : {false, true})
+                    for (const int width : {640, 853, 640})
+                    {
+                        CAPTURE(radius, dark, width);
+                        REQUIRE(SDL_SetWindowSize(native.window, width, 480));
+                        SDL_SyncWindow(native.window);
+                        REQUIRE(shape.apply(native.window, radius));
+                        REQUIRE(liltview::apply_native_window_theme(native.window, dark));
+                        SendMessageW(native.hwnd(), WM_NCACTIVATE, TRUE, 0);
+                        SendMessageW(native.hwnd(), WM_NCPAINT, 1, 0);
+                        SendMessageW(native.hwnd(), WM_NCACTIVATE, FALSE, 0);
+                        const auto region = CreateRectRgn(0, 0, 0, 0);
+                        REQUIRE(region);
+                        const int kind = GetWindowRgn(native.hwnd(), region);
+                        RECT bounds{};
+                        GetRgnBox(region, &bounds);
+                        int pixels_w = 0, pixels_h = 0;
+                        const bool have_size = SDL_GetWindowSizeInPixels(native.window, &pixels_w, &pixels_h);
+                        const std::array corners{POINT{0, 0}, POINT{pixels_w - 1, 0}, POINT{0, pixels_h - 1},
+                                                 POINT{pixels_w - 1, pixels_h - 1}};
+                        std::array<bool, 4> contains{};
+                        for (std::size_t i = 0; i < corners.size(); ++i)
+                            contains[i] = PtInRegion(region, corners[i].x, corners[i].y) != FALSE;
+                        DeleteObject(region);
+                        REQUIRE(have_size);
+                        CHECK(kind == (radius == 0 ? SIMPLEREGION : COMPLEXREGION));
+                        CHECK(bounds.left == 0);
+                        CHECK(bounds.top == 0);
+                        CHECK(bounds.right == pixels_w);
+                        CHECK(bounds.bottom == pixels_h);
+                        for (std::size_t i = 0; i < corners.size(); ++i)
+                        {
+                            CAPTURE(i);
+                            CHECK(contains[i] == (radius == 0));
+                        }
+                    }
+            // Native captions must not inherit even a rectangular custom mask.
+            REQUIRE(shape.apply(native.window, 0, true));
+            REQUIRE(SDL_SetWindowBordered(native.window, true));
+            REQUIRE(liltview::apply_native_window_theme(native.window, false));
+            CHECK(window_region(native.hwnd()) == ERROR);
+            BOOL composition = FALSE;
+            REQUIRE(SUCCEEDED(DwmIsCompositionEnabled(&composition)));
+            if (composition)
+            {
+                BOOL rendering = FALSE;
+                REQUIRE(
+                    SUCCEEDED(DwmGetWindowAttribute(native.hwnd(), DWMWA_NCRENDERING_ENABLED, &rendering, sizeof(rendering))));
+                CHECK(rendering);
+            }
+        }
     }
 }
 

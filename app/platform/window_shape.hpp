@@ -5,6 +5,7 @@ struct SDL_Window;
 namespace liltview
 {
 // Native regions are O(radius), not full-window RGBA masks on Linux / Windows.
+// Square custom windows keep an explicit rectangle to prevent native corner clips.
 // Native frames clear custom regions so DWM can draw the non-client area.
 // Guards only custom Win32 NC painting; native frames have no guard installed.
 // Does not intercept native move/resize.

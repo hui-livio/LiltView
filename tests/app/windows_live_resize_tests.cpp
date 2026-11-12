@@ -232,14 +232,26 @@ TEST_CASE("Windows live sizing presents title controls and full chrome at each n
                             CHECK(partial > 0);
                         }
                     }
-                    DeleteObject(region);
-                    if (rounded)
-                    {
-                        CHECK(kind == COMPLEXREGION);
-                        CHECK(bounds.right == pixel_width);
-                        CHECK(bounds.bottom == pixel_height);
-                    }
                     else
-                        CHECK(kind == ERROR);
+                    {
+                        // An opaque framebuffer is insufficient if Windows clips its
+                        // square corners. Check both GPU coverage and the native mask.
+                        for (unsigned corner = 0; corner < 4; ++corner)
+                            for (int y = 0; y < 6; ++y)
+                                for (int x = 0; x < 6; ++x)
+                                {
+                                    const int px = (corner & 1) ? pixel_width - 1 - x : x;
+                                    const int py = (corner & 2) ? pixel_height - 1 - y : y;
+                                    CAPTURE(corner, px, py);
+                                    CHECK(PtInRegion(region, px, py));
+                                    CHECK(pixels.alpha[static_cast<std::size_t>(py) * pixel_width + px] == 255);
+                                }
+                    }
+                    DeleteObject(region);
+                    CHECK(kind == (rounded ? COMPLEXREGION : SIMPLEREGION));
+                    CHECK(bounds.left == 0);
+                    CHECK(bounds.top == 0);
+                    CHECK(bounds.right == pixel_width);
+                    CHECK(bounds.bottom == pixel_height);
                 }
 }
