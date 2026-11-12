@@ -1,5 +1,6 @@
 #include "shell.hpp"
 #include "theme.hpp"
+#include "status_bar.hpp"
 
 #include "version.hpp"
 #include "viewer/viewer.hpp"
@@ -63,6 +64,48 @@ Text image_error_text(lv_error_code code)
     default:
         return Text::image_error;
     }
+}
+
+// Theme-aware broken-image illustration, not the previous image. The reason is
+// ordinary wrapped text directly below it, readable without hover or a dialog.
+void draw_image_failure(Language language, Text reason, ImVec2 min, ImVec2 max, float scale)
+{
+    const auto &palette      = current_ui_palette();
+    const float width        = std::max(1.0f, max.x - min.x);
+    const float wrap         = std::max(1.0f, std::min(520 * scale, width - 48 * scale));
+    const char *message      = translate(language, reason == Text::image_unsupported ? Text::unsupported_format : reason);
+    const auto message_size  = ImGui::CalcTextSize(message, nullptr, false, wrap);
+    const float title_height = ImGui::GetTextLineHeight();
+    const float icon_size    = std::clamp(max.y - min.y - title_height - message_size.y - 50 * scale, 0.0f, 72 * scale);
+    const float icon_scale   = icon_size / 72;
+    const float height       = icon_size + 22 * scale + title_height + 12 * scale + message_size.y;
+    const float top          = std::max(min.y + 8 * scale, min.y + (max.y - min.y - height) * 0.5f);
+    const ImVec2 icon_min{min.x + (width - icon_size) * 0.5f, top};
+    const auto pt = [&](float x, float y)
+    {
+        return ImVec2{icon_min.x + x * icon_scale, icon_min.y + y * icon_scale};
+    };
+    auto *draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(pt(0, 0), pt(72, 72), ImGui::GetColorU32(palette.surface), 16 * icon_scale);
+    draw->AddRect(pt(12, 16), pt(58, 54), ImGui::GetColorU32(palette.secondary), 4 * icon_scale, 0, 1.5f * icon_scale);
+    draw->AddCircleFilled(pt(24, 28), 4 * icon_scale, ImGui::GetColorU32(palette.secondary));
+    const ImVec2 mountain[]{pt(15, 49), pt(29, 36), pt(39, 44), pt(47, 37), pt(56, 46)};
+    draw->AddPolyline(mountain, 5, ImGui::GetColorU32(palette.secondary), 0, 1.5f * icon_scale);
+    draw->AddCircleFilled(pt(56, 54), 13 * icon_scale, ImGui::GetColorU32(palette.surface));
+    draw->AddCircle(pt(56, 54), 10 * icon_scale, ImGui::GetColorU32(palette.error), 0, 1.5f * icon_scale);
+    draw->AddLine(pt(52, 50), pt(60, 58), ImGui::GetColorU32(palette.error), 1.8f * icon_scale);
+    draw->AddLine(pt(60, 50), pt(52, 58), ImGui::GetColorU32(palette.error), 1.8f * icon_scale);
+    const auto *title = translate(language, Text::image_load_failed);
+    ImGui::SetCursorScreenPos(
+        {min.x + std::max(0.0f, (width - ImGui::CalcTextSize(title).x) * 0.5f), top + icon_size + 22 * scale});
+    ImGui::TextUnformatted(title);
+    ImGui::SetCursorScreenPos(
+        {min.x + (width - message_size.x) * 0.5f, top + icon_size + 22 * scale + title_height + 12 * scale});
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
+    ImGui::PushStyleColor(ImGuiCol_Text, palette.secondary);
+    ImGui::TextUnformatted(message);
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
 }
 
 // Keep small chrome arcs smooth at fractional UI scales and dense framebuffers.
@@ -285,12 +328,21 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
     const auto finish = [&]
     {
         const auto selected = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        // Navigation restores the cursor after the reason text. Submit its
+        // trailing spacing explicitly rather than extending child bounds via SetCursorPos.
+        ImGui::Dummy({0, 0});
         ImGui::EndChild();
         if (information.visible &&
-            draw_image_information(language, viewer.image_details(), information.panel_min, information.panel_max))
+            draw_image_information(language, viewer.failed() ? std::nullopt : viewer.image_details(), information.panel_min,
+                                   information.panel_max))
             image_info_open_ = false;
         return selected;
     };
+    if (viewer.failed())
+    {
+        draw_image_failure(language, image_error_text(viewer.error()), position, end, scale);
+        return finish();
+    }
     if (viewer.has_visible_image())
     {
         viewer.draw({position.x, position.y}, {position.x + available.x, position.y + available.y},
@@ -300,14 +352,6 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
     if (viewer.loading())
     {
         centered_text(translate(language, Text::loading), ImGui::GetWindowWidth(), true);
-        return finish();
-    }
-    if (viewer.failed())
-    {
-        const auto message = image_error_text(viewer.error());
-        ImGui::PushTextWrapPos();
-        ImGui::TextWrapped("%s", translate(language, message));
-        ImGui::PopTextWrapPos();
         return finish();
     }
     const float image_size = 82.0f * scale;
@@ -326,10 +370,6 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
 
 void Shell::draw_status(Language language, const Viewer &viewer, const WindowChromeMetrics &chrome)
 {
-    const auto t = [language](Text text)
-    {
-        return translate(language, text);
-    };
     Text status = Text::ready;
     if (viewer.loading())
         status = viewer.native_loading() ? Text::loading_native : Text::loading;
@@ -337,38 +377,22 @@ void Shell::draw_status(Language language, const Viewer &viewer, const WindowChr
         status = Text::loading_detail;
     if (viewer.failed())
         status = image_error_text(viewer.error());
-    std::string text = t(status);
-    if (viewer.filename().empty())
-        text += std::string("  /  ") + t(Text::no_image);
-    else
-        text += "  |  " + viewer.filename() + "  " + std::to_string(viewer.source_size().width) + " x " +
-            std::to_string(viewer.source_size().height);
-    const auto &navigation = viewer.navigation();
-    if (navigation.total)
-        text += "  |  " + std::to_string(navigation.current) + " / " + std::to_string(navigation.total);
-    if (navigation.scanning)
-        text += std::string("  |  ") + t(Text::scanning_directory);
-    else if (navigation.error)
-        text += std::string("  |  ") + t(Text::directory_error);
-    const char *language_name = language == Language::chinese ? "简体中文" : "English";
+    const auto content = status_bar_content(language, status, viewer.image_details(), viewer.filename(), viewer.navigation());
     const auto origin         = ImGui::GetWindowPos();
     const auto size           = ImGui::GetWindowSize();
     const auto &style         = ImGui::GetStyle();
     const float top           = origin.y + chrome.status_top();
-    const float text_y        = top + (chrome.status_height - ImGui::GetTextLineHeight()) * 0.5f;
     const float left          = origin.x + chrome.border + style.WindowPadding.x;
-    const float right         = origin.x + size.x - chrome.border - style.WindowPadding.x - ImGui::CalcTextSize(language_name).x;
-    const auto color          = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const float right         = origin.x + size.x - chrome.border - style.WindowPadding.x;
     auto *list                = ImGui::GetWindowDrawList();
     list->AddRectFilled({origin.x + chrome.border, top},
                         {origin.x + size.x - chrome.border, origin.y + size.y - chrome.border},
                         ImGui::GetColorU32(current_ui_palette().chrome), std::max(0.0f, chrome.radius - chrome.border),
                         ImDrawFlags_RoundCornersBottom);
-    // 两侧共用居中的文字基线；长文件名裁切在语言标签之前，不撑高或覆盖状态栏。
-    list->PushClipRect({left, top}, {std::max(left, right - style.ItemSpacing.x), origin.y + size.y - chrome.border}, true);
-    list->AddText({left, text_y}, color, text.c_str());
-    list->PopClipRect();
-    list->AddText({right, text_y}, color, language_name);
+    // Thin top rule and three independently clipped groups; no language label.
+    list->AddLine({origin.x + chrome.border, top}, {origin.x + size.x - chrome.border, top},
+                  ImGui::GetColorU32(current_ui_palette().separator));
+    draw_status_bar_content(content, {left, top}, {right, origin.y + size.y - chrome.border}, style.FontScaleDpi);
 }
 
 void Shell::draw_about(Language language, render::Renderer &renderer, render::Image icon, float frame_radius)

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -20,6 +21,7 @@ namespace
 class LayoutRenderer final : public liltview::render::Renderer
 {
 public:
+    unsigned image_calls = 0;
     liltview::render::Capabilities capabilities() const override
     {
         return {liltview::render::Backend::opengl3, 4096, 128 * 1024 * 1024, 0};
@@ -38,13 +40,17 @@ public:
     void destroy_image(liltview::render::Image) noexcept override
     {
     }
-    void add_image(ImDrawList *, liltview::render::Image, liltview::render::Point, liltview::render::Point,
+    void add_image(ImDrawList *, liltview::render::Image image, liltview::render::Point, liltview::render::Point,
                    liltview::render::Point, liltview::render::Point) override
     {
+        if (image)
+            ++image_calls;
     }
-    void add_image_quad(ImDrawList *, liltview::render::Image, const std::array<liltview::render::Point, 4> &,
+    void add_image_quad(ImDrawList *, liltview::render::Image image, const std::array<liltview::render::Point, 4> &,
                         const std::array<liltview::render::Point, 4> &) override
     {
+        if (image)
+            ++image_calls;
     }
     void begin_frame() override
     {
@@ -404,4 +410,89 @@ TEST_CASE("main window keeps its original flags and resize regions through resiz
                     CHECK(window_chrome_hit(m, {size.x / 2, m.status_top() + m.status_height / 2}) == WindowHit::drag);
                     ImGui::Render();
                 }
+}
+
+TEST_CASE("failed replacement shows a failure illustration and its reason below instead of the old image",
+          "[shell][image_failure]")
+{
+    using namespace liltview;
+    Source source;
+    Gui gui;
+    LayoutRenderer renderer;
+    Viewer viewer(renderer);
+    const auto wait = [&]
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!viewer.settled())
+        {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            viewer.pump();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    const auto unsupported = source.directory / "unsupported-%s.xyz";
+    std::ofstream(unsupported, std::ios::binary) << "not an image";
+    const auto corrupt = source.directory / "corrupt.bmp";
+    std::filesystem::copy_file(source.path, corrupt);
+    std::filesystem::resize_file(corrupt, 24);
+    const std::array failures{std::pair{source.directory / "missing.png", Text::image_io_error},
+                              std::pair{unsupported, Text::unsupported_format}, std::pair{corrupt, Text::image_corrupt}};
+    for (const auto &[path, reason] : failures)
+    {
+        viewer.open(source.path);
+        wait();
+        REQUIRE_FALSE(viewer.failed());
+        Shell shell;
+        apply_style(false, 1);
+        ImGui::GetIO().DisplaySize = {640, 480};
+        ImGui::NewFrame();
+        WindowChromeState chrome;
+        chrome.system_titlebar = true;
+        chrome.line_height     = ImGui::GetTextLineHeight();
+        const auto menu        = build_menu(Settings{}, Language::english, true, false, true, true, false, false, true, true);
+        renderer.image_calls   = 0;
+        shell.draw(Language::english, menu, false, renderer, {}, viewer, chrome);
+        ImGui::Render();
+        REQUIRE(renderer.image_calls > 0);
+        viewer.open(path);
+        wait();
+        REQUIRE(viewer.failed());
+        // The old scene may remain cached internally, but must never be drawn
+        // or described as the failed replacement in the information panel.
+        for (const auto language : {Language::english, Language::chinese})
+            for (const bool dark : {false, true})
+                for (const float scale : {1.0f, 1.25f, 2.0f})
+                    for (const bool native : {false, true})
+                        for (const bool panel : {false, true})
+                        {
+                            CAPTURE(path, language, dark, scale, native, panel);
+                            apply_style(dark, scale);
+                            chrome.system_titlebar = native;
+                            chrome.dark            = dark;
+                            chrome.scale           = scale;
+                            if (shell.image_info_open() != panel)
+                                shell.toggle_image_info();
+                            ImGui::NewFrame();
+                            chrome.line_height = ImGui::GetTextLineHeight();
+                            ImGui::LogToBuffer();
+                            // Keep logging across child-window End calls, then
+                            // inspect before LogFinish clears the text buffer.
+                            ImGui::GetCurrentContext()->LogWindow = nullptr;
+                            renderer.image_calls                  = 0;
+                            shell.draw(language, menu, false, renderer, {}, viewer, chrome);
+                            const std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+                            ImGui::LogFinish();
+                            ImGui::Render();
+                            CHECK(renderer.image_calls == 0);
+                            const auto title   = text.find(translate(language, Text::image_load_failed));
+                            const auto message = text.find(translate(language, reason));
+                            REQUIRE(title != std::string::npos);
+                            REQUIRE(message != std::string::npos);
+                            CHECK(message > title);
+                            CHECK(text.substr(title, message - title).find('\n') != std::string::npos);
+                            CHECK(text.find(std::string(100, 'x')) == std::string::npos);
+                            if (panel)
+                                CHECK(text.find(translate(language, Text::no_image)) != std::string::npos);
+                        }
+    }
 }

@@ -31,7 +31,8 @@ constexpr UiPalette light{.canvas          = rgb(0xECEEF2),
                           .overlay_text    = rgb(0xF8F9FC),
                           .overlay_border  = rgb(0xFFFFFF, 0.20f),
                           .close_hover     = rgb(0xC9364F),
-                          .close_pressed   = rgb(0xAD2540)};
+                          .close_pressed   = rgb(0xAD2540),
+                          .error           = rgb(0xAD2540)};
 
 // Graphite: neutral charcoal rather than blue-black; raised panels stay quiet.
 constexpr UiPalette dark{.canvas          = rgb(0x17181C),
@@ -52,7 +53,8 @@ constexpr UiPalette dark{.canvas          = rgb(0x17181C),
                          .overlay_text    = rgb(0xF8F9FC),
                          .overlay_border  = rgb(0xFFFFFF, 0.20f),
                          .close_hover     = rgb(0xC9364F),
-                         .close_pressed   = rgb(0xAD2540)};
+                         .close_pressed   = rgb(0xAD2540),
+                         .error           = rgb(0xFF9BAA)};
 } // namespace
 
 const UiPalette &ui_palette(bool dark_mode)

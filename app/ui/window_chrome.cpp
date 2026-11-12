@@ -15,7 +15,7 @@ WindowChromeMetrics window_chrome_metrics(ImVec2 size, const WindowChromeState &
             size.y,
             custom ? scale : 0,
             custom ? 36 * scale : 0,
-            state.line_height + 8 * scale,
+            state.line_height + 12 * scale,
             custom ? 6 * scale : 0,
             44 * scale,
             custom && state.rounded && !state.maximized ? 12 * scale : 0,

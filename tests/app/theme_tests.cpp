@@ -75,6 +75,7 @@ TEST_CASE("both themes keep primary and secondary text readable on their intende
             CHECK(contrast(p.secondary, surface) >= 4.5);
         for (const auto surface : {p.surface, p.chrome, p.popup})
             CHECK(contrast(p.accent, surface) >= 3);
+        CHECK(contrast(p.error, p.chrome) >= 4.5);
         CHECK(contrast({1, 1, 1, 1}, p.close_hover) >= 4.5);
         CHECK(contrast({1, 1, 1, 1}, p.close_pressed) >= 4.5);
     }
