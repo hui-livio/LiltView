@@ -293,3 +293,59 @@ TEST_CASE("rotated tiles retain shared edges and bounded visible native regions"
             CHECK_FALSE(view.visible({0, 0, 256, 256}));
         }
 }
+
+TEST_CASE("zoom stays monotonic below the new fit scale after rotation", "[viewport][rotation][zoom][shortcut]")
+{
+    for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+            for (const int turns : {-1, 1})
+            {
+                CAPTURE(density, orientation, turns);
+                // Keep the EXIF-oriented image landscape for every source orientation.
+                const lv_size_u32 source = orientation >= 5 ? lv_size_u32{2000, 4000} : lv_size_u32{4000, 2000};
+                const render::Point max{800, 600};
+                const render::Point center{400, 300};
+                Viewport view;
+                view.update({0, 0}, max, density, source, orientation);
+                CHECK(std::abs(view.scale() - 0.2 * density) < 1e-12);
+                view.rotate(turns);
+                CHECK(std::abs(view.scale() - 0.15 * density) < 1e-12);
+                view.zoom(1);
+                const double preserved_scale = view.scale();
+                CHECK(std::abs(preserved_scale - 0.1875 * density) < 1e-12);
+                view.rotate(-turns);
+                view.update({0, 0}, max, density, source, orientation);
+                CHECK(view.scale() == preserved_scale);
+
+                // Below the new FIT minimum, zooming out or by zero must not
+                // increase the scale; wheel and keyboard/menu share this rule.
+                const auto before = view;
+                for (const double amount : {-100.0, -1.0, -0.1, 0.0})
+                {
+                    auto keyboard = before;
+                    auto wheel = before;
+                    keyboard.zoom(amount);
+                    wheel.zoom(amount, center);
+                    CHECK(keyboard.same_view(before));
+                    CHECK(wheel.same_view(keyboard));
+                }
+                for (unsigned repeat = 0; repeat < 10; ++repeat)
+                    view.zoom(-1);
+                CHECK(view.same_view(before));
+
+                // A small zoom-in keeps its normal step even below FIT. Once
+                // back above FIT, zoom-out stops at the ordinary FIT minimum.
+                view.zoom(0.1);
+                CHECK(std::abs(view.scale() - preserved_scale * std::pow(1.25, 0.1)) < 1e-12);
+                CHECK(view.scale() > preserved_scale);
+                CHECK(view.scale() < 0.2 * density);
+                view.zoom(1);
+                CHECK(view.scale() > 0.2 * density);
+                view.zoom(-100);
+                CHECK(std::abs(view.scale() - 0.2 * density) < 1e-12);
+                view.fit();
+                view.update({0, 0}, max, density, source, orientation);
+                CHECK(view.fitting());
+                CHECK(std::abs(view.scale() - 0.2 * density) < 1e-12);
+            }
+}

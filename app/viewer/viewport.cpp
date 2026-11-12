@@ -169,7 +169,10 @@ void Viewport::zoom(double wheel, render::Point anchor)
         return;
     const double cx = (min_.x + max_.x) / 2, cy = (min_.y + max_.y) / 2;
     const double x = center_x_ + (anchor.x - cx) * density_ / scale_, y = center_y_ + (anchor.y - cy) * density_ / scale_;
-    zoom_     = std::clamp(scale_ * std::pow(1.25, wheel), fit_scale_, 32.0);
+    // Rotation can preserve a manual scale below the new FIT minimum.
+    // Zooming out (or by zero) must never raise that preserved scale.
+    const double minimum = std::min(fit_scale_, scale_);
+    zoom_     = std::clamp(scale_ * std::pow(1.25, wheel), minimum, 32.0);
     fit_      = false;
     scale_    = zoom_;
     center_x_ = x - (anchor.x - cx) * density_ / scale_;
