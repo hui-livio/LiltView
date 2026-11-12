@@ -74,6 +74,7 @@ Application shortcuts are temporarily disabled during loading and image restorat
 | 100% original-pixel scale | `Ctrl+1`, when available |
 | Zoom a static image | Mouse wheel |
 | Zoom in / out | `Ctrl+↑` / `Ctrl+↓` |
+| Rotate left / right 90° | `Ctrl+←` / `Ctrl+→` |
 | Pan a static image | Drag with the left mouse button |
 | Move the viewport | `Shift+↑` / `Shift+↓` / `Shift+←` / `Shift+→` |
 | Show / hide image information | `I` |

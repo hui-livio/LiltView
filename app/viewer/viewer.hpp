@@ -48,6 +48,7 @@ public:
     void draw(render::Point min, render::Point max, float density, bool interactive = true);
     void fit();
     void actual_size();
+    void rotate(int quarter_turns);
     void set_viewport(render::Point min, render::Point max, float density = 1);
     void pan(double x, double y);
     void zoom(double wheel, render::Point anchor);

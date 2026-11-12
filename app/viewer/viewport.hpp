@@ -23,6 +23,7 @@ public:
     void update(render::Point min, render::Point max, float density, lv_size_u32 source, lv_orientation orientation);
     void fit();
     void actual_size();
+    void rotate(int quarter_turns); // Positive turns rotate clockwise, after EXIF orientation.
     void pan(double x, double y);
     void zoom(double wheel, render::Point anchor);
     void zoom(double wheel); // Keyboard/menu zoom is anchored at the canvas center.
@@ -39,11 +40,13 @@ public:
 
 private:
     void clamp();
+    lv_orientation display_orientation() const;
     std::array<double, 2> orient(double x, double y) const;
     std::array<double, 2> unorient(double x, double y) const;
     render::Point min_{}, max_{};
     lv_size_u32 source_{};
     lv_orientation orientation_ = LV_ORIENTATION_NORMAL;
+    unsigned rotation_          = 0;
     double density_ = 1, scale_ = 1, zoom_ = 1, fit_scale_ = 1, center_x_ = 0, center_y_ = 0;
     bool fit_ = true, initialized_ = false;
 };

@@ -79,15 +79,17 @@ MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_
     auto pan_down            = view_control(language, 53, Text::pan_down, MenuAction::pan_down, {"Shift", "Down"}, has_image);
     auto zoom_in             = view_control(language, 54, Text::zoom_in, MenuAction::zoom_in, {"Control", "Up"}, has_image);
     auto zoom_out            = view_control(language, 55, Text::zoom_out, MenuAction::zoom_out, {"Control", "Down"}, has_image);
+    auto rotate_left  = view_control(language, 58, Text::rotate_left, MenuAction::rotate_left, {"Control", "Left"}, has_image);
+    auto rotate_right = view_control(language, 59, Text::rotate_right, MenuAction::rotate_right, {"Control", "Right"}, has_image);
     MenuItem pan_separator;
     pan_separator.id        = 56;
     pan_separator.separator = true;
     auto information        = toggle(language, 57, Text::image_info, MenuAction::image_info, image_info_open);
     information.shortcut    = {"i"};
     information.enabled     = has_image || has_image_info;
-    view.children           = {previous, next,     navigation_separator, fit,         actual_size,
-                               zoom_in,  zoom_out, pan_separator,        pan_left,    pan_right,
-                               pan_up,   pan_down, zoom_separator,       information, fullscreen_item};
+    view.children           = {previous, next,        navigation_separator, fit,           actual_size,    zoom_in,
+                               zoom_out, rotate_left, rotate_right,         pan_separator, pan_left,       pan_right,
+                               pan_up,   pan_down,    zoom_separator,       information,   fullscreen_item};
     return view;
 }
 

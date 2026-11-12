@@ -680,6 +680,8 @@ TEST_CASE("canvas right click shares View entries shortcuts and actions in both 
                             previous = position + item.label.size();
                         }
                     CHECK(context.text.find("Ctrl+↑") != std::string::npos);
+                    CHECK(context.text.find("Ctrl+←") != std::string::npos);
+                    CHECK(context.text.find("Ctrl+→") != std::string::npos);
                     CHECK(context.text.find("Shift+←") != std::string::npos);
                     CHECK(context.text.find("F11") != std::string::npos);
                     // The first enabled row dispatches exactly the same action

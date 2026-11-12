@@ -184,3 +184,112 @@ TEST_CASE("directional panning moves image content on screen and preserves image
             }
         }
 }
+
+TEST_CASE("quarter turns rotate screen coordinates after every EXIF orientation without changing native detail",
+          "[viewport][rotation][orientation][sharpness]")
+{
+    for (const float density : {1.0f, 1.25f, 1.5f, 2.0f})
+        for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+        {
+            CAPTURE(density, orientation);
+            Viewport original;
+            original.update({0, 0}, {512 / density, 512 / density}, density, {60000, 40000}, orientation);
+            original.actual_size();
+            original.pan(64, -32);
+            const auto target  = original.target(256, true);
+            const auto before  = original.quad(target.rect, target.canvas);
+            const float center = 256 / density;
+            for (const int turns : {-1, 1, 2, 3, 4, -4, 9})
+            {
+                CAPTURE(turns);
+                auto rotated = original;
+                rotated.rotate(turns);
+                // The next frame's metadata update must preserve manual rotation.
+                rotated.update({0, 0}, {512 / density, 512 / density}, density, {60000, 40000}, orientation);
+                CHECK(rotated.scale() == original.scale());
+                CHECK(rotated.target(256, true) == target);
+                const auto after = rotated.quad(target.rect, target.canvas);
+                const auto count = (turns % 4 + 4) % 4;
+                for (unsigned i = 0; i < before.size(); ++i)
+                {
+                    auto expected = before[i];
+                    for (int turn = 0; turn < count; ++turn)
+                        expected = {2 * center - expected.y, expected.x};
+                    CHECK(std::abs(after[i].x - expected.x) < 0.001f);
+                    CHECK(std::abs(after[i].y - expected.y) < 0.001f);
+                    CHECK(std::abs(after[i].x * density - std::round(after[i].x * density)) < 0.001f);
+                    CHECK(std::abs(after[i].y * density - std::round(after[i].y * density)) < 0.001f);
+                }
+                if (count)
+                {
+                    CHECK_FALSE(rotated.same_layout(original));
+                    CHECK(original.toward(rotated, 0.5).same_view(original));
+                }
+                rotated.rotate(-turns);
+                CHECK(rotated.same_view(original));
+            }
+        }
+}
+
+TEST_CASE("rotation refits swapped bounds and preserves the current orientation through fit and actual size",
+          "[viewport][rotation][fit]")
+{
+    Viewport view;
+    view.update({0, 0}, {600, 400}, 1, {1200, 600}, LV_ORIENTATION_NORMAL);
+    const auto original = view;
+    CHECK(view.scale() == 0.5);
+    view.rotate(1);
+    CHECK(view.fitting());
+    CHECK(std::abs(view.scale() - 1.0 / 3) < 1e-12);
+    auto quad = view.quad({0, 0, 1200, 600}, {1200, 600});
+    CHECK(quad[0].x == 400);
+    CHECK(quad[0].y == 0);
+    CHECK(quad[2].x == 200);
+    CHECK(quad[2].y == 400);
+    view.actual_size();
+    CHECK(view.scale() == 1);
+    view.zoom(1);
+    CHECK(view.scale() == 1.25);
+    view.rotate(-1);
+    CHECK(view.scale() == 1.25);
+    view.fit();
+    view.update({0, 0}, {600, 400}, 1, {1200, 600}, LV_ORIENTATION_NORMAL);
+    CHECK(view.same_view(original));
+    view.rotate(-1);
+    view.fit();
+    view.update({0, 0}, {600, 400}, 1, {1200, 600}, LV_ORIENTATION_NORMAL);
+    quad = view.quad({0, 0, 1200, 600}, {1200, 600});
+    CHECK(quad[0].x == 200);
+    CHECK(quad[0].y == 400);
+    view.reset();
+    view.rotate(1); // An empty viewer has no persistent rotation to apply later.
+    view.update({0, 0}, {600, 400}, 1, {1200, 600}, LV_ORIENTATION_NORMAL);
+    CHECK(view.same_view(original));
+}
+
+TEST_CASE("rotated tiles retain shared edges and bounded visible native regions", "[viewport][rotation][coverage]")
+{
+    for (lv_orientation orientation = 1; orientation <= 8; ++orientation)
+        for (const int turns : {-1, 1, 2})
+        {
+            CAPTURE(orientation, turns);
+            Viewport view;
+            view.update({0, 0}, {600, 400}, 2, {60000, 40000}, orientation);
+            view.actual_size();
+            view.pan(-64, 32);
+            view.rotate(turns);
+            const auto target = view.target(256, true);
+            CHECK(target.rect.width <= 1792);
+            CHECK(target.rect.height <= 1792);
+            CHECK(target.rect.x + target.rect.width <= target.canvas.width);
+            CHECK(target.rect.y + target.rect.height <= target.canvas.height);
+            const auto a = view.quad({target.rect.x, target.rect.y, 128, 128}, target.canvas);
+            const auto b = view.quad({target.rect.x + 128, target.rect.y, 128, 128}, target.canvas);
+            CHECK(a[1].x == b[0].x);
+            CHECK(a[1].y == b[0].y);
+            CHECK(a[2].x == b[3].x);
+            CHECK(a[2].y == b[3].y);
+            CHECK(view.visible(target.rect));
+            CHECK_FALSE(view.visible({0, 0, 256, 256}));
+        }
+}
