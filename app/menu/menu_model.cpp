@@ -184,6 +184,23 @@ MenuAction menu_action_for_input(const MenuItem &menu, const std::vector<std::st
     return menu_action_for_shortcut(menu, shortcut, repeat);
 }
 
+std::array<double, 2> menu_pan_delta(MenuAction action)
+{
+    switch (action)
+    {
+    case MenuAction::pan_left:
+        return {64, 0};
+    case MenuAction::pan_right:
+        return {-64, 0};
+    case MenuAction::pan_up:
+        return {0, 64};
+    case MenuAction::pan_down:
+        return {0, -64};
+    default:
+        return {};
+    }
+}
+
 void apply_menu_setting(MenuAction action, Settings &settings)
 {
     switch (action)

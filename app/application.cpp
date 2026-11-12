@@ -423,22 +423,15 @@ private:
             if (viewer_->has_image() && viewer_->can_actual_size())
                 viewer_->actual_size();
             break;
-        // Menu/keyboard directions move the viewport; pan() moves image content in the opposite direction.
         case MenuAction::pan_left:
-            if (viewer_->has_image())
-                viewer_->pan(64, 0);
-            break;
         case MenuAction::pan_right:
-            if (viewer_->has_image())
-                viewer_->pan(-64, 0);
-            break;
         case MenuAction::pan_up:
-            if (viewer_->has_image())
-                viewer_->pan(0, 64);
-            break;
         case MenuAction::pan_down:
             if (viewer_->has_image())
-                viewer_->pan(0, -64);
+            {
+                const auto delta = menu_pan_delta(action);
+                viewer_->pan(delta[0], delta[1]);
+            }
             break;
         case MenuAction::zoom_in:
             if (viewer_->has_image())

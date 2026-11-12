@@ -3,6 +3,7 @@
 
 #include "settings/settings.hpp"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -65,6 +66,8 @@ struct ShortcutContext
 };
 MenuAction menu_action_for_input(const MenuItem &, const std::vector<std::string> &shortcut, bool repeat,
                                  const ShortcutContext &);
+// Image-content delta in logical pixels: menu directions move the viewport the other way.
+std::array<double, 2> menu_pan_delta(MenuAction action);
 void apply_menu_setting(MenuAction action, Settings &settings);
 } // namespace liltview
 
