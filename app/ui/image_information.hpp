@@ -16,6 +16,9 @@ struct ImageInformationRow
     std::string value;
 };
 
+// Known source container format, never inferred from a file extension.
+const char *image_format_name(lv_format);
+
 // Presentation only: no file access, Core calls, rendering or metadata parsing.
 std::vector<ImageInformationRow> image_information_rows(Language, const ImageDetails &);
 

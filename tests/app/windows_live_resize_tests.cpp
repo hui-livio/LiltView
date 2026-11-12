@@ -192,9 +192,9 @@ TEST_CASE("Windows live sizing presents title controls and full chrome at each n
                     }
                     bool footer_visible = false;
                     for (int offset = 20; offset <= 70; offset += 5)
-                        footer_visible |= glyph_visible(pixels, metrics.width - static_cast<float>(offset) * scale,
+                        footer_visible |= glyph_visible(pixels, metrics.border + static_cast<float>(offset) * scale,
                                                         metrics.status_top() + metrics.status_height * 0.5f, density, dark);
-                    CHECK(footer_visible); // The right-aligned language label follows the resized bottom edge.
+                    CHECK(footer_visible); // Empty state keeps Ready/No image on the left; the language label is gone.
                     bool title_visible = false;
                     for (int x = 50; x <= 110; x += 4)
                         title_visible |= glyph_visible(pixels, static_cast<float>(x) * scale, center_y, density, dark);

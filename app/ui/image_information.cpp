@@ -89,6 +89,11 @@ bool draw_information_header(Language language)
 }
 } // namespace
 
+const char *image_format_name(lv_format format)
+{
+    return format_name(format);
+}
+
 std::vector<ImageInformationRow> image_information_rows(Language language, const ImageDetails &details)
 {
     const auto t = [language](Text text)

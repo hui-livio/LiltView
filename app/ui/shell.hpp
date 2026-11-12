@@ -40,7 +40,7 @@ public:
 
 private:
     MenuAction draw_window_menu(const MenuItem &menu);
-    MenuAction draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &,
+    MenuAction draw_canvas(Language language, const MenuItem &menu, render::Renderer &renderer, render::Image icon, Viewer &,
                            const WindowChromeMetrics &);
     void draw_status(Language language, const Viewer &, const WindowChromeMetrics &);
     void draw_about(Language language, render::Renderer &renderer, render::Image icon, float frame_radius);

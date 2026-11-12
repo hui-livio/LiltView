@@ -63,6 +63,7 @@ MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std:
 struct ShortcutContext
 {
     bool blocked = false, fullscreen = false, image_info_open = false;
+    bool loading = false; // Includes queued opens and restoring visible pixels.
 };
 MenuAction menu_action_for_input(const MenuItem &, const std::vector<std::string> &shortcut, bool repeat,
                                  const ShortcutContext &);

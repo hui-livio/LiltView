@@ -171,7 +171,7 @@ MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std:
 MenuAction menu_action_for_input(const MenuItem &menu, const std::vector<std::string> &shortcut, bool repeat,
                                  const ShortcutContext &context)
 {
-    if (context.blocked)
+    if (context.blocked || context.loading)
         return MenuAction::none;
     if (shortcut == std::vector<std::string>{"Escape"})
     {

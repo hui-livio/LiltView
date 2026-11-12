@@ -93,6 +93,12 @@ enum class Text
     info_state,
     info_partial,
     info_previous_loading,
+    status_failed,
+    status_loading_native,
+    status_loading_detail,
+    status_previous_image,
+    image_load_failed,
+    unsupported_format,
     count
 };
 

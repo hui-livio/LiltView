@@ -1,5 +1,6 @@
 #include "shell.hpp"
 #include "theme.hpp"
+#include "status_bar.hpp"
 
 #include "version.hpp"
 #include "viewer/viewer.hpp"
@@ -63,6 +64,99 @@ Text image_error_text(lv_error_code code)
     default:
         return Text::image_error;
     }
+}
+
+struct ImageFailureLayout
+{
+    float width, wrap, icon, title_gap, reason_gap, padding, top, height;
+    ImVec2 title, reason;
+};
+
+ImageFailureLayout image_failure_layout(const char *title, const char *reason, float width, float height, float scale)
+{
+    ImageFailureLayout layout{};
+    layout.width             = width;
+    layout.wrap              = std::max(1.0f, std::min(520 * scale, width - 2 * std::min(24 * scale, width * 0.04f)));
+    layout.title             = ImGui::CalcTextSize(title, nullptr, false, layout.wrap);
+    layout.reason            = ImGui::CalcTextSize(reason, nullptr, false, layout.wrap);
+    layout.padding           = 4 * scale;
+    layout.title_gap         = 22 * scale;
+    layout.reason_gap        = 12 * scale;
+    const float maximum_icon = std::min(72 * scale, layout.wrap);
+    const float minimum_icon = std::min(32 * scale, maximum_icon);
+    const float text_height  = layout.title.y + layout.reason.y + 2 * layout.padding;
+    if (text_height + maximum_icon + layout.title_gap + layout.reason_gap > height)
+    {
+        layout.title_gap  = 8 * scale;
+        layout.reason_gap = 6 * scale;
+    }
+    layout.icon   = std::clamp(height - text_height - layout.title_gap - layout.reason_gap, minimum_icon, maximum_icon);
+    layout.height = text_height + layout.icon + layout.title_gap + layout.reason_gap;
+    layout.top    = layout.padding + std::max(0.0f, (height - layout.height) * 0.5f);
+    return layout;
+}
+
+// Preserve a visible illustration and readable text at small sizes/high DPI.
+// Compact spacing first; if even the minimum illustration and wrapped text do
+// not fit, scroll the failure content instead of silently clipping the reason.
+void draw_image_failure(Language language, Text reason, ImVec2 min, ImVec2 max, float scale)
+{
+    const auto &palette = current_ui_palette();
+    const float width = std::max(1.0f, max.x - min.x), height = std::max(1.0f, max.y - min.y);
+    const auto *title   = translate(language, Text::image_load_failed);
+    const auto *message = translate(language, reason == Text::image_unsupported ? Text::unsupported_format : reason);
+    auto layout         = image_failure_layout(title, message, width, height, scale);
+    const bool scroll   = layout.height > height;
+    if (scroll)
+        layout = image_failure_layout(title, message, std::max(1.0f, width - ImGui::GetStyle().ScrollbarSize), height, scale);
+    ImGui::SetCursorScreenPos(min);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0, 0});
+    ImGui::BeginChild("image_failure", {width, height}, ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
+                          (scroll ? ImGuiWindowFlags_AlwaysVerticalScrollbar : 0));
+    if (!scroll || ImGui::IsWindowAppearing())
+        ImGui::SetScrollY(0);
+    const auto origin      = ImGui::GetCursorScreenPos();
+    const float icon_scale = layout.icon / 72;
+    const ImVec2 icon_min{origin.x + (layout.width - layout.icon) * 0.5f, origin.y + layout.top};
+    const auto pt = [&](float x, float y)
+    {
+        return ImVec2{icon_min.x + x * icon_scale, icon_min.y + y * icon_scale};
+    };
+    auto *draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(pt(0, 0), pt(72, 72), ImGui::GetColorU32(palette.surface), 16 * icon_scale);
+    draw->AddRect(pt(12, 16), pt(58, 54), ImGui::GetColorU32(palette.secondary), 4 * icon_scale, 0, 1.5f * icon_scale);
+    draw->AddCircleFilled(pt(24, 28), 4 * icon_scale, ImGui::GetColorU32(palette.secondary));
+    const ImVec2 mountain[]{pt(15, 49), pt(29, 36), pt(39, 44), pt(47, 37), pt(56, 46)};
+    draw->AddPolyline(mountain, 5, ImGui::GetColorU32(palette.secondary), 0, 1.5f * icon_scale);
+    draw->AddCircleFilled(pt(56, 54), 13 * icon_scale, ImGui::GetColorU32(palette.surface));
+    draw->AddCircle(pt(56, 54), 10 * icon_scale, ImGui::GetColorU32(palette.error), 0, 1.5f * icon_scale);
+    draw->AddLine(pt(52, 50), pt(60, 58), ImGui::GetColorU32(palette.error), 1.8f * icon_scale);
+    draw->AddLine(pt(60, 50), pt(52, 58), ImGui::GetColorU32(palette.error), 1.8f * icon_scale);
+    ImGui::SetCursorScreenPos(icon_min);
+    ImGui::Dummy({layout.icon, layout.icon});
+    const auto text = [&](const char *value, ImVec2 size, float y, ImVec4 color)
+    {
+        ImGui::SetCursorScreenPos({origin.x + (layout.width - size.x) * 0.5f, y});
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + layout.wrap);
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::TextUnformatted(value);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+    };
+    const float title_y  = icon_min.y + layout.icon + layout.title_gap;
+    const float reason_y = title_y + layout.title.y + layout.reason_gap;
+    text(title, layout.title, title_y, palette.text);
+    text(message, layout.reason, reason_y, palette.secondary);
+    ImGui::SetCursorScreenPos({origin.x, reason_y + layout.reason.y + layout.padding});
+    ImGui::Dummy({0, 0});
+    ImGui::EndChild();
+    ImGui::PopStyleVar(2);
+    // The content child owns its full extent; navigation overlays in the
+    // parent should not extend that parent by another trailing item spacing.
+    ImGui::SetCursorScreenPos(min);
+    ImGui::Dummy({0, 0});
 }
 
 // Keep small chrome arcs smooth at fractional UI scales and dense framebuffers.
@@ -173,6 +267,27 @@ MenuAction draw_menu(const MenuItem &root)
     }
     return result;
 }
+
+MenuAction draw_canvas_menu(const MenuItem &menu, bool enabled)
+{
+    // The stable View ID and renderer are shared with the menu bar, including
+    // shortcuts, separators, checked state and per-action availability.
+    const auto *view     = find_menu_item(menu, 2);
+    enabled              = enabled && view && view->enabled;
+    constexpr auto popup = "canvas_view_menu";
+    if (enabled && ImGui::IsWindowHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+        ImGui::OpenPopup(popup);
+    MenuAction action = MenuAction::none;
+    if (ImGui::BeginPopup(popup))
+    {
+        if (enabled)
+            action = draw_menu(*view);
+        else
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    return action;
+}
 } // namespace
 
 void apply_style(bool dark, float scale)
@@ -236,7 +351,7 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
         return action;
     }
 
-    const auto canvas_action = draw_canvas(language, renderer, icon, viewer, metrics);
+    const auto canvas_action = draw_canvas(language, menu, renderer, icon, viewer, metrics);
     if (canvas_action != MenuAction::none)
         action = canvas_action;
     draw_status(language, viewer, metrics);
@@ -257,8 +372,8 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
     return selected;
 }
 
-MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, render::Image icon, Viewer &viewer,
-                              const WindowChromeMetrics &chrome)
+MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::Renderer &renderer, render::Image icon,
+                              Viewer &viewer, const WindowChromeMetrics &chrome)
 {
     // 画布填满无内边距的主窗口，仅为底部状态栏预留高度。
     const auto t = [language](Text text)
@@ -284,13 +399,25 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
                                    ImGui::IsMouseDown(ImGuiMouseButton_Left));
     const auto finish = [&]
     {
-        const auto selected = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        auto selected         = draw_canvas_menu(menu, viewer.settled() && viewer.has_visible_image() && !viewer.failed());
+        const auto navigation = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        if (navigation != MenuAction::none)
+            selected = navigation;
+        // Navigation restores the cursor after the reason text. Submit its
+        // trailing spacing explicitly rather than extending child bounds via SetCursorPos.
+        ImGui::Dummy({0, 0});
         ImGui::EndChild();
         if (information.visible &&
-            draw_image_information(language, viewer.image_details(), information.panel_min, information.panel_max))
+            draw_image_information(language, viewer.failed() ? std::nullopt : viewer.image_details(), information.panel_min,
+                                   information.panel_max))
             image_info_open_ = false;
         return selected;
     };
+    if (viewer.failed())
+    {
+        draw_image_failure(language, image_error_text(viewer.error()), position, end, scale);
+        return finish();
+    }
     if (viewer.has_visible_image())
     {
         viewer.draw({position.x, position.y}, {position.x + available.x, position.y + available.y},
@@ -300,14 +427,6 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
     if (viewer.loading())
     {
         centered_text(translate(language, Text::loading), ImGui::GetWindowWidth(), true);
-        return finish();
-    }
-    if (viewer.failed())
-    {
-        const auto message = image_error_text(viewer.error());
-        ImGui::PushTextWrapPos();
-        ImGui::TextWrapped("%s", translate(language, message));
-        ImGui::PopTextWrapPos();
         return finish();
     }
     const float image_size = 82.0f * scale;
@@ -326,10 +445,6 @@ MenuAction Shell::draw_canvas(Language language, render::Renderer &renderer, ren
 
 void Shell::draw_status(Language language, const Viewer &viewer, const WindowChromeMetrics &chrome)
 {
-    const auto t = [language](Text text)
-    {
-        return translate(language, text);
-    };
     Text status = Text::ready;
     if (viewer.loading())
         status = viewer.native_loading() ? Text::loading_native : Text::loading;
@@ -337,38 +452,22 @@ void Shell::draw_status(Language language, const Viewer &viewer, const WindowChr
         status = Text::loading_detail;
     if (viewer.failed())
         status = image_error_text(viewer.error());
-    std::string text = t(status);
-    if (viewer.filename().empty())
-        text += std::string("  /  ") + t(Text::no_image);
-    else
-        text += "  |  " + viewer.filename() + "  " + std::to_string(viewer.source_size().width) + " x " +
-            std::to_string(viewer.source_size().height);
-    const auto &navigation = viewer.navigation();
-    if (navigation.total)
-        text += "  |  " + std::to_string(navigation.current) + " / " + std::to_string(navigation.total);
-    if (navigation.scanning)
-        text += std::string("  |  ") + t(Text::scanning_directory);
-    else if (navigation.error)
-        text += std::string("  |  ") + t(Text::directory_error);
-    const char *language_name = language == Language::chinese ? "简体中文" : "English";
+    const auto content = status_bar_content(language, status, viewer.image_details(), viewer.filename(), viewer.navigation());
     const auto origin         = ImGui::GetWindowPos();
     const auto size           = ImGui::GetWindowSize();
     const auto &style         = ImGui::GetStyle();
     const float top           = origin.y + chrome.status_top();
-    const float text_y        = top + (chrome.status_height - ImGui::GetTextLineHeight()) * 0.5f;
     const float left          = origin.x + chrome.border + style.WindowPadding.x;
-    const float right         = origin.x + size.x - chrome.border - style.WindowPadding.x - ImGui::CalcTextSize(language_name).x;
-    const auto color          = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const float right         = origin.x + size.x - chrome.border - style.WindowPadding.x;
     auto *list                = ImGui::GetWindowDrawList();
     list->AddRectFilled({origin.x + chrome.border, top},
                         {origin.x + size.x - chrome.border, origin.y + size.y - chrome.border},
                         ImGui::GetColorU32(current_ui_palette().chrome), std::max(0.0f, chrome.radius - chrome.border),
                         ImDrawFlags_RoundCornersBottom);
-    // 两侧共用居中的文字基线；长文件名裁切在语言标签之前，不撑高或覆盖状态栏。
-    list->PushClipRect({left, top}, {std::max(left, right - style.ItemSpacing.x), origin.y + size.y - chrome.border}, true);
-    list->AddText({left, text_y}, color, text.c_str());
-    list->PopClipRect();
-    list->AddText({right, text_y}, color, language_name);
+    // Thin top rule and three independently clipped groups; no language label.
+    list->AddLine({origin.x + chrome.border, top}, {origin.x + size.x - chrome.border, top},
+                  ImGui::GetColorU32(current_ui_palette().separator));
+    draw_status_bar_content(content, {left, top}, {right, origin.y + size.y - chrome.border}, style.FontScaleDpi);
 }
 
 void Shell::draw_about(Language language, render::Renderer &renderer, render::Image icon, float frame_radius)
