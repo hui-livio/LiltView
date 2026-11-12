@@ -66,21 +66,60 @@ Text image_error_text(lv_error_code code)
     }
 }
 
-// Theme-aware broken-image illustration, not the previous image. The reason is
-// ordinary wrapped text directly below it, readable without hover or a dialog.
+struct ImageFailureLayout
+{
+    float width, wrap, icon, title_gap, reason_gap, padding, top, height;
+    ImVec2 title, reason;
+};
+
+ImageFailureLayout image_failure_layout(const char *title, const char *reason, float width, float height, float scale)
+{
+    ImageFailureLayout layout{};
+    layout.width             = width;
+    layout.wrap              = std::max(1.0f, std::min(520 * scale, width - 2 * std::min(24 * scale, width * 0.04f)));
+    layout.title             = ImGui::CalcTextSize(title, nullptr, false, layout.wrap);
+    layout.reason            = ImGui::CalcTextSize(reason, nullptr, false, layout.wrap);
+    layout.padding           = 4 * scale;
+    layout.title_gap         = 22 * scale;
+    layout.reason_gap        = 12 * scale;
+    const float maximum_icon = std::min(72 * scale, layout.wrap);
+    const float minimum_icon = std::min(32 * scale, maximum_icon);
+    const float text_height  = layout.title.y + layout.reason.y + 2 * layout.padding;
+    if (text_height + maximum_icon + layout.title_gap + layout.reason_gap > height)
+    {
+        layout.title_gap  = 8 * scale;
+        layout.reason_gap = 6 * scale;
+    }
+    layout.icon   = std::clamp(height - text_height - layout.title_gap - layout.reason_gap, minimum_icon, maximum_icon);
+    layout.height = text_height + layout.icon + layout.title_gap + layout.reason_gap;
+    layout.top    = layout.padding + std::max(0.0f, (height - layout.height) * 0.5f);
+    return layout;
+}
+
+// Preserve a visible illustration and readable text at small sizes/high DPI.
+// Compact spacing first; if even the minimum illustration and wrapped text do
+// not fit, scroll the failure content instead of silently clipping the reason.
 void draw_image_failure(Language language, Text reason, ImVec2 min, ImVec2 max, float scale)
 {
-    const auto &palette      = current_ui_palette();
-    const float width        = std::max(1.0f, max.x - min.x);
-    const float wrap         = std::max(1.0f, std::min(520 * scale, width - 48 * scale));
-    const char *message      = translate(language, reason == Text::image_unsupported ? Text::unsupported_format : reason);
-    const auto message_size  = ImGui::CalcTextSize(message, nullptr, false, wrap);
-    const float title_height = ImGui::GetTextLineHeight();
-    const float icon_size    = std::clamp(max.y - min.y - title_height - message_size.y - 50 * scale, 0.0f, 72 * scale);
-    const float icon_scale   = icon_size / 72;
-    const float height       = icon_size + 22 * scale + title_height + 12 * scale + message_size.y;
-    const float top          = std::max(min.y + 8 * scale, min.y + (max.y - min.y - height) * 0.5f);
-    const ImVec2 icon_min{min.x + (width - icon_size) * 0.5f, top};
+    const auto &palette = current_ui_palette();
+    const float width = std::max(1.0f, max.x - min.x), height = std::max(1.0f, max.y - min.y);
+    const auto *title   = translate(language, Text::image_load_failed);
+    const auto *message = translate(language, reason == Text::image_unsupported ? Text::unsupported_format : reason);
+    auto layout         = image_failure_layout(title, message, width, height, scale);
+    const bool scroll   = layout.height > height;
+    if (scroll)
+        layout = image_failure_layout(title, message, std::max(1.0f, width - ImGui::GetStyle().ScrollbarSize), height, scale);
+    ImGui::SetCursorScreenPos(min);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0, 0});
+    ImGui::BeginChild("image_failure", {width, height}, ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
+                          (scroll ? ImGuiWindowFlags_AlwaysVerticalScrollbar : 0));
+    if (!scroll || ImGui::IsWindowAppearing())
+        ImGui::SetScrollY(0);
+    const auto origin      = ImGui::GetCursorScreenPos();
+    const float icon_scale = layout.icon / 72;
+    const ImVec2 icon_min{origin.x + (layout.width - layout.icon) * 0.5f, origin.y + layout.top};
     const auto pt = [&](float x, float y)
     {
         return ImVec2{icon_min.x + x * icon_scale, icon_min.y + y * icon_scale};
@@ -95,17 +134,29 @@ void draw_image_failure(Language language, Text reason, ImVec2 min, ImVec2 max, 
     draw->AddCircle(pt(56, 54), 10 * icon_scale, ImGui::GetColorU32(palette.error), 0, 1.5f * icon_scale);
     draw->AddLine(pt(52, 50), pt(60, 58), ImGui::GetColorU32(palette.error), 1.8f * icon_scale);
     draw->AddLine(pt(60, 50), pt(52, 58), ImGui::GetColorU32(palette.error), 1.8f * icon_scale);
-    const auto *title = translate(language, Text::image_load_failed);
-    ImGui::SetCursorScreenPos(
-        {min.x + std::max(0.0f, (width - ImGui::CalcTextSize(title).x) * 0.5f), top + icon_size + 22 * scale});
-    ImGui::TextUnformatted(title);
-    ImGui::SetCursorScreenPos(
-        {min.x + (width - message_size.x) * 0.5f, top + icon_size + 22 * scale + title_height + 12 * scale});
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
-    ImGui::PushStyleColor(ImGuiCol_Text, palette.secondary);
-    ImGui::TextUnformatted(message);
-    ImGui::PopStyleColor();
-    ImGui::PopTextWrapPos();
+    ImGui::SetCursorScreenPos(icon_min);
+    ImGui::Dummy({layout.icon, layout.icon});
+    const auto text = [&](const char *value, ImVec2 size, float y, ImVec4 color)
+    {
+        ImGui::SetCursorScreenPos({origin.x + (layout.width - size.x) * 0.5f, y});
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + layout.wrap);
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::TextUnformatted(value);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+    };
+    const float title_y  = icon_min.y + layout.icon + layout.title_gap;
+    const float reason_y = title_y + layout.title.y + layout.reason_gap;
+    text(title, layout.title, title_y, palette.text);
+    text(message, layout.reason, reason_y, palette.secondary);
+    ImGui::SetCursorScreenPos({origin.x, reason_y + layout.reason.y + layout.padding});
+    ImGui::Dummy({0, 0});
+    ImGui::EndChild();
+    ImGui::PopStyleVar(2);
+    // The content child owns its full extent; navigation overlays in the
+    // parent should not extend that parent by another trailing item spacing.
+    ImGui::SetCursorScreenPos(min);
+    ImGui::Dummy({0, 0});
 }
 
 // Keep small chrome arcs smooth at fractional UI scales and dense framebuffers.

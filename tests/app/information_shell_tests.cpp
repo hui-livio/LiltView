@@ -21,7 +21,8 @@ namespace
 class LayoutRenderer final : public liltview::render::Renderer
 {
 public:
-    unsigned image_calls = 0;
+    unsigned image_calls = 0, upload_delay_ms = 0;
+    bool fail_upload = false;
     liltview::render::Capabilities capabilities() const override
     {
         return {liltview::render::Backend::opengl3, 4096, 128 * 1024 * 1024, 0};
@@ -36,6 +37,13 @@ public:
     }
     void update_image(liltview::render::Image, liltview::render::Rect, liltview::render::Pixels) override
     {
+        if (fail_upload)
+        {
+            fail_upload = false;
+            throw std::runtime_error("Injected progressive upload failure");
+        }
+        if (upload_delay_ms)
+            SDL_Delay(upload_delay_ms);
     }
     void destroy_image(liltview::render::Image) noexcept override
     {
@@ -152,6 +160,47 @@ struct Source
         std::filesystem::remove_all(directory, error);
     }
 };
+
+std::filesystem::path progressive_bmp(const Source &source, bool corrupt)
+{
+    constexpr std::uint32_t width = 2048, height = 2048;
+    const auto path            = source.directory / (corrupt ? "progressive-corrupt.bmp" : "progressive.bmp");
+    const std::uint32_t offset = corrupt ? 58 : 54, stride = width * (corrupt ? 1 : 3);
+    std::array<unsigned char, 54> header{};
+    const auto put = [&](unsigned at, std::uint32_t value)
+    {
+        for (unsigned i = 0; i < 4; ++i)
+            header[at + i] = static_cast<unsigned char>(value >> (8 * i));
+    };
+    header[0] = 'B';
+    header[1] = 'M';
+    put(2, offset + stride * height);
+    put(10, offset);
+    put(14, 40);
+    put(18, width);
+    put(22, static_cast<std::uint32_t>(-static_cast<std::int32_t>(height))); // Top-down rows.
+    header[26] = 1;
+    header[28] = corrupt ? 8 : 24;
+    put(34, stride * height);
+    if (corrupt)
+        put(46, 1); // Only palette index zero is valid.
+    std::ofstream output(path, std::ios::binary);
+    output.write(reinterpret_cast<const char *>(header.data()), header.size());
+    if (corrupt)
+    {
+        const char palette[]{0, 0, static_cast<char>(255), 0};
+        output.write(palette, sizeof(palette));
+    }
+    std::string row(stride, '\0');
+    for (unsigned y = 0; y < height; ++y)
+    {
+        if (corrupt && y == height - 1)
+            row[0] = 1; // A real decoder error after multiple valid native row bands.
+        output.write(row.data(), static_cast<std::streamsize>(row.size()));
+    }
+    REQUIRE(output.good());
+    return path;
+}
 } // namespace
 
 TEST_CASE("full information shell keeps the image navigation panel and footer disjoint at small sizes and DPI",
@@ -744,4 +793,149 @@ TEST_CASE("canvas menu preserves disabled View actions and dismisses without dis
     REQUIRE(context.popup());
     context.close();
     CHECK_FALSE(context.popup());
+}
+
+TEST_CASE("progressive decode and upload failures clear pending pixels and restore shortcuts", "[shell][loading][image_failure]")
+{
+    using namespace liltview;
+    for (const bool corrupt : {false, true})
+        for (const bool replacement : {false, true})
+        {
+            CAPTURE(corrupt, replacement);
+            CanvasMenuContext context;
+            if (replacement)
+                context.load();
+            const auto path                  = progressive_bmp(context.source, corrupt);
+            context.renderer.upload_delay_ms = 5; // One upload crosses the pump budget: presentation precedes the terminal.
+            context.viewer.open(path);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+            while (!(context.viewer.loading() && context.viewer.has_visible_image() && context.viewer.detail_loading()))
+            {
+                REQUIRE(std::chrono::steady_clock::now() < deadline);
+                REQUIRE_FALSE(context.viewer.failed());
+                context.viewer.pump();
+                context.frame();
+                SDL_Delay(1);
+            }
+            const auto loading = ShortcutContext{false, false, false, !context.viewer.settled()};
+            CHECK(menu_action_for_input(context.menu, {"Control", "o"}, false, loading) == MenuAction::none);
+            if (!corrupt)
+                context.renderer.fail_upload = true;
+            while (!context.viewer.failed())
+            {
+                REQUIRE(std::chrono::steady_clock::now() < deadline);
+                context.viewer.pump();
+                context.frame();
+                SDL_Delay(1);
+            }
+            context.settle(); // Drains cancelled terminals, without drawing the discarded scene again.
+            const lv_error_code expected = corrupt ? LV_ERROR_CORRUPT_DATA : LV_ERROR_MEMORY_BUDGET;
+            CHECK(context.viewer.error() == expected);
+            CHECK_FALSE(context.viewer.loading());
+            CHECK_FALSE(context.viewer.detail_loading());
+            CHECK(context.viewer.settled());
+            context.renderer.image_calls = 0;
+            context.frame();
+            CHECK(context.renderer.image_calls == 0);
+            const auto failed = ShortcutContext{false, false, false, !context.viewer.settled()};
+            for (const bool repeat : {false, true})
+            {
+                CHECK(menu_action_for_input(context.menu, {"Control", "o"}, repeat, failed) ==
+                      (repeat ? MenuAction::none : MenuAction::open));
+                CHECK(menu_action_for_input(context.menu, {"Control", "q"}, repeat, failed) ==
+                      (repeat ? MenuAction::none : MenuAction::quit));
+            }
+            context.renderer.upload_delay_ms = 0;
+            context.load();
+            CHECK(context.viewer.settled());
+            CHECK(context.renderer.image_calls > 0);
+        }
+}
+
+TEST_CASE("failure illustration and text fit minimum windows across DPI and scroll when necessary", "[shell][image_failure][dpi]")
+{
+    using namespace liltview;
+    CanvasMenuContext context;
+    context.viewer.open(context.source.directory / "missing.bmp");
+    context.settle();
+    const auto failure_window = []() -> ImGuiWindow *
+    {
+        for (auto *window : ImGui::GetCurrentContext()->Windows)
+            if (window->Active && std::string_view(window->Name).find("/image_failure_") != std::string_view::npos)
+                return window;
+        return nullptr;
+    };
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool dark : {false, true})
+            for (const bool native : {false, true})
+                for (const bool panel : {false, true})
+                    for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+                    {
+                        CAPTURE(language, dark, native, panel, scale);
+                        context.language           = language;
+                        context.dark               = dark;
+                        context.native             = native;
+                        context.scale              = scale;
+                        ImGui::GetIO().DisplaySize = {640, 480};
+                        if (context.shell.image_info_open() != panel)
+                            context.shell.toggle_image_info();
+                        context.frame();
+                        context.frame();
+                        auto *failure = failure_window();
+                        REQUIRE(failure);
+                        CHECK(failure->ScrollMax.x == 0);
+                        CHECK(failure->ScrollMax.y == 0);
+                        CHECK(failure->DC.CursorMaxPos.y <= failure->InnerRect.Max.y + 1);
+                        CHECK(context.text.find(translate(language, Text::image_io_error)) != std::string::npos);
+                        // The error badge has actual geometry, not a zero-sized icon.
+                        const auto color = ImGui::GetColorU32(current_ui_palette().error);
+                        float top = failure->InnerRect.Max.y, bottom = failure->InnerRect.Min.y;
+                        for (const auto &vertex : failure->DrawList->VtxBuffer)
+                            if (vertex.col == color)
+                            {
+                                top    = std::min(top, vertex.pos.y);
+                                bottom = std::max(bottom, vertex.pos.y);
+                            }
+                        CHECK(bottom - top >= 8 * scale);
+                        CHECK(top >= failure->InnerRect.Min.y);
+                        CHECK(bottom <= failure->InnerRect.Max.y);
+                    }
+    // Deliberately smaller than the supported minimum: content stays reachable
+    // via a real scrollbar, instead of reducing the illustration to zero.
+    context.language           = Language::english;
+    context.native             = false;
+    context.scale              = 2;
+    ImGui::GetIO().DisplaySize = {400, 300};
+    context.frame();
+    context.frame();
+    auto *failure = failure_window();
+    REQUIRE(failure);
+    REQUIRE(failure->ScrollMax.y > 0);
+    CHECK(failure->ScrollMax.x == 0);
+    const auto max_scroll = failure->ScrollMax.y;
+    ImGui::GetIO().AddMousePosEvent(failure->InnerRect.GetCenter().x, failure->InnerRect.GetCenter().y);
+    context.frame();
+    ImGui::GetIO().AddMouseWheelEvent(0, -1);
+    context.frame();
+    CHECK(failure->Scroll.y > 0);
+    ImGui::SetScrollY(failure, max_scroll);
+    context.frame();
+    CHECK(failure->DC.CursorMaxPos.y <= failure->InnerRect.Max.y + 1);
+    // A child must not swallow the still-usable canvas navigation overlays.
+    ImGui::GetIO().DisplaySize = {640, 480};
+    context.viewer.open(context.source.directory / "z-missing.bmp");
+    context.settle();
+    context.frame();
+    context.frame();
+    const auto *canvas = context.canvas();
+    REQUIRE(canvas);
+    const auto arrows = navigation_button_layout(canvas->InnerRect.Min, canvas->InnerRect.Max, context.scale);
+    const auto point =
+        ImVec2{(arrows.previous.min.x + arrows.previous.max.x) * 0.5f, (arrows.previous.min.y + arrows.previous.max.y) * 0.5f};
+    ImGui::GetIO().AddMousePosEvent(point.x, point.y);
+    context.frame();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    CHECK(context.frame() == MenuAction::none);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    CHECK(context.frame() == MenuAction::previous);
 }

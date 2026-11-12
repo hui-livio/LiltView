@@ -213,6 +213,10 @@ void Viewer::discard_pending()
     lv_event_release(pending_anchor_);
     pending_anchor_  = nullptr;
     pending_content_ = false;
+    // A discarded progressive scene cannot still be waiting for visible
+    // pixels. Failure presentation deliberately stops calling draw(), so it
+    // cannot clear this flag on a later frame for us.
+    visible_pending_ = false;
     pending_scene_.clear();
     pending_scene_id_ = 0;
 }

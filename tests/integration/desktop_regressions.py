@@ -274,65 +274,79 @@ def test_info(executable, folder):
 
 
 def test_status(executable, folder):
-    # Cover square native-window corners, edge-to-edge canvas layout, font scripts/themes, and a long filename.
-    sample = folder / ("long-image-" + "x" * 180 + ".bmp")
+    # Each theme/language covers empty, populated and failed layouts. The right
+    # group is image metadata, not a language label: it must be blank otherwise.
+    sample = folder / ("long-image-" + "x" * 140 + ".bmp")
     shutil.copy2(Path(__file__).resolve().parents[1] / "fixtures/red.bmp", sample)
     for theme in ("light", "dark"):
         for language in ("en-US", "zh-CN"):
-            directory = folder / f"{theme}-{language}"
-            directory.mkdir()
-            (directory / "settings.yaml").write_text(f"theme: {theme}\nlanguage: {language}\nsystem_titlebar: true\n")
-            screenshot = directory / "status.ppm"
-            command = [str(executable), "--smoke-test", "--config-dir", str(directory), "--screenshot", str(screenshot)]
-            if theme == "dark":
-                command.append(str(sample))
-            result = subprocess.run(command, text=True, capture_output=True, timeout=10)
-            assert result.returncode == 0, result.stdout + result.stderr
-            header, dimensions, maximum, pixels = screenshot.read_bytes().split(b"\n", 3)
-            assert header == b"P6" and maximum == b"255", "invalid screenshot"
-            width, height = map(int, dimensions.split())
+            for state in ("empty", "image", "failed"):
+                context = (theme, language, state)
+                directory = folder / f"{theme}-{language}-{state}"
+                directory.mkdir()
+                (directory / "settings.yaml").write_text(
+                    f"theme: {theme}\nlanguage: {language}\nsystem_titlebar: true\n")
+                screenshot = directory / "status.ppm"
+                command = [str(executable), "--smoke-test", "--config-dir", str(directory),
+                           "--screenshot", str(screenshot)]
+                if state == "image":
+                    command.append(str(sample))
+                elif state == "failed":
+                    command.append(str(directory / "missing-image.bmp"))
+                result = subprocess.run(command, text=True, capture_output=True, timeout=10)
+                assert result.returncode == 0, result.stdout + result.stderr
+                header, dimensions, maximum, pixels = screenshot.read_bytes().split(b"\n", 3)
+                assert header == b"P6" and maximum == b"255", "invalid screenshot"
+                width, height = map(int, dimensions.split())
 
-            def pixel(x, y):
-                offset = (y * width + x) * 3
-                return pixels[offset:offset + 3]
+                def pixel(x, y):
+                    offset = (y * width + x) * 3
+                    return pixels[offset:offset + 3]
 
-            background = pixel(width // 2, height - 1)
-            # The first full background row is the canvas/footer boundary. Sampling
-            # both edges avoids mistaking dense long-filename glyphs for the canvas.
-            background_rows = [y for y in range(height - 100, height)
-                               if all(pixel(x, y) == background for x in (18, width // 2, width - 19))]
-            assert background_rows, (theme, language, "missing status background")
-            top = background_rows[0]
-            assert 24 <= height - top <= 28, (theme, language, "footer height", height - top)
-            canvas_color = pixel(0, height // 2)
-            assert canvas_color != background, (theme, language, "canvas has side padding")
-            canvas_top = next(y for y in range(top) if pixel(width // 2, y) == canvas_color)
-            menu_color = pixel(width // 2, 0)
-            # A native-decorated window must fill its rectangular client area,
-            # not expose the renderer's clear color outside custom-rounded corners.
-            for x in (*range(8), *range(width - 8, width)):
-                for y in range(8):
-                    assert pixel(x, y) == menu_color, (theme, language, "unpainted top corner", x, y)
-                for y in range(height - 8, height):
-                    assert pixel(x, y) == background, (theme, language, "unpainted bottom corner", x, y)
-            menu_bottom = next(y for y in range(top) if pixel(width // 2, y) != menu_color)
-            assert canvas_top == menu_bottom, (theme, language, "canvas has top padding", menu_bottom, canvas_top)
-            for y in (canvas_top, (canvas_top + top) // 2, top - 1):
-                assert pixel(0, y) == canvas_color, (theme, language, "canvas has left padding", y)
-                assert pixel(width - 1, y) == canvas_color, (theme, language, "canvas has right padding", y)
-            ink_bounds = []
-            for left, right in ((18, width // 3), (width - 75, width - 18)):
-                rows = [y for y in range(top, height)
-                        if any(max(abs(a - b) for a, b in zip(pixel(x, y), background)) > 15
-                               for x in range(left, right))]
-                assert rows, (theme, language, "missing status text")
-                above, below = min(rows) - top, height - 1 - max(rows)
-                assert min(above, below) >= 3, (theme, language, "clipped status text", above, below)
-                # Allow up to 2px of optical offset from glyph ascenders/descenders.
-                assert abs(above - below) <= 4, (theme, language, "text not centered", above, below)
-                ink_bounds.append((min(rows), max(rows)))
-            # Chinese glyphs and Latin descenders share a baseline, not identical ink bounds.
-            assert all(abs(a - b) <= 3 for a, b in zip(*ink_bounds)), (theme, language, "status baselines differ", ink_bounds)
+                background = pixel(width // 2, height - 1)
+                # Both outer edges are free of labels and vertical separators.
+                # The top rule is distinct from both canvas and footer fill.
+                top = next(y for y in range(height - 80, height)
+                           if pixel(0, y) == background and pixel(width - 1, y) == background)
+                assert 28 <= height - top <= 30, (*context, "footer height", height - top)
+                canvas_color = pixel(0, height // 2)
+                assert canvas_color != background, (*context, "canvas has side padding")
+                rule = pixel(0, top - 1)
+                assert rule not in (canvas_color, background), (*context, "missing footer rule")
+                assert pixel(width - 1, top - 1) == rule, (*context, "incomplete footer rule")
+                canvas_top = next(y for y in range(top - 1) if pixel(width // 2, y) == canvas_color)
+                menu_color = pixel(width // 2, 0)
+                for x in (*range(8), *range(width - 8, width)):
+                    for y in range(8):
+                        assert pixel(x, y) == menu_color, (*context, "unpainted top corner", x, y)
+                    for y in range(height - 8, height):
+                        assert pixel(x, y) == background, (*context, "unpainted bottom corner", x, y)
+                menu_bottom = next(y for y in range(top - 1) if pixel(width // 2, y) != menu_color)
+                assert canvas_top == menu_bottom, (*context, "canvas has top padding", menu_bottom, canvas_top)
+                for y in (canvas_top, (canvas_top + top - 2) // 2, top - 2):
+                    assert pixel(0, y) == canvas_color, (*context, "canvas has left padding", y)
+                    assert pixel(width - 1, y) == canvas_color, (*context, "canvas has right padding", y)
+
+                def ink_rows(left, right):
+                    return [y for y in range(top, height)
+                            if any(max(abs(a - b) for a, b in zip(pixel(x, y), background)) > 15
+                                   for x in range(left, right))]
+
+                ink_bounds = []
+                regions = [(18, width // 3)]
+                if state == "image":
+                    regions.append((width - 75, width - 18))
+                else:
+                    assert not ink_rows(width * 2 // 3, width - 18), (*context, "stale image metadata or language label")
+                for left, right in regions:
+                    rows = ink_rows(left, right)
+                    assert rows, (*context, "missing status text")
+                    above, below = min(rows) - top, height - 1 - max(rows)
+                    assert min(above, below) >= 3, (*context, "clipped status text", above, below)
+                    assert abs(above - below) <= 4, (*context, "text not centered", above, below)
+                    ink_bounds.append((min(rows), max(rows)))
+                if len(ink_bounds) == 2:
+                    assert all(abs(a - b) <= 3 for a, b in zip(*ink_bounds)), (*context, "status baselines differ", ink_bounds)
 
 
 def test_chrome_pixels(executable, folder):
@@ -400,7 +414,12 @@ def test_chrome_pixels(executable, folder):
             title = pixel(width // 2, 20)
             menu = pixel(width // 2, 50)
             canvas = pixel(width // 2, 100)
-            assert title != menu != canvas, (theme, "missing title/menu/canvas rows")
+            # Shared chrome tokens intentionally give title/menu/footer the
+            # same fill; verify the current palette instead of an old split.
+            expected_chrome = (29, 30, 35) if theme == "dark" else (244, 245, 248)
+            expected_canvas = (23, 24, 28) if theme == "dark" else (236, 238, 242)
+            assert tuple(title) == tuple(menu) == expected_chrome, (theme, "incorrect title/menu fill", title, menu)
+            assert tuple(canvas) == expected_canvas, (theme, "incorrect canvas fill", canvas)
             assert pixel(2, 69) == canvas and pixel(width - 3, 69) == canvas, (theme, "padded canvas")
             footer = pixel(width // 2, height - 3)
             assert footer != border and footer != canvas, (theme, "missing status bar")
@@ -413,12 +432,12 @@ def test_chrome_pixels(executable, folder):
             border_light = luminance(border)
             # Stay clear of the foreground stroke's inner AA fringe.
             status_background = pixel(width // 2, height - 8)
-            for index, surface in enumerate((title, menu, canvas, status_background)):
+            for surface in (title, menu, canvas, status_background):
                 surface_light = luminance(surface)
                 contrast = (max(border_light, surface_light) + 0.05) / (min(border_light, surface_light) + 0.05)
-                # Palette A deliberately softens the non-text outline. The
-                # darker light-menu strip has a separate 2.5:1 design budget.
-                minimum = 4.0 if theme == "dark" else (2.5 if index == 1 else 3.0)
+                # Palette A deliberately softens the non-text outline. All
+                # chrome surfaces now share the same semantic fill.
+                minimum = 4.0 if theme == "dark" else 3.0
                 assert contrast >= minimum, (theme, "low-contrast outline", border, surface, contrast)
                 assert (border_light > surface_light) == (theme == "dark"), (theme, "wrong outline polarity")
 

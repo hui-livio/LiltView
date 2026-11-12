@@ -68,11 +68,13 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
     const ImVec2 size{rect.max.x - rect.min.x, rect.max.y - rect.min.y};
     ImGui::SetCursorScreenPos(rect.min);
     ImGui::BeginDisabled(!enabled);
+    // Failure text may live in a scrollable child. The canvas arrows remain
+    // overlays above that child, but never above unrelated windows or popups.
     // Arrow keys belong to image shortcuts; clicking an overlay must not leave nav focus behind.
-    const bool pressed      = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_NoNavFocus);
-    const bool hovered      = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
-    const bool held         = ImGui::IsItemActive();
-    const auto &p = current_ui_palette();
+    const bool pressed = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_NoNavFocus | ImGuiButtonFlags_FlattenChildren);
+    const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride | ImGuiHoveredFlags_AllowWhenOverlappedByWindow);
+    const bool held    = ImGui::IsItemActive();
+    const auto &p      = current_ui_palette();
     const ImVec4 background = held ? p.overlay_pressed : hovered ? p.overlay_hover : p.overlay;
     auto *draw              = ImGui::GetWindowDrawList();
     const float rounding    = std::min({8 * scale, size.x / 2, size.y / 2});
@@ -87,7 +89,8 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
                          {center.x - sign * half_width, center.y + half_height}};
     const float thickness = std::min({2 * scale, size.x / 8, size.y / 8});
     draw->AddPolyline(arrow, 3, ImGui::GetColorU32(p.overlay_text), ImDrawFlags_None, thickness);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_NoNavOverride))
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_NoNavOverride |
+                             ImGuiHoveredFlags_AllowWhenOverlappedByWindow))
         ImGui::SetTooltip("%s", translate(language, previous ? Text::previous : Text::next));
     ImGui::EndDisabled();
     return pressed && enabled ? (previous ? MenuAction::previous : MenuAction::next) : MenuAction::none;
