@@ -11,7 +11,7 @@ cmake --install build/app-release --prefix "$PWD/build/package"
 
 Windows 在 x64 Developer Shell 中构建 `msvc-release` 后，也可用 `cmake --install build/msvc-release --prefix "D:/LiltView-package"` 暂存程序、字体和许可证；入口为 `<prefix>/bin/liltview.exe`。这是 CMake 安装布局，不是 Windows 安装器，干净 Windows 环境部署仍需独立验收。
 
-安装目录包含静态链接裁剪版 SDL 的主程序、`share/liltview/fonts/` 下的鸿蒙字体与其原始许可证，以及项目和第三方许可证。构建目录继续使用可执行文件旁的 `assets/fonts/`，安装后的资源按 bin / share 的相对布局查找，可整体移动安装前缀。**不安装 SDL 动态库或设置 SDL 专用 RPATH**，不会覆盖发行版的 SDL；Linux 仍依赖系统 OpenGL、Fontconfig、GIO（启用全局菜单时）和窗口系统运行库；Windows 使用系统图形 / Win32 运行库，不依赖 Linux Fontconfig / GIO。支持常规 JPEG；libjpeg-turbo 静态链接并附 LICENSE.md / README.ijg，不覆盖系统 JPEG 库。
+安装目录包含静态链接裁剪版 SDL 的主程序、`share/liltview/fonts/` 下的鸿蒙字体与其原始许可证，以及项目和第三方许可证。构建目录继续使用可执行文件旁的 `assets/fonts/`，安装后的资源按 bin / share 的相对布局查找，可整体移动安装前缀。**不安装 SDL 动态库或设置 SDL 专用 RPATH**，不会覆盖发行版的 SDL；Linux 仍依赖 SDL 所选图形驱动、Fontconfig、GIO（启用全局菜单时）和窗口系统运行库；Windows 使用系统图形 / Win32 运行库，不依赖 Linux Fontconfig / GIO。支持常规 JPEG；libjpeg-turbo 静态链接并附 LICENSE.md / README.ijg，不覆盖系统 JPEG 库。
 
 验证安装时使用新的 staging 目录：旧动态链接构建留下的 `.so` 文件不会由 CMake 自动删除，不能将旧 staging 文件误认为新的安装产物。可用 `readelf -d <prefix>/bin/liltview` / `ldd` 检查动态依赖中没有 SDL。
 

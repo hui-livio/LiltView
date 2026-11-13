@@ -14,8 +14,7 @@ namespace liltview::render
 {
 enum class Backend
 {
-    opengl3,
-    d3d11
+    sdl_renderer
 };
 enum class SurfaceKind
 {
@@ -82,7 +81,7 @@ struct ImageDesc
 };
 struct Capabilities
 {
-    Backend backend                  = Backend::opengl3;
+    Backend backend                  = Backend::sdl_renderer;
     std::uint32_t max_texture_edge   = 0;
     std::uint64_t image_budget_bytes = 0, image_bytes = 0;
 };
@@ -92,7 +91,6 @@ struct Config
     void *surface                    = nullptr; // Borrowed native window, must outlive Renderer.
     std::uint64_t image_budget_bytes = 128ULL * 1024 * 1024;
     bool vsync                       = true;
-    bool staged_uploads              = true; // Bounded PBO transfers; false is a diagnostic direct-upload baseline.
 };
 struct UploadStats
 {

@@ -1,4 +1,4 @@
-// Real OpenGL warm-adoption UT: static 1.bmp -> content-GIF 2.png, READY without
+// Real SDL_Render warm-adoption UT: static 1.bmp -> content-GIF 2.png, READY without
 // additional GPU image bytes, then read back genuine warmed red 0 and real blue 1.
 // Assert one warmed installation/two actual presentations and retain the original non-warm mode.
 #include <SDL3/SDL.h>
@@ -148,7 +148,7 @@ void exercise_warm(liltview::render::Renderer &renderer, const std::filesystem::
         if (!blue)
             events(viewer);
     }
-    check(red && blue, "Real OpenGL failed warmed red/blue readback");
+    check(red && blue, "SDL_Render failed warmed red/blue readback");
     check(viewer.warmed_first_frames_presented() == 1, "Warmed first frame was installed more than once");
     check(viewer.animation_frames_presented() == 2, "Warmed playback presented an incorrect number of frames");
     check(viewer.animation_warmup_stats().adopted == 1, "GIF was not adopted from the real warmed session");

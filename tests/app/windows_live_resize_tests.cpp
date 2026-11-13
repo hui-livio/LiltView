@@ -87,7 +87,7 @@ TEST_CASE("Windows live sizing presents title controls and full chrome at each n
         graphics.renderer = render::create_renderer({render::SurfaceKind::sdl_window, graphics.window, 128 * 1024 * 1024, false});
     } catch (const render::Error &error)
     {
-        SKIP("OpenGL 3.3 is unavailable in this Windows session: " << error.what());
+        SKIP("SDL_Render is unavailable in this Windows session: " << error.what());
     }
     REQUIRE(initialize_imgui_platform(graphics.window));
     graphics.platform = true;

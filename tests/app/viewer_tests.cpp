@@ -82,7 +82,7 @@ public:
             (void)id;
             bytes += texture.bytes;
         }
-        return {liltview::render::Backend::opengl3, max_edge, image_budget, bytes};
+        return {liltview::render::Backend::sdl_renderer, max_edge, image_budget, bytes};
     }
     Size framebuffer_size() const override
     {

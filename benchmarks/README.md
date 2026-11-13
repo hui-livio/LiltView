@@ -4,7 +4,7 @@
 
 ## 运行基准
 
-手动真实图片基准不加入 CTest，也不要求把个人文件提交到仓库。以下命令在仓库根目录执行，要求 Linux、启用全局菜单及可用的 SDL / OpenGL 环境：
+手动真实图片基准不加入 CTest，也不要求把个人文件提交到仓库。以下命令在仓库根目录执行，要求 Linux、启用全局菜单及可用的 SDL_Render 环境：
 
 ```sh
 cmake --preset app-release -DBUILD_TESTING=ON -DLILTVIEW_BUILD_DESKTOP_TESTS=ON

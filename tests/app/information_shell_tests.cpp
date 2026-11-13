@@ -26,7 +26,7 @@ public:
     bool fail_upload = false;
     liltview::render::Capabilities capabilities() const override
     {
-        return {liltview::render::Backend::opengl3, 4096, 128 * 1024 * 1024, 0};
+        return {liltview::render::Backend::sdl_renderer, 4096, 128 * 1024 * 1024, 0};
     }
     liltview::render::Size framebuffer_size() const override
     {

@@ -37,7 +37,7 @@ SVG 当前只使用上述 PlutoSVG / PlutoVG 基础静态 profile，复杂 SVG �
 
 ## 首次注册
 
-当前声明 11 个直接 submodule 及 PlutoSVG 嵌套的 PlutoVG；版本以 `dependencies.json`、gitlink 和实际 checkout 为准，使用 `python3 scripts/init_submodules.py --check` 检查。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、OpenGL 和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。系统 OpenGL 和平台运行库仍按动态方式使用，Linux 还依赖 Fontconfig 等桌面组件，这不是完整静态应用。
+当前声明 11 个直接 submodule 及 PlutoSVG 嵌套的 PlutoVG；版本以 `dependencies.json`、gitlink 和实际 checkout 为准，使用 `python3 scripts/init_submodules.py --check` 检查。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、SDL_Render（含平台驱动）和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。平台图形驱动由 SDL 在运行时选择与加载，应用不直接链接 OpenGL；平台运行库仍按动态方式使用，Linux 还依赖 Fontconfig 等桌面组件，这不是完整静态应用。
 
 `plasma-wayland-protocols/` 保存 KDE appmenu 协议描述、原 MIT 许可和带 SHA-256 的来源清单。它是构建时生成 Wayland C 接口所需的协议数据，不是完整第三方库；没有复制 Qt 实现或链接 Qt。生成工具 wayland-scanner、GIO / GLib、Wayland 和 X11 由系统开发环境提供。
 

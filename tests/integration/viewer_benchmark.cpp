@@ -1,6 +1,5 @@
 // Manual real-image interaction benchmark; never registered with CTest.
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_opengl.h>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -212,17 +211,16 @@ int main(int argc, char **argv)
         ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
         {
-            auto real = render::create_renderer({render::SurfaceKind::sdl_window, window, 128ULL * 1024 * 1024, false,
-                                                 std::getenv("LILTVIEW_BENCH_DIRECT") == nullptr});
+            auto real = render::create_renderer({render::SurfaceKind::sdl_window, window, 128ULL * 1024 * 1024, false});
             MeasuredRenderer renderer(*real);
             platform = initialize_imgui_platform(window);
             if (!platform)
                 throw std::runtime_error("Cannot initialize ImGui platform");
-            const auto get_string = reinterpret_cast<const GLubyte *(APIENTRY *)(GLenum)>(SDL_GL_GetProcAddress("glGetString"));
-            int interval          = -1;
-            SDL_GL_GetSwapInterval(&interval);
-            std::printf("video=%s vendor=%s device=%s version=%s vsync=%d file=%s\n", SDL_GetCurrentVideoDriver(),
-                        get_string(GL_VENDOR), get_string(GL_RENDERER), get_string(GL_VERSION), interval, argv[1]);
+            int interval = -1;
+            auto *device = SDL_GetRenderer(window);
+            SDL_GetRenderVSync(device, &interval);
+            std::printf("video=%s renderer=SDL_Render/%s vsync=%d file=%s\n", SDL_GetCurrentVideoDriver(),
+                        SDL_GetRendererName(device), interval, argv[1]);
             Viewer viewer(renderer);
             viewer.open(std::filesystem::path(argv[1]));
             settle("initial-fit", viewer, renderer);
