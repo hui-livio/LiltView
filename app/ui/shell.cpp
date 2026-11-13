@@ -345,9 +345,15 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
     if (image_generation_ != viewer.image_generation())
     {
         image_generation_ = viewer.image_generation();
-        dock_.reset();
+        dock_.image_changed();
         canvas_gesture_.reset();
     }
+    if (dock_image_info_open_ != image_info_open_)
+    {
+        dock_image_info_open_ = image_info_open_;
+        dock_.reset(); // Info is the only Dock action that changes the remaining canvas/anchor.
+    }
+    const bool retain_dock       = !viewer.failed() && viewer.has_visible_image();
     const auto &io               = ImGui::GetIO();
     const bool popup_open        = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     input_blocked                = input_blocked || io.AppFocusLost || ImGui::GetTopMostPopupModal() != nullptr;
@@ -364,7 +370,7 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
         ImGui::IsMouseDragging(ImGuiMouseButton_Left), ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
     const bool image_held         = canvas_gesture_.image_held();
     const bool drag_busy          = image_held || ImGui::IsMouseDragging(ImGuiMouseButton_Left);
-    const bool dock_blocked       = dock_.prepare(dock_layout_value, ready, drag_busy, input_blocked, viewer.image_loaded());
+    const bool dock_blocked       = dock_.prepare(dock_layout_value, ready, drag_busy, input_blocked, retain_dock);
     const bool navigation_blocked = navigation_gesture_.blocks(
         buttons, state, io.MousePos, ImGui::IsMouseClicked(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Left));
     const bool blocked = input_blocked || popup_open || (!image_held && (dock_blocked || navigation_blocked)) ||
@@ -381,7 +387,7 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
             selected = navigation;
         // Draw last in the canvas, above the image/edge navigation, never in the layout flow.
         const auto dock_action = dock_.draw(dock_layout_value, menu, language, viewer.interaction_ready(), drag_busy,
-                                            input_blocked, viewer.image_loaded());
+                                            input_blocked, !viewer.failed() && viewer.has_visible_image());
         if (dock_action != MenuAction::none)
             selected = dock_action;
         // Navigation restores the cursor after the reason text. Submit its

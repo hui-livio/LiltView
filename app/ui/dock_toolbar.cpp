@@ -104,6 +104,14 @@ void DockVisibility::reset() noexcept
     fade_start_ = 0;
     from_ = to_ = alpha_ = 0;
 }
+void DockVisibility::cancel_activation() noexcept
+{
+    // Pending dwell belongs to the old image, but a visible overlay belongs to
+    // the canvas. Never send it through hidden/fade-in again on navigation.
+    dwell_.reset();
+    if (alpha_ == 0)
+        reset();
+}
 float DockVisibility::evaluate(double now) const noexcept
 {
     const float step = static_cast<float>(std::clamp((now - fade_start_) / 0.120, 0.0, 1.0));
@@ -277,6 +285,11 @@ void DockToolbar::reset()
     visibility_.reset();
     tooltip_pending_ = focused_ = pressed_ = false;
 }
+void DockToolbar::image_changed() noexcept
+{
+    visibility_.cancel_activation();
+    tooltip_pending_ = focused_ = pressed_ = false;
+}
 bool DockToolbar::keyboard_focus(const DockLayout &layout) const
 {
     const auto &g = *ImGui::GetCurrentContext();
@@ -302,8 +315,8 @@ bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held,
     else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         pressed_ = hovered && hit(layout, mouse);
     const bool image_drag = image_held && !pressed_;
-    // A camera operation may briefly restore cached pixels. Do not flash an
-    // already visible overlay off; hidden controls still cannot be revealed.
+    // Camera restores and image replacement must not flash a visible overlay
+    // off; retaining it still cannot reveal previously hidden controls.
     const bool visible_ready = ready || (retain_visible && visibility_.opacity() > 0);
     visibility_.update(ImGui::GetTime(), visible_ready && layout.valid && !blocked && (!any_popup || more),
                        hovered && layout.trigger.contains(mouse), hovered && hit(layout, mouse), image_drag, more,

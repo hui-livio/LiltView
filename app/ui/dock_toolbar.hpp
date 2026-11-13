@@ -52,6 +52,7 @@ class DockVisibility
 {
 public:
     void reset() noexcept;
+    void cancel_activation() noexcept;
     void update(double now, bool ready, bool trigger_hovered, bool dock_hovered, bool image_held, bool menu_open,
                 bool keyboard_focus);
     float opacity() const noexcept
@@ -101,6 +102,7 @@ public:
         return focused_;
     }
     void reset();
+    void image_changed() noexcept;
 
 private:
     bool keyboard_focus(const DockLayout &) const;

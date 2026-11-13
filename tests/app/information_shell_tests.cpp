@@ -968,10 +968,11 @@ struct DockShellScenario
         viewer.open(source.path);
         settle();
     }
-    liltview::MenuAction frame()
+    liltview::MenuAction frame(bool pump = true)
     {
         using namespace liltview;
-        viewer.pump();
+        if (pump)
+            viewer.pump();
         ImGui::NewFrame();
         chrome.line_height = ImGui::GetTextLineHeight();
         const auto menu    = build_menu(Settings{}, Language::english, true, chrome.fullscreen, viewer.has_image(),
@@ -1116,9 +1117,9 @@ TEST_CASE("full shell loading replacement failure and no-image cannot reveal or 
     REQUIRE(s.dock_visible());
     s.viewer.open(s.source.directory / "missing.bmp");
     REQUIRE_FALSE(s.viewer.interaction_ready());
-    REQUIRE(s.viewer.has_visible_image()); // Previous image remaining on screen must not enable new gestures.
-    s.frame();
-    CHECK_FALSE(s.dock_visible());
+    REQUIRE(s.viewer.has_visible_image()); // Previous image does not enable new gestures, but the Dock remains drawn.
+    s.frame(false);
+    CHECK(s.dock_visible());
     CHECK(s.double_click({300, 200}) == MenuAction::none);
     s.settle();
     REQUIRE(s.viewer.failed());
@@ -1206,4 +1207,90 @@ TEST_CASE("dock dwell and double-click remain unavailable throughout progressive
     CHECK_FALSE(s.dock_visible());
     s.frames(26);
     CHECK(s.dock_visible());
+}
+
+
+TEST_CASE("Dock navigation retains opacity and position across previous and next image requests", "[dock][shell][regression]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    const auto first = s.source.directory / "a.bmp";
+    for (const auto name : {"a.bmp", "b.bmp", "c.bmp"})
+        std::filesystem::copy_file(s.source.path, s.source.directory / name);
+    s.viewer.open(first);
+    s.settle();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (s.viewer.navigation().scanning)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        s.frame();
+        SDL_Delay(1);
+    }
+    s.reveal();
+    REQUIRE(s.dock_visible());
+    const auto bounds = s.layout.bounds;
+    auto &io          = ImGui::GetIO();
+    for (const int direction : {1, 1, -1, -1})
+    {
+        CAPTURE(direction, s.viewer.filename());
+        const auto &rect = s.layout.buttons[direction < 0 ? 0 : 1].rect;
+        io.AddMousePosEvent((rect.min.x + rect.max.x) / 2, (rect.min.y + rect.max.y) / 2);
+        s.frames(2);
+        io.AddMouseButtonEvent(0, true);
+        CHECK(s.frame() == MenuAction::none);
+        io.AddMouseButtonEvent(0, false);
+        REQUIRE(s.frame() == (direction < 0 ? MenuAction::previous : MenuAction::next));
+        s.viewer.navigate(direction);
+        REQUIRE_FALSE(s.viewer.interaction_ready());
+        s.frame(false); // Deterministic queued state, before even a tiny cached image can complete.
+        REQUIRE(s.dock_visible());
+        do
+        {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            s.frame();
+            REQUIRE_FALSE(s.viewer.failed());
+            REQUIRE(s.dock_visible());
+            CHECK(s.layout.bounds.min.x == bounds.min.x);
+            CHECK(s.layout.bounds.min.y == bounds.min.y);
+            SDL_Delay(1);
+        } while (!s.viewer.interaction_ready());
+    }
+    // Info changes the available canvas; this is the one action allowed to reset visibility.
+    s.shell.toggle_image_info();
+    s.frame();
+    CHECK_FALSE(s.dock_visible());
+    CHECK(s.layout.bounds.min.x != bounds.min.x);
+    s.reveal();
+    REQUIRE(s.dock_visible());
+    s.shell.toggle_image_info();
+    s.frame();
+    CHECK_FALSE(s.dock_visible());
+}
+
+TEST_CASE("a shown Dock survives progressive replacement but still auto hides when the pointer leaves",
+          "[dock][shell][loading][regression]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    s.reveal();
+    REQUIRE(s.dock_visible());
+    s.renderer.upload_delay_ms = 5;
+    s.viewer.open(progressive_bmp(s.source, false));
+    s.frame(false);
+    REQUIRE(s.dock_visible());
+    bool saw_native     = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    do
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        s.frame();
+        REQUIRE_FALSE(s.viewer.failed());
+        REQUIRE(s.dock_visible());
+        saw_native |= s.viewer.native_loading();
+        SDL_Delay(1);
+    } while (!s.viewer.interaction_ready());
+    REQUIRE(saw_native);
+    ImGui::GetIO().AddMousePosEvent(100, 100);
+    s.frames(15);
+    CHECK_FALSE(s.dock_visible());
 }
