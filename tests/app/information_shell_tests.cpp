@@ -4,6 +4,7 @@
 #include "viewer/viewer.hpp"
 
 #include <SDL3/SDL.h>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <imgui_internal.h>
 
@@ -940,4 +941,269 @@ TEST_CASE("failure illustration and text fit minimum windows across DPI and scro
     CHECK(context.frame() == MenuAction::none);
     ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
     CHECK(context.frame() == MenuAction::previous);
+}
+
+
+namespace
+{
+// Full Shell + real asynchronous Viewer, without a native window or GPU. Inputs
+// traverse the same ImGui and action path as the desktop application.
+struct DockShellScenario
+{
+    Source source;
+    Gui gui;
+    LayoutRenderer renderer;
+    liltview::Viewer viewer{renderer};
+    liltview::Shell shell;
+    liltview::WindowChromeState chrome;
+    liltview::DockLayout layout;
+    bool external_blocked = false;
+
+    DockShellScenario()
+    {
+        ImGui::GetIO().DisplaySize = {1280, 900};
+        ImGui::GetIO().DeltaTime   = .01f;
+        liltview::apply_style(true, 1);
+        ImGui::GetStyle().AntiAliasedLinesUseTex = false;
+        viewer.open(source.path);
+        settle();
+    }
+    liltview::MenuAction frame()
+    {
+        using namespace liltview;
+        viewer.pump();
+        ImGui::NewFrame();
+        chrome.line_height = ImGui::GetTextLineHeight();
+        const auto menu    = build_menu(Settings{}, Language::english, true, chrome.fullscreen, viewer.has_image(),
+                                        viewer.can_actual_size(), viewer.navigation().can_previous, viewer.navigation().can_next,
+                                        shell.image_info_open(), viewer.has_visible_image());
+        const auto action  = shell.draw(Language::english, menu, false, renderer, {}, viewer, chrome, external_blocked);
+        for (auto *window : ImGui::GetCurrentContext()->Windows)
+            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
+                layout =
+                    dock_layout(window->WorkRect.Min, window->WorkRect.Max, chrome.scale, viewer.fitting(), chrome.fullscreen);
+        ImGui::Render();
+        return action;
+    }
+    void settle()
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        do
+        {
+            frame();
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (!viewer.interaction_ready() && !viewer.failed());
+    }
+    void frames(int n)
+    {
+        for (int i = 0; i < n; ++i)
+            CHECK(frame() == liltview::MenuAction::none);
+    }
+    void reveal()
+    {
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent((layout.trigger.min.x + layout.trigger.max.x) / 2, layout.trigger.max.y - 4);
+        frames(36);
+    }
+    ImVec2 dock_center(std::size_t i = 3)
+    {
+        const auto &r = layout.buttons[i].rect;
+        return {(r.min.x + r.max.x) / 2, (r.min.y + r.max.y) / 2};
+    }
+    ImVec4 dock_pixel() const
+    {
+        return corner_pixel(*ImGui::GetDrawData(),
+                            {layout.bounds.min.x + 24 * chrome.scale, layout.bounds.min.y + 2 * chrome.scale});
+    }
+    bool dock_visible() const
+    {
+        const auto c = dock_pixel(), p = liltview::current_ui_palette().popup;
+        return std::abs(c.x - p.x) < .01f && std::abs(c.y - p.y) < .01f && std::abs(c.z - p.z) < .01f;
+    }
+    liltview::MenuAction double_click(ImVec2 point)
+    {
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent(point.x, point.y);
+        frames(40); // Separate from any earlier gesture/double-click chain.
+        io.AddMouseButtonEvent(0, true);
+        CHECK(frame() == liltview::MenuAction::none);
+        io.AddMouseButtonEvent(0, false);
+        CHECK(frame() == liltview::MenuAction::none);
+        io.AddMouseButtonEvent(0, true);
+        const auto action = frame();
+        io.AddMouseButtonEvent(0, false);
+        frame();
+        return action;
+    }
+};
+} // namespace
+
+TEST_CASE("full shell dock overlays without changing FIT in both themes DPI panels and fullscreen", "[dock][shell]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    for (const bool dark : {true, false})
+        for (const bool fullscreen : {true, false})
+            for (const bool panel : {false, true})
+                for (const float scale : {1.0f, 1.5f, 2.0f})
+                {
+                    CAPTURE(dark, fullscreen, panel, scale);
+                    apply_style(dark, scale);
+                    ImGui::GetStyle().AntiAliasedLinesUseTex = false;
+                    s.chrome.dark                            = dark;
+                    s.chrome.fullscreen                      = fullscreen;
+                    s.chrome.scale                           = scale;
+                    s.chrome.system_titlebar                 = !fullscreen;
+                    if (s.shell.image_info_open() != panel)
+                        s.shell.toggle_image_info();
+                    ImGui::GetIO().AddMousePosEvent(100, 100);
+                    s.frames(15);
+                    const auto before = s.viewer.presented_view();
+                    REQUIRE(s.layout.valid);
+                    CHECK_FALSE(s.dock_visible());
+                    s.reveal();
+                    CHECK(s.dock_visible());
+                    CHECK(s.viewer.presented_view().same_view(before));
+                    ImGui::GetIO().AddMousePosEvent(100, 100);
+                    s.frames(15);
+                    CHECK_FALSE(s.dock_visible());
+                    CHECK(s.viewer.presented_view().same_view(before));
+                    CHECK(s.viewer.fitting());
+                }
+}
+
+TEST_CASE("full shell double-click uses view mode including FIT at exactly 100 percent and manual zoom", "[dock][shell]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    for (const bool fullscreen : {false, true})
+    {
+        s.chrome.fullscreen = fullscreen;
+        s.frames(2);
+        REQUIRE(s.viewer.fitting());
+        REQUIRE(s.viewer.presented_view().scale() == 1);              // Tiny image: FIT numerically equals 100%.
+        CHECK(s.double_click({300, 200}) == MenuAction::actual_size); // Blank canvas is included.
+        s.viewer.actual_size();
+        s.settle();
+        CHECK_FALSE(s.viewer.fitting());
+        CHECK_FALSE(s.dock_visible());
+        CHECK(s.double_click({300, 200}) == MenuAction::fit);
+        s.viewer.fit();
+        s.settle();
+        s.viewer.zoom(1);
+        s.settle();
+        REQUIRE_FALSE(s.viewer.fitting());
+        CHECK(s.double_click({300, 200}) == MenuAction::fit);
+        s.viewer.fit();
+        s.settle();
+        CHECK_FALSE(s.dock_visible());
+    }
+    s.shell.toggle_image_info();
+    s.frames(2);
+    CHECK(s.double_click({1200, 150}) == MenuAction::none); // Information panel.
+    CHECK(s.double_click({300, 895}) == MenuAction::none);  // Status bar.
+    CHECK(s.double_click({500, 15}) == MenuAction::none);   // Titlebar.
+    s.external_blocked = true;
+    CHECK(s.double_click({300, 200}) == MenuAction::none); // Native file chooser.
+}
+
+TEST_CASE("full shell loading replacement failure and no-image cannot reveal or double-click", "[dock][shell]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    s.reveal();
+    REQUIRE(s.dock_visible());
+    s.viewer.open(s.source.directory / "missing.bmp");
+    REQUIRE_FALSE(s.viewer.interaction_ready());
+    REQUIRE(s.viewer.has_visible_image()); // Previous image remaining on screen must not enable new gestures.
+    s.frame();
+    CHECK_FALSE(s.dock_visible());
+    CHECK(s.double_click({300, 200}) == MenuAction::none);
+    s.settle();
+    REQUIRE(s.viewer.failed());
+    s.reveal();
+    CHECK_FALSE(s.dock_visible());
+    s.viewer.open(s.source.path);
+    s.settle();
+    CHECK(s.viewer.interaction_ready());
+    s.reveal();
+    CHECK(s.dock_visible());
+
+    // A fresh empty Viewer is equally unavailable, even after a long bottom dwell.
+    Viewer empty(s.renderer);
+    Shell shell;
+    ImGui::GetIO().AddMousePosEvent(640, 860);
+    for (int i = 0; i < 50; ++i)
+    {
+        ImGui::NewFrame();
+        CHECK(shell.draw(Language::english, build_menu(Settings{}, Language::english, true, false), false, s.renderer, {}, empty,
+                         s.chrome) == MenuAction::none);
+        ImGui::Render();
+        CHECK_FALSE(shell.needs_animation_frame());
+    }
+}
+
+TEST_CASE("full shell a canvas drag crosses dock and edge arrows without activation or input theft", "[dock][shell]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    auto &io = ImGui::GetIO();
+    s.viewer.actual_size();
+    s.settle();
+    io.AddMousePosEvent(300, 200);
+    s.frames(40);
+    io.AddMouseButtonEvent(0, true);
+    s.frame();
+    io.AddMousePosEvent(640, s.layout.trigger.max.y - 5);
+    s.frames(40);
+    CHECK_FALSE(s.dock_visible());
+    io.AddMouseButtonEvent(0, false);
+    s.frame();
+    s.frames(36);
+    REQUIRE(s.dock_visible());
+    const auto center = s.dock_center();
+    io.AddMousePosEvent(center.x, center.y);
+    s.frames(2);
+    io.AddMouseButtonEvent(0, true);
+    CHECK(s.frame() == MenuAction::none);
+    io.AddMousePosEvent(310, 210);
+    s.frames(2);
+    io.AddMouseButtonEvent(0, false);
+    CHECK(s.frame() == MenuAction::none);
+    CHECK_FALSE(s.viewer.fitting()); // A drag originating on Dock was not treated as a double-click.
+}
+
+
+TEST_CASE("dock dwell and double-click remain unavailable throughout progressive native loading", "[dock][shell][loading]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    auto &io = ImGui::GetIO();
+    io.AddMousePosEvent(640, s.layout.trigger.max.y - 4);
+    s.frames(10); // Start but do not finish the old image's hover timer.
+    s.renderer.upload_delay_ms = 5;
+    s.viewer.open(progressive_bmp(s.source, false));
+    bool saw_native     = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!s.viewer.interaction_ready())
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        REQUIRE_FALSE(s.viewer.failed());
+        s.frame();
+        if (s.viewer.native_loading() && s.viewer.has_visible_image())
+        {
+            saw_native = true;
+            CHECK_FALSE(s.viewer.interaction_ready());
+            CHECK_FALSE(s.dock_visible());
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(saw_native);
+    // Completion is not allowed to inherit the previous image's dwell time.
+    CHECK_FALSE(s.dock_visible());
+    s.frames(10);
+    CHECK_FALSE(s.dock_visible());
+    s.frames(26);
+    CHECK(s.dock_visible());
 }

@@ -21,6 +21,7 @@ The image information panel, status bar, and both themes. Both screenshots displ
 - **Open your way**: use the File menu, `Ctrl+O`, drag a single file into the window, or open an image from the command line.
 - **Browse a folder**: images in the same directory use natural filename ordering. Navigate with `←` / `→`, the menu, or the buttons at the canvas edges. Navigation stops at the first and last image instead of wrapping around.
 - **Inspect the details**: fit to window, view at 100% original-pixel scale, zoom with the mouse wheel, drag to pan, use keyboard zoom and viewport movement, or go fullscreen.
+- **On-demand Dock**: hidden by default; hover at the canvas bottom for 200 ms to reveal it. More attaches above the Dock. Double-click the successfully loaded canvas to toggle 100% / fit.
 - **View large static images**: tiled display and detail restoration let you explore large images. Once a static image finishes loading, zooming and panning do not decode the source file again. Actual size limits depend on the format and available resources.
 - **Play GIFs automatically**: ordinary-size GIFs follow their source frame durations and loop information, including transparency and frame compositing. Playback scheduling pauses when the window is hidden or minimized.
 - **See image information**: the status bar shows the filename, folder position, original format, source dimensions, and zoom. Press `I` for more details.

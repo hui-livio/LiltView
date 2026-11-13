@@ -1309,6 +1309,8 @@ TEST_CASE("image details report physical displayed zoom while a cold target is s
     viewer.zoom(-3);
     gui.frame(viewer, 2);
     REQUIRE(viewer.detail_loading());
+    CHECK_FALSE(viewer.interaction_ready());
+    CHECK(viewer.image_loaded());
     details = viewer.image_details();
     REQUIRE(details);
     CHECK(details->scale == viewer.presented_view().scale());
@@ -1942,6 +1944,8 @@ TEST_CASE("a prior static cold restore failure cannot suppress a new GIF's neigh
     viewer.actual_size();
     gui.draw(viewer, renderer);
     REQUIRE(viewer.detail_loading());
+    CHECK_FALSE(viewer.interaction_ready());
+    CHECK(viewer.image_loaded());
     renderer.fail_upload  = true;
     renderer.allow_upload = true;
     const auto deadline   = std::chrono::steady_clock::now() + std::chrono::seconds(8);
