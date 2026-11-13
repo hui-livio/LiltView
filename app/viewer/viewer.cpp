@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <imgui.h>
 #include <memory>
 #include <spdlog/spdlog.h>
@@ -94,7 +95,7 @@ Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
     } catch (...)
     {
         lv_core_begin_shutdown(core_);
-        while (lv_core_join(core_, 10) == LV_TIMEOUT)
+        while (!join_shutdown(10))
         {
         }
         lv_core_destroy(&core_);
@@ -111,6 +112,9 @@ void Viewer::begin_shutdown()
     if (!core_ || closing_)
         return;
     closing_ = true;
+    if (preparation_) preparation_->cancel();
+    if (retired_preparation_) retired_preparation_->cancel();
+    scene_.retire_ready(); pending_scene_.retire_ready(); retired_scene_.retire_ready();
     prepared_animation_.reset();
     animation_warmup_->begin_shutdown();
     prefetch_->begin_shutdown();
@@ -119,7 +123,17 @@ void Viewer::begin_shutdown()
 }
 bool Viewer::join_shutdown(std::uint32_t timeout_ms)
 {
-    return !core_ || lv_core_join(core_, timeout_ms) == LV_OK;
+    const auto start = std::chrono::steady_clock::now();
+    do
+    {
+        const bool workers = (!preparation_ || preparation_->done()) && (!retired_preparation_ || retired_preparation_->done()) &&
+            scene_.retire_ready() && pending_scene_.retire_ready() && retired_scene_.retire_ready();
+        const bool core = !core_ || lv_core_join(core_, 0) == LV_OK;
+        if (workers && core) return true;
+        if (!timeout_ms) return false;
+        SDL_Delay(1);
+    } while (std::chrono::steady_clock::now()-start < std::chrono::milliseconds(timeout_ms));
+    return false;
 }
 
 void Viewer::shutdown()
@@ -128,9 +142,11 @@ void Viewer::shutdown()
         return;
     begin_shutdown();
     // Decoder checks cancellation at input/row boundaries; keep SDL alive until callbacks stop.
-    while (lv_core_join(core_, 10) == LV_TIMEOUT)
+    while (!join_shutdown(10))
     {
     }
+    preparation_.reset();
+    retired_preparation_.reset();
     prefetch_.reset();
     animation_warmup_.reset();
     discard_pending();
@@ -171,6 +187,11 @@ void Viewer::navigate(int direction)
 void Viewer::open_selected(const std::filesystem::path &absolute)
 {
     ++generation_;
+    load_started_ = std::chrono::steady_clock::now();
+    static_stats_ = {}; static_stats_.generation = generation_;
+    static_stats_.batch = static_mode_ == StaticUploadMode::batch;
+    loading_frame_submitted_ = static_frame_submitted_ = false;
+    spdlog::info("static_load_begin generation={} mode={} path={}", generation_, static_stats_.batch ? "batch" : "pipeline", platform::path_bytes(absolute));
     prepared_animation_.reset();
     adopting_animation_ = animation_warmup_->request_adoption(absolute, animation_bounds(), generation_);
     if (adopting_animation_)
@@ -205,6 +226,17 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
 
 void Viewer::discard_pending()
 {
+    if (preparation_)
+    {
+        const auto cancelled = preparation_->stats();
+        spdlog::debug("static_load_cancel generation={} prepared_tiles={} output_peak={}", preparation_->generation(), cancelled.tiles, cancelled.output_peak);
+        preparation_->cancel();
+        // A new static request is not submitted until this one has retired.
+        if (retired_preparation_) std::terminate();
+        retired_preparation_ = std::move(preparation_);
+    }
+    decode_complete_ = cpu_complete_ = false;
+    expected_tiles_ = 0;
     renderer_.destroy_image(pending_);
     pending_      = {};
     pending_info_ = {};
@@ -217,13 +249,18 @@ void Viewer::discard_pending()
     // pixels. Failure presentation deliberately stops calling draw(), so it
     // cannot clear this flag on a later frame for us.
     visible_pending_ = false;
+    if (!pending_scene_.retire_ready())
+    {
+        if (!retired_scene_.empty()) std::terminate();
+        pending_scene_.swap(retired_scene_);
+    }
     pending_scene_.clear();
     pending_scene_id_ = 0;
 }
 
 void Viewer::submit_pending()
 {
-    if (pending_path_.empty() || request_)
+    if (pending_path_.empty() || request_ || retired_preparation_ || !retired_scene_.empty())
         return;
     const auto path = platform::path_bytes(pending_path_);
     lv_request_desc request;
@@ -276,7 +313,8 @@ void Viewer::accept_completed()
     display_ = pending_;
     pending_ = {};
     scene_.swap(pending_scene_);
-    pending_scene_.clear();
+    pending_scene_.swap(retired_scene_); // Retire old CPU readers without waiting on main-thread disk I/O.
+    if (retired_scene_.retire_ready()) retired_scene_.clear();
     scene_id_         = pending_scene_id_;
     pending_scene_id_ = 0;
     info_             = pending_info_;
@@ -310,12 +348,14 @@ void Viewer::consume(const lv_event_view &view)
         // Preserve the old source/cache on failure, but do not let optional old
         // GPU residency prevent admission of the replacement native scene.
         scene_.release_details();
-        pending_scene_.begin(pending_info_);
+        pending_scene_.begin(pending_info_, true);
+        preparation_ = std::make_unique<TilePreparation>(pending_scene_.overview_level(), static_mode_, wake_core, nullptr, generation_);
     }
     if (current && view.type == LV_EVENT_REGION_READY)
     {
         const auto &pixels = *lv_pixels_get_view(view.as.region.pixels);
-        pending_scene_.upload(view.as.region);
+        if (static_stats_.first_region_ms < 0) static_stats_.first_region_ms = load_elapsed_ms();
+        preparation_->submit(view.as.region);
         pending_pixel_format_ = pixels.format;
         pending_color_space_  = pixels.color_space;
         pending_content_      = true;
@@ -324,10 +364,15 @@ void Viewer::consume(const lv_event_view &view)
     {
         if (current)
         {
-            if (view.type == LV_EVENT_COMPLETE && !pending_scene_.empty())
+            if (view.type == LV_EVENT_COMPLETE && preparation_)
             {
                 last_source_bytes_read_ = view.as.completion.source_bytes_read;
-                accept_completed();
+                decode_complete_ = true;
+                expected_tiles_ = view.as.completion.final_tile_count;
+                static_stats_.core_ms = view.as.completion.elapsed_ns / 1e6;
+                static_stats_.decode_done_ms = load_elapsed_ms();
+                preparation_->finish();
+                spdlog::debug("static_load_decode generation={} core_ms={:.3f} observed_ms={:.3f} tiles={}", generation_, static_stats_.core_ms, static_stats_.decode_done_ms, expected_tiles_);
             }
             else
             {
@@ -344,12 +389,16 @@ void Viewer::pump()
 {
     if (closing_)
         return;
-    retired_scene_.clear(); // The previous frame no longer references these textures.
+    const auto pump_started = std::chrono::steady_clock::now();
+    first_commit_this_frame_ = false;
+    if (retired_preparation_ && retired_preparation_->done()) retired_preparation_.reset();
+    if (retired_scene_.retire_ready()) retired_scene_.clear(); // No UI join on an outstanding cache read.
     navigation_->pump();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(4);
     lv_event *raw       = nullptr;
     bool consumed       = false;
-    while (std::chrono::steady_clock::now() < deadline && lv_core_poll_event(core_, &raw) == LV_OK)
+    while (std::chrono::steady_clock::now() < deadline &&
+           (!preparation_ || preparation_->can_accept() || preparation_->done()) && lv_core_poll_event(core_, &raw) == LV_OK)
     {
         consumed = true;
         std::unique_ptr<lv_event, decltype(&lv_event_release)> event(raw, lv_event_release);
@@ -391,11 +440,15 @@ void Viewer::pump()
     }
     if (consumed && std::chrono::steady_clock::now() >= deadline)
         wake_core(nullptr); // Continue draining next frame even without another queue edge.
+    advance_static();
     submit_pending();
     advance_animation();
     pump_neighbors();
     if (prepared_animation_)
         advance_animation();
+    if (loading_ || static_stats_.ready_ms < 0)
+        static_stats_.max_pump_ms = std::max(static_stats_.max_pump_ms,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-pump_started).count());
 }
 
 std::uint64_t Viewer::content_cache_bytes() const
@@ -412,8 +465,9 @@ void Viewer::draw(render::Point min, render::Point max, float density, bool inte
     density                = std::max(0.01f, density);
     min                    = {std::round(min.x * density) / density, std::round(min.y * density) / density};
     max                    = {std::round(max.x * density) / density, std::round(max.y * density) / density};
-    const bool native      = work_ == Work::static_image;
-    const bool reveal      = native && loading_ && !pending_scene_.empty();
+    set_viewport(min, max, density); // Hidden preparation also advances for non-Shell render clients.
+    if (loading_ && work_ == Work::static_image) return;
+    const bool reveal      = false;
     auto &scene            = reveal ? pending_scene_ : scene_;
     const auto &image_info = reveal ? pending_info_ : info_;
     const auto image       = display_;
@@ -451,7 +505,8 @@ void Viewer::draw(render::Point min, render::Point max, float density, bool inte
         {
             try
             {
-                const bool ready = scene.prepare(viewport_, changing_view ? &presented_viewport_ : nullptr);
+                const bool ready = first_commit_this_frame_ && scene.covered(viewport_) ? true :
+                    scene.prepare(viewport_, changing_view ? &presented_viewport_ : nullptr);
                 visible_pending_ = !ready;
                 // Streaming may extend the current image, but a new camera is
                 // committed atomically, never a few restored tiles at a time.
@@ -511,6 +566,6 @@ void Viewer::draw(render::Point min, render::Point max, float density, bool inte
 
 bool Viewer::has_visible_image() const
 {
-    return has_image() || (work_ == Work::static_image && loading_ && !pending_scene_.empty());
+    return !(loading_ && work_ == Work::static_image) && has_image();
 }
 } // namespace liltview

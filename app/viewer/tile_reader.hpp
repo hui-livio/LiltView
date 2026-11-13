@@ -43,6 +43,8 @@ public:
     ~TileReader();
     TileReader(const TileReader &)            = delete;
     TileReader &operator=(const TileReader &) = delete;
+    void cancel() noexcept;
+    bool done() const noexcept;
     void request(const std::vector<Request> &); // Replace obsolete pending jobs, visible first.
     void retry_errors();                        // Explicit user retry; keep successful decoded entries.
     Data find(Key);                             // Never performs I/O or waits for a job; may rethrow its error.

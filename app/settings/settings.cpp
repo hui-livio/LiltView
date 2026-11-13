@@ -30,8 +30,9 @@ struct SettingsDocument
     std::string log_level = std::string(log_level_name(default_log_level()));
     bool system_titlebar  = false;
     bool disable_rounding = false;
+    std::string static_upload_mode = "pipeline";
 };
-YLT_REFL(SettingsDocument, width, height, maximized, theme, language, log_level, system_titlebar, disable_rounding);
+YLT_REFL(SettingsDocument, width, height, maximized, theme, language, log_level, system_titlebar, disable_rounding, static_upload_mode);
 
 Theme parse_theme(std::string_view value)
 {
@@ -130,6 +131,7 @@ Settings parse_settings(std::string_view data)
     settings.theme            = parse_theme(document.theme);
     settings.language         = parse_language(document.language);
     settings.log_level        = parse_log_level(document.log_level);
+    settings.static_upload_mode = document.static_upload_mode == "batch" ? StaticUploadMode::batch : StaticUploadMode::pipeline;
     return settings;
 }
 
@@ -144,7 +146,8 @@ std::string serialize_settings(const Settings &settings)
                                     std::string(language_code(settings.language)),
                                     std::string(log_level_name(settings.log_level)),
                                     settings.system_titlebar,
-                                    settings.disable_rounding};
+                                    settings.disable_rounding,
+                                    settings.static_upload_mode == StaticUploadMode::batch ? "batch" : "pipeline"};
     std::string yaml;
     iguana::to_yaml(document, yaml);
     return yaml;

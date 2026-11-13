@@ -30,7 +30,7 @@ target_link_libraries(liltview_cli PRIVATE LiltView::cli11 PUBLIC LiltView::app_
 liltview_configure_cxx_target(liltview_cli)
 
 find_package(Threads REQUIRED)
-add_library(liltview_viewer STATIC platform/file_io.cpp viewer/viewer.cpp viewer/neighbors.cpp viewer/navigation.cpp viewer/prefetch.cpp viewer/animation_warmup.cpp viewer/animation_prepared.cpp viewer/animation.cpp viewer/playback.cpp viewer/details.cpp viewer/viewport.cpp viewer/tiles.cpp viewer/tile_reader.cpp)
+add_library(liltview_viewer STATIC platform/file_io.cpp viewer/viewer.cpp viewer/static_loading.cpp viewer/neighbors.cpp viewer/navigation.cpp viewer/prefetch.cpp viewer/animation_warmup.cpp viewer/animation_prepared.cpp viewer/animation.cpp viewer/playback.cpp viewer/details.cpp viewer/viewport.cpp viewer/tiles.cpp viewer/tile_preparation.cpp viewer/tile_reader.cpp)
 target_include_directories(liltview_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog ZLIB::ZLIB Threads::Threads)
 liltview_configure_cxx_target(liltview_viewer)
@@ -173,3 +173,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps" RENAME "${app_id}.png")
     endforeach()
 endif()
+
+# Manual first-load comparison, excluded from ordinary builds and CTest.
+add_executable(liltview_loading_benchmark EXCLUDE_FROM_ALL "${PROJECT_SOURCE_DIR}/tests/integration/loading_benchmark.cpp")
+target_link_libraries(liltview_loading_benchmark PRIVATE liltview_viewer liltview_sdl_platform LiltView::app_model spdlog::spdlog)
+liltview_configure_cxx_target(liltview_loading_benchmark)

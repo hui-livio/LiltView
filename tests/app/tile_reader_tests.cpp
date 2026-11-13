@@ -207,3 +207,32 @@ TEST_CASE("cached tile errors are reported without poisoning unrelated entries",
     CHECK_THROWS_AS(reader.request({invalid}), std::invalid_argument);
     CHECK_THROWS_AS(TileReader(-1), std::system_error);
 }
+
+TEST_CASE("retiring a cache reader never waits for a blocked disk call on the UI thread", "[tile_reader][cancel]")
+{
+    File file;
+    Gate gate;
+    TileReader reader(fileno(file.file), nullptr, nullptr, 128,
+        [&](int fd, const TileReader::Request &request) {
+            std::unique_lock lock(gate.mutex);
+            gate.entered = true; gate.changed.notify_all();
+            gate.changed.wait(lock, [&] { return gate.proceed; });
+            return fake_read(fd, request);
+        });
+    Release release{gate};
+    reader.request({job(1), job(2)});
+    {
+        std::unique_lock lock(gate.mutex);
+        REQUIRE(gate.changed.wait_for(lock, std::chrono::seconds(5), [&] { return gate.entered; }));
+    }
+    reader.cancel(); // Returns while the injected disk operation remains blocked.
+    CHECK_FALSE(reader.done());
+    CHECK(reader.stats().queued == 0);
+    gate.release();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!reader.done())
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}

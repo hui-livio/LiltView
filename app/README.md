@@ -13,7 +13,7 @@
 | `settings/`、`i18n/`、`logging/` | YAML、安全替换、中英翻译、日志与 C 回调适配 |
 | `resources/` | 内嵌彩色图标、Windows RC 图标 / 版本信息模板 |
 
-显示、缓存与 SDL 纹理上传细节见[渲染说明](../docs/渲染与大图实现.md)，参数见[配置说明](../docs/命令行与设置.md)。首次 LOD / 压缩 / 写缓存后台化仍待实现，不能把后台恢复等同于整个首次加载都在后台。
+显示、缓存与 SDL 纹理上传细节见[渲染说明](../docs/渲染与大图实现.md)，参数见[配置说明](../docs/命令行与设置.md)。首次加载通过有界 TilePreparation worker 进行像素打包、LOD、压缩和缓存写入；SDL 纹理创建与上传仍由主线程执行，首屏完整后统一显示。
 
 窗口标题栏在原窗口 / SDL_Renderer 上切换；Linux X11 使用不透明 visual + Shape，Wayland 使用 alpha surface + input region。应用仅使用 SDL_Render 与 ImGui SDLRenderer3，不创建图形 API 上下文、不直接链接 OpenGL，也不维护独立 D3D 后端；底层驱动由 SDL 选择。关闭统一先隐藏，再取消并等待后台工作、保存设置、撤销菜单关联、释放图像和 renderer，最后销毁窗口 / SDL。
 

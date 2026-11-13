@@ -71,7 +71,7 @@ LILTVIEW_BENCH_DIRECT=1 build/app-release/tests/liltview_viewer_benchmark /path/
 | 绘制 | CPU 构建／提交与 GPU 执行分开，图片自身和含 UI 的整帧分开 |
 | 呈现 | 交换缓冲调用等待与屏幕实际可见延迟分开；前者不能代替后者 |
 
-viewer 已有 pump / prepare / upload / submit / present 分段；源 I/O / 解码、首次 CPU LOD / 压缩 / 写缓存及 GPU 完成时间线仍需细化。无埋点阶段标记未采集；外部摄像判定画面时注明帧间隔误差，不能用“解码完成／图片 displayed”日志代替真正可见。
+viewer 已有 pump / prepare / upload / submit / present 分段；首次 TilePreparation 另记 pack / LOD / 压缩 / 缓存写入和队列高水位。源 I/O / 纯解码 CPU 与 GPU 完成时间线仍需细化。无埋点阶段标记未采集；外部摄像判定画面时注明帧间隔误差，不能用“解码完成／图片 displayed”日志代替真正可见。
 
 解码专项提前准备压缩输入，排除磁盘、UI 和 GPU；实际加载组仍走真实链路。吞吐量同时注明源像素、实际解码像素和输出像素，使用实际解码总量／总解码时间，缩放解码不以完整源图像素夸大吞吐量。
 
@@ -114,3 +114,24 @@ Core COMPLETE 总耗时不足以提供全部分段数据，接口与诊断补充
 - 比较整图和 ROI 拼接的颜色 / 相位 / 边缘正确性，再比较速度；固定去马赛克、tone-map 和质量模式，不能通过降低精度冒充提速。
 - 增加高精度 / 多平面最小可交付块、低队列额度、第三方工作集、metadata / trace 开销测试；验证预算不足明确失败而非永久等待。
 - 诊断启用 / 关闭分组测量采集开销，trace 溢出有丢弃计数，不挤占必达终结事件，也不靠全局 GPU 同步制造失真的阶段数据。
+
+## 8K 首次加载：流水与集中上传对照
+
+使用 [loading_compare.py](loading_compare.py) 生成固定种子的 8192×8192、16px 随机彩色棋盘格 PNG。相邻格明暗交替，每格 RGB 独立随机，512px Core tile 不是纯色；脚本实际解码检查并记录 SHA-256、尺寸、生成器与机器信息。生成文件和原始日志位于 `build/`，不覆盖 `assets/`。
+
+```powershell
+# 在 x64 MSVC 开发环境中
+cmake --preset msvc-release
+cmake --build build/msvc-release --target liltview liltview_loading_benchmark --parallel 6
+python benchmarks/loading_compare.py --exe build/msvc-release/app/liltview_loading_benchmark.exe --runs 30 --output build/loading-comparison-8k
+```
+
+每个样本启动新进程，交替两种模式顺序，使用真正的 YAML 解析；输入 OS 文件缓存预热，匿名 tile 缓存每进程重建，不声称冷磁盘。默认 VSync 请求开启、1600×1000 隐藏窗口，并明确以 16.667ms 目标帧周期调度，模拟帧预算运行条件；隐藏窗口的 VSync 不等于真实前台显示行为。`--vsync 0 --cadence-ms 0` 可单独测不限制帧周期的吞吐，不与默认组混算。
+
+输出每样本 JSON、帧级 CSV、阶段日志和 summary.json。报告首屏 / present 返回、上传片段峰值、主线程 work 分布、5ms 探针事件的处理延迟、暂存高水位、进程 CPU 与峰值 RSS。事件延迟包含调度等待；最终上传突发后的排队探针也会被排空采样。RSS 是进程高水位，含初始化和最终画面读回，不冒充仅加载缓冲的精确账本。
+
+验收自动检查：pipeline 首次上传早于观察到的 Core COMPLETE；batch 在 Core / worker 结束后才首次上传；每种模式 256 个 tile、无半成品可见状态、输入保留不超过两块，以及最终 SDL 读回 RGB 的逐字节 FNV-1a 校验值全部相同。完整产品 UI 行为另由 Dock / Shell / navigation render 回归验证。
+
+已完成的 30+30 主组与 10+10 吞吐诊断组数据见 [2026-11-13 实测报告](results/2026-11-13-first-load-8k/README.md)。
+
+已有本地图片可直接使用 `liltview_loading_benchmark IMAGE SETTINGS_YAML REPORT_JSON [VSYNC=1] [FRAME_MS=16.667] [SCREENSHOT_PPM]`，可选截图在首屏计时结束后保存；不要使用会生成固定 8K 输入的 Python runner 代替任意图片测试。

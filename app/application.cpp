@@ -133,6 +133,8 @@ private:
         update_visual_style();
         configure_hit_test();
         viewer_ = std::make_unique<Viewer>(*renderer_);
+        viewer_->set_static_upload_mode(settings_.static_upload_mode == StaticUploadMode::batch ?
+            Viewer::StaticUploadMode::batch : Viewer::StaticUploadMode::pipeline);
         if (!options.image_path.empty())
             viewer_->open(utf8_path(options.image_path));
         smoke_started_ = SDL_GetTicks();
@@ -805,9 +807,11 @@ private:
         const auto border = window_border_color();
         renderer_->set_opaque_background({border.x, border.y, border.z});
         renderer_->render_frame(ImGui::GetDrawData());
+        viewer_->note_frame_submitted();
         if (capture)
             capture_smoke_frame(options);
         renderer_->present();
+        viewer_->note_frame_presented();
     }
 
     // 测试动作通过真实 SDL 事件路径执行，避免另写一套退出和弹窗处理逻辑。

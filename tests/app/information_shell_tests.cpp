@@ -217,7 +217,7 @@ TEST_CASE("full information shell keeps the image navigation panel and footer di
     while (!viewer.settled())
     {
         REQUIRE(std::chrono::steady_clock::now() < deadline);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     REQUIRE_FALSE(viewer.failed());
@@ -476,7 +476,7 @@ TEST_CASE("failed replacement shows a failure illustration and its reason below 
         while (!viewer.settled())
         {
             REQUIRE(std::chrono::steady_clock::now() < deadline);
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     };
@@ -574,7 +574,7 @@ struct CanvasMenuContext
         while (!viewer.settled() || viewer.navigation().scanning)
         {
             REQUIRE(std::chrono::steady_clock::now() < deadline);
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
@@ -722,7 +722,7 @@ TEST_CASE("canvas menu rejects empty queued loading and failed images and closes
     // previous scene remains visible. No shortcut can move that cached scene.
     context.viewer.open(context.source.directory / "a.bmp");
     REQUIRE_FALSE(context.viewer.settled());
-    REQUIRE(context.viewer.has_visible_image());
+    REQUIRE_FALSE(context.viewer.has_visible_image());
     context.frame();
     CHECK_FALSE(context.popup());
     context.right_click(context.center());
@@ -812,11 +812,11 @@ TEST_CASE("progressive decode and upload failures clear pending pixels and resto
             context.renderer.upload_delay_ms = 5; // One upload crosses the pump budget: presentation precedes the terminal.
             context.viewer.open(path);
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
-            while (!(context.viewer.loading() && context.viewer.has_visible_image() && context.viewer.detail_loading()))
+            while (!(context.viewer.loading() && context.viewer.static_load_stats().tiles > 0))
             {
                 REQUIRE(std::chrono::steady_clock::now() < deadline);
                 REQUIRE_FALSE(context.viewer.failed());
-                context.viewer.pump();
+                (context.viewer.pump(), context.viewer.prepare_loading_view());
                 context.frame();
                 SDL_Delay(1);
             }
@@ -827,7 +827,7 @@ TEST_CASE("progressive decode and upload failures clear pending pixels and resto
             while (!context.viewer.failed())
             {
                 REQUIRE(std::chrono::steady_clock::now() < deadline);
-                context.viewer.pump();
+                (context.viewer.pump(), context.viewer.prepare_loading_view());
                 context.frame();
                 SDL_Delay(1);
             }
@@ -972,7 +972,7 @@ struct DockShellScenario
     {
         using namespace liltview;
         if (pump)
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
         ImGui::NewFrame();
         chrome.line_height = ImGui::GetTextLineHeight();
         const auto menu    = build_menu(Settings{}, Language::english, true, chrome.fullscreen, viewer.has_image(),
@@ -1117,7 +1117,7 @@ TEST_CASE("full shell loading replacement failure and no-image cannot reveal or 
     REQUIRE(s.dock_visible());
     s.viewer.open(s.source.directory / "missing.bmp");
     REQUIRE_FALSE(s.viewer.interaction_ready());
-    REQUIRE(s.viewer.has_visible_image()); // Previous image does not enable new gestures, but the Dock remains drawn.
+    REQUIRE_FALSE(s.viewer.has_visible_image()); // The canvas is hidden but the already shown Dock remains drawn.
     s.frame(false);
     CHECK(s.dock_visible());
     CHECK(s.double_click({300, 200}) == MenuAction::none);
@@ -1192,9 +1192,10 @@ TEST_CASE("dock dwell and double-click remain unavailable throughout progressive
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         REQUIRE_FALSE(s.viewer.failed());
         s.frame();
-        if (s.viewer.native_loading() && s.viewer.has_visible_image())
+        if (s.viewer.native_loading())
         {
             saw_native = true;
+            CHECK_FALSE(s.viewer.has_visible_image());
             CHECK_FALSE(s.viewer.interaction_ready());
             CHECK_FALSE(s.dock_visible());
         }

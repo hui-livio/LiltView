@@ -353,7 +353,7 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
         dock_image_info_open_ = image_info_open_;
         dock_.reset(); // Info is the only Dock action that changes the remaining canvas/anchor.
     }
-    const bool retain_dock       = !viewer.failed() && viewer.has_visible_image();
+    const bool retain_dock       = !viewer.failed() && (viewer.has_visible_image() || (viewer.loading() && viewer.has_image()));
     const auto &io               = ImGui::GetIO();
     const bool popup_open        = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     input_blocked                = input_blocked || io.AppFocusLost || ImGui::GetTopMostPopupModal() != nullptr;
@@ -387,7 +387,7 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
             selected = navigation;
         // Draw last in the canvas, above the image/edge navigation, never in the layout flow.
         const auto dock_action = dock_.draw(dock_layout_value, menu, language, viewer.interaction_ready(), drag_busy,
-                                            input_blocked, !viewer.failed() && viewer.has_visible_image());
+                                            input_blocked, !viewer.failed() && (viewer.has_visible_image() || (viewer.loading() && viewer.has_image())));
         if (dock_action != MenuAction::none)
             selected = dock_action;
         // Navigation restores the cursor after the reason text. Submit its
@@ -405,6 +405,8 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
         draw_image_failure(language, image_error_text(viewer.error()), position, end, scale);
         return finish();
     }
+    viewer.set_viewport({position.x, position.y}, {position.x + available.x, position.y + available.y},
+                        ImGui::GetIO().DisplayFramebufferScale.x);
     if (viewer.has_visible_image())
     {
         viewer.draw({position.x, position.y}, {position.x + available.x, position.y + available.y},

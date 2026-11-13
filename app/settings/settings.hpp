@@ -15,6 +15,8 @@ enum class Theme
     light
 };
 
+enum class StaticUploadMode { pipeline, batch };
+
 enum class LogLevel
 {
     trace,
@@ -40,6 +42,7 @@ struct Settings
     LogLevel log_level    = default_log_level();
     bool system_titlebar  = false;
     bool disable_rounding = false;
+    StaticUploadMode static_upload_mode = StaticUploadMode::pipeline;
 };
 
 // YAML only. Invalid syntax returns defaults; missing keys keep their defaults.

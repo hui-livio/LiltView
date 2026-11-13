@@ -65,6 +65,7 @@ void exercise(liltview::render::Renderer &renderer, const char *extension)
         do
         {
             viewer.pump();
+            viewer.set_viewport({0, 0}, {800, 600}, 1);
             check(!viewer.failed(), "Navigation image load failed");
             check(std::chrono::steady_clock::now() < deadline, "Navigation load timed out");
             SDL_Delay(1);
@@ -81,10 +82,12 @@ void exercise(liltview::render::Renderer &renderer, const char *extension)
         for (;;)
         {
             viewer.pump();
-            const auto details = viewer.image_details();
-            if (details && details->partial)
+            if (viewer.loading() && viewer.static_load_stats().tiles > 0)
+            {
+                check(!viewer.has_visible_image(), "Partial pending scene became visible");
                 break;
-            check(std::chrono::steady_clock::now() < deadline, "No progressive image to navigate away from");
+            }
+            check(std::chrono::steady_clock::now() < deadline, "No pending texture upload to navigate away from");
             SDL_Delay(1);
         }
         if (cycle % 4 < 2)

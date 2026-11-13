@@ -586,3 +586,13 @@ TEST_CASE("Dock keyboard focus consumes only unmodified image navigation and Esc
         CHECK(menu_action_for_input(menu, {"Control", "Up"}, false, context) == MenuAction::none);
     }
 }
+
+TEST_CASE("static upload strategy is a persistent config-only setting", "[settings]")
+{
+    CHECK(Settings{}.static_upload_mode == StaticUploadMode::pipeline);
+    CHECK(parse_settings("static_upload_mode: batch\n").static_upload_mode == StaticUploadMode::batch);
+    CHECK(parse_settings("static_upload_mode: unknown\n").static_upload_mode == StaticUploadMode::pipeline);
+    Settings settings;
+    settings.static_upload_mode = StaticUploadMode::batch;
+    CHECK(parse_settings(serialize_settings(settings)).static_upload_mode == StaticUploadMode::batch);
+}

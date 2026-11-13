@@ -35,6 +35,21 @@ public:
         return navigation_->snapshot();
     }
     void pump();
+    using StaticUploadMode = TilePreparation::Mode;
+    void set_static_upload_mode(StaticUploadMode mode) { if (loading_) throw std::logic_error("Cannot change upload mode during a load"); static_mode_ = mode; }
+    void prepare_loading_view() { if (loading_) set_viewport(canvas_min_, canvas_max_, canvas_density_); }
+    struct StaticLoadStats
+    {
+        std::uint64_t generation = 0, tiles = 0, uploaded_bytes = 0;
+        double core_ms = 0, first_region_ms = -1, decode_done_ms = -1, prepare_done_ms = -1;
+        double first_upload_ms = -1, last_upload_ms = -1, ready_ms = -1, submitted_ms = -1, presented_ms = -1;
+        double loading_presented_ms = -1, upload_cpu_ms = 0, max_upload_slice_ms = 0, max_pump_ms = 0;
+        TilePreparation::Stats preparation;
+        bool batch = false;
+    };
+    const StaticLoadStats &static_load_stats() const { return static_stats_; }
+    void note_frame_submitted();
+    void note_frame_presented();
     void suspend_animation(bool suspended);
     int wait_timeout_ms(int maximum) const;
     bool animating() const
@@ -120,7 +135,8 @@ public:
     }
     bool settled() const
     {
-        return !loading_ && !visible_pending_ && pending_path_.empty() && (playback_.started() || request_ == 0);
+        return !loading_ && !visible_pending_ && pending_path_.empty() && !retired_preparation_ && retired_scene_.empty() &&
+            (playback_.started() || request_ == 0);
     }
     // Foreground identity and camera mode, never inferred from numerical zoom.
     bool image_loaded() const
@@ -168,6 +184,20 @@ private:
     void consume(const lv_event_view &);
     void discard_pending();
     void accept_completed();
+    void advance_static();
+    void commit_static_if_ready();
+    double load_elapsed_ms() const;
+    StaticUploadMode static_mode_ = StaticUploadMode::pipeline;
+    StaticLoadStats static_stats_;
+    std::chrono::steady_clock::time_point load_started_;
+    std::unique_ptr<TilePreparation> preparation_, retired_preparation_;
+    bool decode_complete_ = false, cpu_complete_ = false;
+    Tiles::UploadBudget static_budget_;
+    bool first_commit_this_frame_ = false;
+    std::uint64_t expected_tiles_ = 0;
+    bool loading_frame_submitted_ = false, static_frame_submitted_ = false;
+    render::Point canvas_min_{}, canvas_max_{800, 600};
+    float canvas_density_ = 1;
     void prepare_image(bool animation);
     void upload(const lv_region_info &);
     void consume_animation(const lv_event_view &);

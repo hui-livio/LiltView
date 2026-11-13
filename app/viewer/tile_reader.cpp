@@ -1,5 +1,6 @@
 #include "tile_reader.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <condition_variable>
 #include <deque>
@@ -73,6 +74,7 @@ struct TileReader::State
     mutable std::mutex mutex;
     std::condition_variable changed;
     bool stopping = false;
+    std::atomic<bool> finished{false};
     std::deque<Request> pending;
     std::optional<Key> active;
     std::unordered_map<Key, Entry, KeyHash> cache;
@@ -157,21 +159,26 @@ TileReader::TileReader(int fd, lv_wakeup_fn wake, void *userdata, std::uint64_t 
     try
     {
         state_         = std::make_unique<State>(copy, wake, userdata, budget, std::move(loader));
-        state_->worker = std::thread([state = state_.get()] { state->run(); });
+        state_->worker = std::thread([state = state_.get()] {
+            state->run();
+            state->finished.store(true, std::memory_order_release);
+            if (state->wake) state->wake(state->userdata);
+        });
     } catch (...)
     {
         platform::close_descriptor(copy);
         throw;
     }
 }
+void TileReader::cancel() noexcept
+{
+    { std::lock_guard lock(state_->mutex); state_->stopping = true; state_->pending.clear(); }
+    state_->changed.notify_one();
+}
+bool TileReader::done() const noexcept { return state_->finished.load(std::memory_order_acquire); }
 TileReader::~TileReader()
 {
-    {
-        std::lock_guard lock(state_->mutex);
-        state_->stopping = true;
-        state_->pending.clear();
-    }
-    state_->changed.notify_one();
+    cancel();
     state_->worker.join();
     platform::close_descriptor(state_->fd);
 }
