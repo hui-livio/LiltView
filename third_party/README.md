@@ -32,8 +32,8 @@ libjpeg-turbo 使用本地 ExternalProject 独立构建 jpeg-static，因为上�
 
 PNG 使用本地 libpng / zlib 静态 target；WebP 应用仅链接 decoder，测试才构建编码器。
 PlutoSVG / PlutoVG 关闭示例、FreeType 集成和系统字体缓存读取，按固定嵌套源码构建，不探测系统 PlutoVG。安装同时保留 PlutoVG bundled stb 的 MIT 署名、FreeType FTL 和原始版权声明，汇总在 `PlutoVG-NOTICES.txt`。
-SVG 当前只使用上述 PlutoSVG / PlutoVG 基础静态 profile，复杂 SVG 不支持。没有新增 SVG 后端、Rust 工具链或浏览器运行时；后续选型受轻量 C/C++、无重型框架及无 V8 约束，见[技术决策](../docs/DEVELOPMENT_PLAN.md#8-复杂-svg-范围与技术决策)。
-编译型依赖保持上游源码原样；纯头文件 iguana 的受控补丁见下文及其来源清单。BMP 由项目 C23 实现。功能边界与验证见[格式说明](../docs/IMAGE_FORMATS.md)。
+SVG 当前只使用上述 PlutoSVG / PlutoVG 基础静态 profile，复杂 SVG 不支持。没有新增 SVG 后端、Rust 工具链或浏览器运行时；后续选型受轻量 C/C++、无重型框架及无 V8 约束，见[技术决策](../docs/开发计划与未实现设计.md#7-复杂-svg-范围与技术决策)。
+编译型依赖保持上游源码原样；纯头文件 iguana 的受控补丁见下文及其来源清单。BMP 由项目 C23 实现。功能边界与验证见[格式说明](../docs/图片格式兼容表.md)。
 
 ## 首次注册
 

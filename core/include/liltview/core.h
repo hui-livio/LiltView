@@ -2,7 +2,7 @@
 #define LILTVIEW_CORE_H
 
 /* Runtime ABI v2: static DISPLAY/FIT/REGION/NATIVE and bounded GIF animation sessions.
- * Contracts: docs/CORE_CONTRACTS.md; rendering: docs/RENDERING.md.
+ * Contracts: docs/核心接口与生命周期契约.md; rendering: docs/渲染与大图实现.md.
  * C23 implementation (private C17 compatibility on MSVC), C++20/23 consumers.
  * ABI compatibility is for the same architecture and platform ABI only. */
 #include <stddef.h>

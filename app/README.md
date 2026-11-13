@@ -1,6 +1,6 @@
 # 应用源码入口
 
-模块边界、数据流和构建命令统一见[开发架构](../docs/ARCHITECTURE.md)，当前产品行为见[产品与设计](../docs/PRODUCT_DESIGN.md)。本文件只保留源码导航：
+模块边界、数据流和构建命令统一见[开发架构](../docs/开发架构.md)，当前产品行为见[产品与设计](../docs/产品与设计.md)。本文件只保留源码导航：
 
 | 路径 | 职责 |
 | --- | --- |
@@ -13,7 +13,7 @@
 | `settings/`、`i18n/`、`logging/` | YAML、安全替换、中英翻译、日志与 C 回调适配 |
 | `resources/` | 内嵌彩色图标、Windows RC 图标 / 版本信息模板 |
 
-显示、缓存与 PBO 细节见[渲染说明](../docs/RENDERING.md)，参数见[配置说明](../docs/CONFIGURATION.md)。首次 LOD / 压缩 / 写缓存后台化仍待实现，不能把后台恢复等同于整个首次加载都在后台。
+显示、缓存与 PBO 细节见[渲染说明](../docs/渲染与大图实现.md)，参数见[配置说明](../docs/命令行与设置.md)。首次 LOD / 压缩 / 写缓存后台化仍待实现，不能把后台恢复等同于整个首次加载都在后台。
 
 窗口标题栏在原窗口 / GL context 上切换；Linux X11 使用不透明 visual + Shape，Wayland 使用 alpha surface + input region。Windows 使用现有 SDL3 + OpenGL3 与 Win32 窗口适配，不包含 D3D11。关闭统一先隐藏，再取消并等待后台工作、保存设置、撤销菜单关联、释放图像和 renderer，最后销毁窗口 / SDL。
 
