@@ -5,4 +5,4 @@ PNG、SVG、无损 WebP 的 alpha 为约 50%，BMP 为不透明 24 位。GIF 含
 
 `generate_formats.py` 可重新生成它们；仅生成 WebP 时需要本机 libwebp 编码器。
 正常编译与测试直接读已保存文件，不运行生成器，也不依赖系统编码库。
-更多位深、Adam7、BMP 位域 / RLE、异常输入由 `tests/core/format_tests.cpp` 在测试内生成。SVG 正例只验证[基础静态 profile](../../docs/IMAGE_FORMATS.md#4-svg-静态-profile)；文字、外部资源、滤镜、裁剪和引用等拒绝用例不代表这些特性已获支持。
+更多位深、Adam7、BMP 位域 / RLE、异常输入由 `tests/core/format_tests.cpp` 在测试内生成。SVG 正例只验证[基础静态 profile](../../docs/图片格式兼容表.md#4-svg-静态-profile)；文字、外部资源、滤镜、裁剪和引用等拒绝用例不代表这些特性已获支持。

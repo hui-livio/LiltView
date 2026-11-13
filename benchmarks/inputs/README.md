@@ -28,17 +28,17 @@ GIF 使用 256 色全局调色板。全帧样本移动棋盘并更新色块；�
 
 `validation.json` 记录了全部 62 个文件的 SHA-256、尺寸、格式参数和完整解码核验。静态图通过 libvips 完整解码归约；GIF 通过 FFmpeg 完整解码，并独立解析帧时长、局部矩形、透明标记、disposal 和循环扩展。PNG 另检查各 chunk CRC，BMP 检查位数和压缩方式，TIFF 检查容器与 tile 参数。4000×3000 同组 PNG、BMP、无损 WebP、strip TIFF、tile TIFF、BigTIFF 的完整 RGB 解码流 SHA-256 相同。
 
-全部样本的 `application_status` 都是 `not_tested`：输入完整性核验没有测试当前 LiltView 的打开成功率、速度或资源消耗。普通图中的大 BMP 也可能触发旧版本文件大小限制；超大样本用于实际观察当前版本的支持程度，成功、拒绝和预算不足都应如实记录。
+全部样本的 `application_status` 都是 `not_tested`：输入完整性核验没有测试当前 LiltView 的打开成功率、速度或资源消耗。超大样本用于实际观察当前版本的格式与资源边界，成功、拒绝和预算不足都应如实记录。
 
 棋盘格具有较高可压缩性，源文件小不代表解码画布小。当前最大 PNG 只有数 MiB，但完整 1GP RGBA8 画布为 4,000,000,000 字节。本套素材适合确定性对比、块边界和上传／渲染检查，不代替真实照片的内容分布。生成与核验已读取图片，开展冷缓存测量前必须重新准备对应缓存状态。
 
-复杂 SVG [当前不支持](../../docs/IMAGE_FORMATS.md#4-svg-静态-profile)；上述 SVG 数量仅表示基础几何样本，不证明浏览器级兼容。
+复杂 SVG [当前不支持](../../docs/图片格式兼容表.md#4-svg-静态-profile)；上述 SVG 数量仅表示基础几何样本，不证明浏览器级兼容。
 
 图片和 `preview.jpg` 由本目录 `.gitignore` 排除，生成时保留在本机，不随普通 Git 克隆提供；说明、清单与核验记录可纳入版本管理。`preview.jpg` 是 1920×1080 JPEG 样本的预览副本，不计入 62 个测试输入。
 
 ## 后续输入（待补充）
 
-AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG，以及无文件头的原始 RGB / 灰度、YUV、Bayer 都已列入 [性能测试计划](../TEST_PLAN.md)。相关应用能力均为[待开发](../../docs/DEVELOPMENT_PLAN.md)。
+AVIF、JPEG XL、HEIF / HEIC、APNG、动画 WebP、ICO / CUR、QOI、JPEG 2000、OpenEXR、相机 RAW / DNG，以及无文件头的原始 RGB / 灰度、YUV、Bayer 都已列入 [性能测试计划](../README.md)。相关应用能力均为[待开发](../../docs/开发计划与未实现设计.md)。
 
 新增静态文件规划放到 `static/normal/<format>/`，适用的超大静态文件放到 `static/large/<format>/`，普通动图放到 `animation/<format>/`。原始数据规划放到 `raw/rgb/`、`raw/yuv/`、`raw/bayer/`，并随附宽高、具体布局、位深、字节序、行跨度、文件 / 平面偏移和适用颜色 / CFA 参数的描述文件；这些目录和描述文件目前尚未创建，具体配置格式待实现确定。
 

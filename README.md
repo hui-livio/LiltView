@@ -40,9 +40,9 @@ The image information panel, status bar, and both themes. Both screenshots displ
 | GIF (`.gif`) | Automatic playback of ordinary-size GIFs, including transparency, compositing, and loops | No oversized animations, manual pause, frame stepping, or seeking |
 | TIFF (`.tif` / `.tiff`) | First page of Classic TIFF / BigTIFF, with common compression, orientation, and transparency | First page only; no page selection, floating-point, or CMYK images |
 
-**Supporting a format does not mean supporting every encoding variant.** Files are identified by their contents; folder browsing filters by the extensions listed above. See the [format compatibility table](docs/IMAGE_FORMATS.md) for bit depths, transparency, orientation, and resource limits.
+**Supporting a format does not mean supporting every encoding variant.** Files are identified by their contents; folder browsing filters by the extensions listed above. See the [format compatibility table](docs/图片格式兼容表.md) for bit depths, transparency, orientation, and resource limits.
 
-- **SVG scope**: text / fonts, CSS stylesheets / classes, clipping, masks, filters, `use` / `symbol`, and embedded images are outside the supported subset. Scripts are not executed, and external resources are not loaded. Export complex files to PNG before viewing them; see the [SVG compatibility notes](docs/IMAGE_FORMATS.md#4-svg-静态-profile).
+- **SVG scope**: text / fonts, CSS stylesheets / classes, clipping, masks, filters, `use` / `symbol`, and embedded images are outside the supported subset. Scripts are not executed, and external resources are not loaded. Export complex files to PNG before viewing them; see the [SVG compatibility notes](docs/图片格式兼容表.md#4-svg-静态-profile).
 - **Color scope**: display output is currently 8-bit RGBA, without full ICC color management or HDR output. Reading a high-bit-depth image does not mean preserving high precision for display.
 - **File scope**: LiltView opens local images, not specialized design source files such as CAD, PSD / PSB, AI, CDR, or Sketch. Standard images exported from those tools are handled according to their actual format.
 - **Product scope**: browsing, not image editing, a photo-library database, tag management, or batch processing.
@@ -107,60 +107,7 @@ The following environments have been confirmed to run LiltView:
 
 These are validated environments, not a guarantee that every Windows version, Linux distribution, desktop, or WSL graphics setup has been tested. Other environments do not carry the same compatibility assurance.
 
-### Validated Windows 10 Environment
-
-Native Windows desktop configuration recorded on November 12, 2026. This is a validated configuration snapshot, not a minimum specification.
-
-| Item | Validated configuration |
-| --- | --- |
-| Operating system | Windows 10 Pro (64-bit) |
-| Version | 22H2 |
-| OS build | 19045.5965 |
-| System language | Simplified Chinese |
-| Memory | 32 GB |
-| Physical memory available to Windows | Approximately 28.78 GB |
-| Dedicated GPU | NVIDIA GeForce RTX 3060 |
-| Dedicated video memory | 12 GB GDDR (reported by the tool as 12288 MiB) |
-| NVIDIA driver version | 596.36 |
-| Windows driver version | 32.0.15.9636 |
-| Driver date | 2026-04-23 |
-| DirectX version | DirectX 12 |
-| Direct3D feature level | Highest listed: `12_1` |
-| Driver model | WDDM 2.7 |
-
-DirectX, feature-level, and WDDM information describes this machine's graphics environment; it does not mean LiltView uses the corresponding rendering backend.
-
-### Validated Arch Linux Environment
-
-Environment versions recorded on November 12, 2026. This is a validated desktop snapshot, not a minimum version requirement, and it does not describe the WSL2 environment below.
-
-| Component | Validated version |
-| --- | --- |
-| System | Arch Linux (rolling release) |
-| Linux kernel | 7.2.15-arch1-1 |
-| KDE Plasma | 6.8.2 |
-| KDE Frameworks (as reported by kcoreaddons) | 6.31.0 |
-| Qt | 6.12.0 |
-| Wayland library | 1.26.0 |
-
-### Validated WSL2 Arch Linux Environment
-
-Environment snapshot recorded on November 12, 2026, with Windows 10 as the host. This setup uses WSLg and is listed separately from the KDE Plasma Wayland desktop above. These versions are not minimum requirements either.
-
-| Item | Validated environment |
-| --- | --- |
-| Linux distribution | Arch Linux |
-| Release model | Rolling release, with no fixed distribution version number |
-| Linux kernel | 6.18.54.1-microsoft-standard-WSL2 |
-| Architecture | x86_64 (64-bit) |
-| Runtime environment | WSL2 |
-| Linux graphics support | WSLg 1.0.79 |
-| Desktop environment | No installed packages or running sessions for common desktops such as KDE Plasma, GNOME, or Xfce were detected |
-| Display interfaces | `DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0` |
-| Wayland package | 1.26.0-1 |
-| Mesa package | 1:26.2.6-1 |
-| systemd | 262.2-1 |
-| glibc | 2.44+r50+g1848099f063e-1 |
+Detailed version and hardware snapshots are maintained in the [runtime environment record](docs/产品与设计.md#6-支持边界与运行环境). They are not minimum requirements or a complete platform acceptance matrix.
 
 ### Installation
 
@@ -168,11 +115,11 @@ Environment snapshot recorded on November 12, 2026, with Windows 10 as the host.
 - **Windows 10**: no installer is currently provided. See [installation and deployment](packaging/README.md) for the application and resource directory layout.
 - **WSL2 Arch Linux**: the validated setup is Arch Linux + WSLg in WSL2 on Windows 10. This does not imply compatibility with every WSL distribution or graphics environment.
 
-## User Documentation
+## Documentation
 
-- [Image format compatibility](docs/IMAGE_FORMATS.md)
-- [Command line and settings](docs/CONFIGURATION.md)
-- [Interface and interaction guide](docs/PRODUCT_DESIGN.md)
+- Usage: [interface and interaction](docs/产品与设计.md), [image formats](docs/图片格式兼容表.md), [command line and settings](docs/命令行与设置.md).
+- Development: [build, validation and documentation index](docs/构建与验证.md), [architecture](docs/开发架构.md), [Core contracts](docs/核心接口与生命周期契约.md), [rendering](docs/渲染与大图实现.md).
+- **Not yet implemented**: [development plan](docs/开发计划与未实现设计.md), [first-load responsiveness and complete first-frame design](docs/首次加载流畅度与完整首屏显示设计.md).
 
 The linked guides are currently in Simplified Chinese.
 

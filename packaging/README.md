@@ -21,13 +21,4 @@ Linux 同时安装 `io.github.hui_livio.LiltView.desktop` 与同名 hicolor SVG 
 
 应用图标源使用 `assets/icons/liltview-color.svg` 及对应 PNG；Windows 已通过 `app/resources/liltview.rc.in` 接入多尺寸 ICO 与文件 / 产品版本资源，Release 使用 GUI 子系统。Windows 安装器及完整部署验收仍待实现。鸿蒙字体保持原样并随应用分发，不单独作为产品分发。
 
-常用 Arch 命令（仓库根目录，以普通用户执行）：
-
-```sh
-python3 scripts/package_arch.py build --syncdeps --jobs 4
-python3 scripts/package_arch.py install --manager pacman --syncdeps --jobs 4
-# 或使用已安装的 paru：
-python3 scripts/package_arch.py install --manager paru --jobs 4
-```
-
-生成的 `.pkg.tar.zst` 可用 `sudo pacman -U <准确文件路径>` 安装。本地源码包已经包含 submodule 源码，不要求构建机器访问 GitHub；系统依赖仍由 pacman 解析。尚未发布 AUR，不以 `paru -S liltview` 作为当前入口。
+Arch 本地源码包、makepkg / pacman / paru 命令与检查步骤统一见 [Arch 部署](arch/README.md)。源码包包含 submodule 源码，系统依赖仍由包管理器解析；尚未发布 AUR，不使用 `paru -S liltview` 作为当前入口。
