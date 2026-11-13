@@ -480,8 +480,8 @@ private:
     // 最近有交互时保持响应；静止时延长等待，避免持续空转重绘。
     void process_events(bool smoke_test, Shell &shell, bool force_poll)
     {
-        const bool active =
-            viewer_->loading() || viewer_->detail_loading() || SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
+        const bool active = viewer_->loading() || viewer_->detail_loading() || shell.needs_animation_frame() ||
+            SDL_GetTicks() - last_activity_ < 180 || ImGui::IsAnyItemActive();
         const auto flags = SDL_GetWindowFlags(window_);
         viewer_->suspend_animation(!smoke_test && (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)));
         const int wait_ms = (smoke_test || force_poll) ? 0 : viewer_->wait_timeout_ms(active ? 16 : 200);
@@ -526,7 +526,7 @@ private:
         // 文本输入和弹窗优先处理按键；图片尚未加载完成时不执行应用快捷键。
         const ShortcutContext context{dialog_ || ImGui::GetIO().WantTextInput ||
                                           ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
-                                      is_fullscreen(), shell.image_info_open(), !viewer_->settled()};
+                                      is_fullscreen(), shell.image_info_open(), !viewer_->settled(), shell.dock_keyboard_focus()};
         // 使用菜单模型中的同一份快捷键定义；禁用菜单项不会响应按键。
         std::vector<std::string> shortcut;
         if ((key.mod & SDL_KMOD_CTRL) != 0)
@@ -769,7 +769,8 @@ private:
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
-        const auto action   = shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_, current_chrome_state());
+        const auto action =
+            shell.draw(language, menu_, system_menu, *renderer_, icon_, *viewer_, current_chrome_state(), dialog_ != nullptr);
         if (live_resize)
         {
             // Only present during the native loop. Window/menu actions, dialogs

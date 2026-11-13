@@ -122,6 +122,24 @@ public:
     {
         return !loading_ && !visible_pending_ && pending_path_.empty() && (playback_.started() || request_ == 0);
     }
+    // Foreground identity and camera mode, never inferred from numerical zoom.
+    bool image_loaded() const
+    {
+        return !closing_ && !loading_ && pending_path_.empty() && (playback_.started() || request_ == 0) && !failed() &&
+            has_visible_image() && selected_path_ == displayed_path_;
+    }
+    bool interaction_ready() const
+    {
+        return image_loaded() && !visible_pending_ && !failed_restore_;
+    }
+    bool fitting() const
+    {
+        return viewport_.fitting();
+    }
+    std::uint64_t image_generation() const
+    {
+        return generation_;
+    }
     bool failed() const
     {
         return error_ != 0;

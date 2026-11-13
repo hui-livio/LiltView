@@ -551,3 +551,38 @@ TEST_CASE("rotation shortcuts honor blocked and loading input without navigation
     CHECK(menu_action_for_shortcut(menu, {"Shift", "Left"}) == MenuAction::pan_left);
     CHECK(menu_action_for_shortcut(menu, {"Shift", "Right"}) == MenuAction::pan_right);
 }
+
+TEST_CASE("Dock keyboard focus consumes only unmodified image navigation and Escape", "[dock][shortcut][regression]")
+{
+    const auto menu = build_menu(Settings{}, Language::english, true, true, true, true, true, true, true);
+    ShortcutContext context;
+    context.fullscreen = context.image_info_open = context.dock_keyboard_focus = true;
+    for (const bool repeat : {false, true})
+    {
+        CHECK(menu_action_for_input(menu, {"Left"}, repeat, context) == MenuAction::none);
+        CHECK(menu_action_for_input(menu, {"Right"}, repeat, context) == MenuAction::none);
+        CHECK(menu_action_for_input(menu, {"Escape"}, repeat, context) == MenuAction::none);
+        CHECK(menu_action_for_input(menu, {"Shift", "Left"}, repeat, context) == MenuAction::pan_left);
+        CHECK(menu_action_for_input(menu, {"Shift", "Right"}, repeat, context) == MenuAction::pan_right);
+        CHECK(menu_action_for_input(menu, {"Shift", "Up"}, repeat, context) == MenuAction::pan_up);
+        CHECK(menu_action_for_input(menu, {"Shift", "Down"}, repeat, context) == MenuAction::pan_down);
+        CHECK(menu_action_for_input(menu, {"Control", "Left"}, repeat, context) == MenuAction::rotate_left);
+        CHECK(menu_action_for_input(menu, {"Control", "Right"}, repeat, context) == MenuAction::rotate_right);
+        CHECK(menu_action_for_input(menu, {"Control", "Up"}, repeat, context) == MenuAction::zoom_in);
+        CHECK(menu_action_for_input(menu, {"Control", "Down"}, repeat, context) == MenuAction::zoom_out);
+        CHECK(menu_action_for_input(menu, {"Tab"}, repeat, context) == MenuAction::none);
+        CHECK(menu_action_for_input(menu, {"Shift", "Tab"}, repeat, context) == MenuAction::none);
+    }
+    context.dock_keyboard_focus = false;
+    CHECK(menu_action_for_input(menu, {"Left"}, false, context) == MenuAction::previous);
+    CHECK(menu_action_for_input(menu, {"Right"}, true, context) == MenuAction::next);
+    CHECK(menu_action_for_input(menu, {"Escape"}, false, context) == MenuAction::image_info);
+    context.dock_keyboard_focus = true;
+    for (const bool loading : {false, true})
+    {
+        context.loading = loading;
+        context.blocked = !loading;
+        CHECK(menu_action_for_input(menu, {"Shift", "Left"}, false, context) == MenuAction::none);
+        CHECK(menu_action_for_input(menu, {"Control", "Up"}, false, context) == MenuAction::none);
+    }
+}

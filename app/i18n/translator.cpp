@@ -93,7 +93,9 @@ constexpr Dictionary english{"File",
                              "Restoring...",
                              "Previous image",
                              "Image unavailable",
-                             "This image format is not supported."};
+                             "This image format is not supported.",
+                             "More",
+                             "Original size (100%)"};
 
 constexpr Dictionary chinese{"文件",
                              "打开图片…",
@@ -180,7 +182,9 @@ constexpr Dictionary chinese{"文件",
                              "恢复中…",
                              "上一张",
                              "图片加载失败",
-                             "不支持此图片格式。"};
+                             "不支持此图片格式。",
+                             "更多",
+                             "原始大小（100%）"};
 
 constexpr bool complete(const Dictionary &dictionary)
 {

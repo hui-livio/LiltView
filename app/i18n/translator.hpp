@@ -101,6 +101,8 @@ enum class Text
     status_previous_image,
     image_load_failed,
     unsupported_format,
+    more,
+    original_size,
     count
 };
 

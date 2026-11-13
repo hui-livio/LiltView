@@ -1,6 +1,7 @@
 #include "shell.hpp"
-#include "theme.hpp"
+#include "menu/imgui_menu.hpp"
 #include "status_bar.hpp"
+#include "theme.hpp"
 
 #include "version.hpp"
 #include "viewer/viewer.hpp"
@@ -218,56 +219,6 @@ void rounded_modal_dim(float radius, ImVec4 color)
     list->PopClipRect();
 }
 
-MenuAction draw_menu(const MenuItem &root)
-{
-    MenuAction result = MenuAction::none;
-    for (const auto &item : root.children)
-    {
-        if (item.separator)
-        {
-            ImGui::Separator();
-            continue;
-        }
-        const auto title = item.label + "###menu_" + std::to_string(item.id);
-        if (!item.children.empty())
-        {
-            if (ImGui::BeginMenu(title.c_str(), item.enabled))
-            {
-                const auto selected = draw_menu(item);
-                if (selected != MenuAction::none)
-                    result = selected;
-                ImGui::EndMenu();
-            }
-        }
-        else
-        {
-            std::string shortcut;
-            for (const auto &key : item.shortcut)
-            {
-                if (!shortcut.empty())
-                    shortcut += "+";
-                if (key == "Control")
-                    shortcut += "Ctrl";
-                else if (key == "Up")
-                    shortcut += "↑";
-                else if (key == "Down")
-                    shortcut += "↓";
-                else if (key == "Left")
-                    shortcut += "←";
-                else if (key == "Right")
-                    shortcut += "→";
-                else if (key.size() == 1 && key[0] >= 'a' && key[0] <= 'z')
-                    shortcut += static_cast<char>(key[0] - 'a' + 'A');
-                else
-                    shortcut += key;
-            }
-            if (ImGui::MenuItem(title.c_str(), shortcut.empty() ? nullptr : shortcut.c_str(), item.checked, item.enabled))
-                result = item.action;
-        }
-    }
-    return result;
-}
-
 MenuAction draw_canvas_menu(const MenuItem &menu, bool enabled)
 {
     // The stable View ID and renderer are shared with the menu bar, including
@@ -318,7 +269,7 @@ void Shell::dismiss_transient_menus()
 }
 
 MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu, render::Renderer &renderer, render::Image icon,
-                       Viewer &viewer, const WindowChromeState &chrome)
+                       Viewer &viewer, const WindowChromeState &chrome, bool input_blocked)
 {
     // 按区域组织一帧；窗口、子画布和弹窗的 Begin/End 在对应函数中配对。
     const auto metrics = window_chrome_metrics(ImGui::GetMainViewport()->Size, chrome);
@@ -351,7 +302,7 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
         return action;
     }
 
-    const auto canvas_action = draw_canvas(language, menu, renderer, icon, viewer, metrics);
+    const auto canvas_action = draw_canvas(language, menu, renderer, icon, viewer, metrics, input_blocked || open_about_);
     if (canvas_action != MenuAction::none)
         action = canvas_action;
     draw_status(language, viewer, metrics);
@@ -373,7 +324,7 @@ MenuAction Shell::draw_window_menu(const MenuItem &menu)
 }
 
 MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::Renderer &renderer, render::Image icon,
-                              Viewer &viewer, const WindowChromeMetrics &chrome)
+                              Viewer &viewer, const WindowChromeMetrics &chrome, bool input_blocked)
 {
     // 画布填满无内边距的主窗口，仅为底部状态栏预留高度。
     const auto t = [language](Text text)
@@ -391,18 +342,54 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
     const auto available = ImGui::GetContentRegionAvail();
     const auto position  = ImGui::GetCursorScreenPos();
     const ImVec2 end{position.x + available.x, position.y + available.y};
+    if (image_generation_ != viewer.image_generation())
+    {
+        image_generation_ = viewer.image_generation();
+        dock_.image_changed();
+        canvas_gesture_.reset();
+    }
+    if (dock_image_info_open_ != image_info_open_)
+    {
+        dock_image_info_open_ = image_info_open_;
+        dock_.reset(); // Info is the only Dock action that changes the remaining canvas/anchor.
+    }
+    const bool retain_dock       = !viewer.failed() && viewer.has_visible_image();
+    const auto &io               = ImGui::GetIO();
+    const bool popup_open        = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    input_blocked                = input_blocked || io.AppFocusLost || ImGui::GetTopMostPopupModal() != nullptr;
+    const bool ready             = viewer.interaction_ready() && !input_blocked;
     const auto buttons = navigation_button_layout(position, end, scale);
-    const auto state   = navigation_button_state(
-        viewer.navigation(), ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
-    const bool blocked =
-        navigation_gesture_.blocks(buttons, state, ImGui::GetIO().MousePos, ImGui::IsMouseClicked(ImGuiMouseButton_Left),
-                                   ImGui::IsMouseDown(ImGuiMouseButton_Left));
+    const auto state             = navigation_button_state(viewer.navigation(), popup_open);
+    const auto *fullscreen       = dock_menu_item(menu, MenuAction::fullscreen);
+    const auto dock_layout_value = dock_layout(position, end, scale, viewer.fitting(), fullscreen && fullscreen->checked);
+    const bool canvas_hit        = !popup_open && !input_blocked && ImGui::IsWindowHovered() &&
+        DockRect{position, end}.contains(io.MousePos) && !navigation_buttons_hit(buttons, state, io.MousePos) &&
+        !dock_.hit(dock_layout_value, io.MousePos);
+    const bool toggle = canvas_gesture_.update(
+        ready, canvas_hit, ImGui::IsMouseClicked(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Left),
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left), ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+    const bool image_held         = canvas_gesture_.image_held();
+    const bool drag_busy          = image_held || ImGui::IsMouseDragging(ImGuiMouseButton_Left);
+    const bool dock_blocked       = dock_.prepare(dock_layout_value, ready, drag_busy, input_blocked, retain_dock);
+    const bool navigation_blocked = navigation_gesture_.blocks(
+        buttons, state, io.MousePos, ImGui::IsMouseClicked(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Left));
+    const bool blocked = input_blocked || popup_open || (!image_held && (dock_blocked || navigation_blocked)) ||
+        (ImGui::IsMouseDown(ImGuiMouseButton_Left) && !image_held);
     const auto finish = [&]
     {
-        auto selected         = draw_canvas_menu(menu, viewer.settled() && viewer.has_visible_image() && !viewer.failed());
+        auto selected =
+            toggle ? dock_toggle_action(menu, viewer.fitting(), viewer.interaction_ready() && !input_blocked) : MenuAction::none;
+        const auto context_action = draw_canvas_menu(menu, viewer.interaction_ready() && !input_blocked);
+        if (context_action != MenuAction::none)
+            selected = context_action;
         const auto navigation = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
         if (navigation != MenuAction::none)
             selected = navigation;
+        // Draw last in the canvas, above the image/edge navigation, never in the layout flow.
+        const auto dock_action = dock_.draw(dock_layout_value, menu, language, viewer.interaction_ready(), drag_busy,
+                                            input_blocked, !viewer.failed() && viewer.has_visible_image());
+        if (dock_action != MenuAction::none)
+            selected = dock_action;
         // Navigation restores the cursor after the reason text. Submit its
         // trailing spacing explicitly rather than extending child bounds via SetCursorPos.
         ImGui::Dummy({0, 0});
