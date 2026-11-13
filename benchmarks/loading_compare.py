@@ -74,7 +74,7 @@ def main():
             assert report["mode"] == mode
             assert report["partial_frames"] == 0
             assert report["tiles"] == 256
-            assert report["input_peak"] <= 2
+            assert report["input_peak"] <= 8
             assert report["first_upload_ms"] < report["decode_done_ms"] if mode == "pipeline" else report["first_upload_ms"] >= report["decode_done_ms"]
             reports.append(report)
             print(mode, run + 1, "ready_ms=", report["ready_ms"], "work_max_ms=", report["work_max_ms"], flush=True)

@@ -6,26 +6,12 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
-#include <zlib.h>
+#include "viewer/cache_codec.hpp"
 #include "viewer/tile_reader.hpp"
 
 namespace
 {
 using liltview::TileReader;
-struct File
-{
-    std::FILE *file = std::tmpfile();
-    File()
-    {
-        if (!file)
-            throw std::runtime_error("tmpfile");
-    }
-    ~File()
-    {
-        if (file)
-            std::fclose(file);
-    }
-};
 TileReader::Request job(std::uint64_t id)
 {
     return {{id, 0}, {4, 4}, 0, 1};
@@ -52,7 +38,7 @@ void wait_reads(TileReader &reader, std::uint64_t count)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
-std::vector<std::uint8_t> fake_read(int, const TileReader::Request &request)
+std::vector<std::uint8_t> fake_read(const TileReader::Request &request)
 {
     return std::vector<std::uint8_t>(request.size.width * request.size.height * 4, static_cast<std::uint8_t>(request.key.tile));
 }
@@ -86,11 +72,11 @@ void LV_CALL wake(void *userdata)
 
 TEST_CASE("tile cache I/O cannot block request or lookup and latest viewport replaces queued work", "[tile_reader]")
 {
-    File file;
+    auto file = std::make_shared<liltview::MemoryTileCache>();
     Gate gate;
     std::atomic<unsigned> notifications{0};
-    TileReader reader(fileno(file.file), wake, &notifications, 128,
-                      [&](int fd, const TileReader::Request &request)
+    TileReader reader(file, wake, &notifications, 128,
+                      [&](const TileReader::Request &request)
                       {
                           std::unique_lock lock(gate.mutex);
                           gate.thread = std::this_thread::get_id();
@@ -98,7 +84,7 @@ TEST_CASE("tile cache I/O cannot block request or lookup and latest viewport rep
                           gate.entered = true;
                           gate.changed.notify_all();
                           gate.changed.wait(lock, [&] { return gate.proceed; });
-                          return fake_read(fd, request);
+                          return fake_read(request);
                       });
     Release release{gate}; // Also release a gated loader if a REQUIRE aborts this test.
     reader.request({job(1), job(2)});
@@ -131,8 +117,8 @@ TEST_CASE("tile cache I/O cannot block request or lookup and latest viewport rep
 
 TEST_CASE("decoded tile RAM cache is bounded LRU and queued work has a fixed limit", "[tile_reader]")
 {
-    File file;
-    TileReader reader(fileno(file.file), nullptr, nullptr, 128, fake_read);
+    auto file = std::make_shared<liltview::MemoryTileCache>();
+    TileReader reader(file, nullptr, nullptr, 128, fake_read);
     reader.request({job(1), job(2)});
     wait_for(reader, {1, 0});
     wait_for(reader, {2, 0});
@@ -150,45 +136,41 @@ TEST_CASE("decoded tile RAM cache is bounded LRU and queued work has a fixed lim
     CHECK(reader.stats().cached_bytes <= 128);
 }
 
-TEST_CASE("background cache reads use an owned fd without disturbing the writer seek position", "[tile_reader]")
+TEST_CASE("background memory cache reads retain blocks without a disk file", "[tile_reader]")
 {
-    File file;
+    auto file = std::make_shared<liltview::MemoryTileCache>();
     const std::vector<std::uint8_t> pixels(64, 213);
-    std::vector<std::uint8_t> compressed(compressBound(pixels.size()));
-    uLongf size = compressed.size();
-    REQUIRE(compress2(compressed.data(), &size, pixels.data(), pixels.size(), 1) == Z_OK);
-    REQUIRE(std::fseek(file.file, 1000, SEEK_SET) == 0);
-    REQUIRE(std::fwrite(compressed.data(), 1, size, file.file) == size);
-    REQUIRE(std::fflush(file.file) == 0);
-    REQUIRE(std::fseek(file.file, 17, SEEK_SET) == 0);
-    TileReader reader(fileno(file.file));
-    auto request   = job(7);
-    request.offset = 1000;
-    request.bytes  = static_cast<std::uint32_t>(size);
+    liltview::CacheEncoder encoder;
+    const auto compressed = encoder.encode(pixels);
+    const auto offset = file->append(compressed);
+    const auto owned = file->find(offset, static_cast<std::uint32_t>(compressed.size()));
+    CHECK(owned->data.data() == compressed.data()); // Pointer transfer, not a payload copy.
+    TileReader reader(file);
+    auto request = job(7);
+    request.offset = offset;
+    request.bytes = static_cast<std::uint32_t>(compressed.size());
     reader.request({request});
     CHECK(*wait_for(reader, request.key) == pixels);
-    CHECK(std::ftell(file.file) == 17);
     const auto reads = reader.stats().reads;
     reader.request({request});
     CHECK(*reader.find(request.key) == pixels);
     CHECK(reader.stats().reads == reads);
-    std::fclose(file.file);
-    file.file        = nullptr;
+    file.reset();
     request.key.tile = 8;
-    reader.request({request}); // The duplicated fd keeps the unlinked cache alive.
+    reader.request({request});
     CHECK(*wait_for(reader, request.key) == pixels);
 }
 
 TEST_CASE("cached tile errors are reported without poisoning unrelated entries", "[tile_reader]")
 {
-    File file;
+    auto file = std::make_shared<liltview::MemoryTileCache>();
     std::atomic<unsigned> attempts{0};
-    TileReader reader(fileno(file.file), nullptr, nullptr, 128,
-                      [&](int fd, const TileReader::Request &request)
+    TileReader reader(file, nullptr, nullptr, 128,
+                      [&](const TileReader::Request &request)
                       {
                           if (request.key.tile == 1 && attempts.fetch_add(1) == 0)
                               throw std::runtime_error("Injected read error");
-                          return fake_read(fd, request);
+                          return fake_read(request);
                       });
     reader.request({job(1)});
     wait_reads(reader, 1);
@@ -205,19 +187,19 @@ TEST_CASE("cached tile errors are reported without poisoning unrelated entries",
     auto invalid = job(3);
     invalid.size = {1024, 1024};
     CHECK_THROWS_AS(reader.request({invalid}), std::invalid_argument);
-    CHECK_THROWS_AS(TileReader(-1), std::system_error);
+    CHECK_THROWS_AS(TileReader(nullptr), std::invalid_argument);
 }
 
 TEST_CASE("retiring a cache reader never waits for a blocked disk call on the UI thread", "[tile_reader][cancel]")
 {
-    File file;
+    auto file = std::make_shared<liltview::MemoryTileCache>();
     Gate gate;
-    TileReader reader(fileno(file.file), nullptr, nullptr, 128,
-        [&](int fd, const TileReader::Request &request) {
+    TileReader reader(file, nullptr, nullptr, 128,
+        [&](const TileReader::Request &request) {
             std::unique_lock lock(gate.mutex);
             gate.entered = true; gate.changed.notify_all();
             gate.changed.wait(lock, [&] { return gate.proceed; });
-            return fake_read(fd, request);
+            return fake_read(request);
         });
     Release release{gate};
     reader.request({job(1), job(2)});
@@ -235,4 +217,26 @@ TEST_CASE("retiring a cache reader never waits for a blocked disk call on the UI
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+}
+
+TEST_CASE("raw memory cache shares payload and rejects invalid RGBA lengths", "[tile_reader]")
+{
+    auto cache = std::make_shared<liltview::MemoryTileCache>();
+    liltview::MemoryBlock pixels(std::vector<std::uint8_t>(64, 27));
+    const auto offset = cache->append(pixels, false);
+    TileReader::Data held;
+    {
+        TileReader reader(cache);
+        reader.request({{{1, 0}, {4, 4}, offset, 64}});
+        held = wait_for(reader, {1, 0});
+        CHECK(held.data() == pixels.data());
+        CHECK(reader.stats().decode_ms == 0);
+        reader.request({{{2, 0}, {3, 4}, offset, 64}});
+        wait_reads(reader, 2);
+        CHECK_THROWS(reader.find({2, 0}));
+    }
+    pixels.reset();
+    cache.reset();
+    CHECK(held.size() == 64);
+    CHECK(held[63] == 27); // C block remains valid beyond reader and cache lifetime.
 }

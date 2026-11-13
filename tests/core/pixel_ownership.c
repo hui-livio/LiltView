@@ -1,6 +1,7 @@
 // Internal ownership checks: compare addresses, not just reconstructed colors.
 #include <stdio.h>
 #include <stdlib.h>
+#include <liltview/memory.h>
 #include "../../core/src/codecs/codec.h"
 
 #define CHECK(expr)                                                                                                              \
@@ -71,14 +72,19 @@ static void shared_slices(lv_core *core, lv_request *r, lv_input *input)
     const lv_pixel_view *view = lv_pixels_get_view(held);
     CHECK(view->data == decoded && view->stride_bytes == 97 * 4);
     CHECK(view->byte_count == 15 * 97 * 4 + 16 * 4);
-    lv_pixels_retain(held);
+    lv_memory_block *block = lv_pixels_acquire_memory(held);
+    CHECK(block && lv_memory_block_data(block) == view->data);
+    CHECK(lv_memory_block_size(block) == view->byte_count);
+    lv_memory_block_retain(block);
     lv_event_release(event);
     drain(core);
     lv_frame_release(&frame);
     CHECK(view->data[0] == 149); // Parent outlives decoder frame and every event.
     CHECK(lv_core_begin_shutdown(core) == LV_OK);
     CHECK(view->data[0] == 149); // Shutdown also preserves external references.
-    lv_pixels_release(held);
+    lv_memory_block_release(block);
+    CHECK(view->data[0] == 149);
+    lv_memory_block_release(block);
     CHECK(!core->live_pixels && !core->used && !core->reserved);
 }
 

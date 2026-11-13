@@ -2,6 +2,7 @@ liltview_require_imgui()
 liltview_require_spdlog()
 liltview_require_sdl3()
 liltview_require_app_headers()
+liltview_require_lz4()
 include(GNUInstallDirs)
 liltview_dependency_source(imgui backends/imgui_impl_sdl3.cpp imgui_source)
 add_subdirectory(renderer)
@@ -30,9 +31,9 @@ target_link_libraries(liltview_cli PRIVATE LiltView::cli11 PUBLIC LiltView::app_
 liltview_configure_cxx_target(liltview_cli)
 
 find_package(Threads REQUIRED)
-add_library(liltview_viewer STATIC platform/file_io.cpp viewer/viewer.cpp viewer/static_loading.cpp viewer/neighbors.cpp viewer/navigation.cpp viewer/prefetch.cpp viewer/animation_warmup.cpp viewer/animation_prepared.cpp viewer/animation.cpp viewer/playback.cpp viewer/details.cpp viewer/viewport.cpp viewer/tiles.cpp viewer/tile_preparation.cpp viewer/tile_reader.cpp)
+add_library(liltview_viewer STATIC platform/file_io.cpp viewer/viewer.cpp viewer/static_loading.cpp viewer/neighbors.cpp viewer/navigation.cpp viewer/prefetch.cpp viewer/animation_warmup.cpp viewer/animation_prepared.cpp viewer/animation.cpp viewer/playback.cpp viewer/details.cpp viewer/viewport.cpp viewer/tiles.cpp viewer/cache_codec.cpp viewer/memory_tile_cache.cpp viewer/tile_preparation.cpp viewer/tile_reader.cpp)
 target_include_directories(liltview_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog ZLIB::ZLIB Threads::Threads)
+target_link_libraries(liltview_viewer PUBLIC LiltView::core LiltView::renderer PRIVATE SDL3::SDL3-static spdlog::spdlog LiltView::lz4 Threads::Threads)
 liltview_configure_cxx_target(liltview_viewer)
 add_library(liltview_ui STATIC ui/shell.cpp ui/theme.cpp ui/status_bar.cpp ui/image_information.cpp ui/close_timing.cpp ui/window_chrome.cpp ui/navigation_buttons.cpp ui/dock_toolbar.cpp menu/imgui_menu.cpp)
 add_library(LiltView::ui ALIAS liltview_ui)
@@ -147,6 +148,10 @@ install(FILES "${PROJECT_SOURCE_DIR}/third_party/iguana/LICENSE-Boost"
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/LICENSE.md"
     "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/README.ijg"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libjpeg-turbo")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/dav1d-ref/LICENSE" "${PROJECT_SOURCE_DIR}/third_party/dav1d-ref/source.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/dav1d-ref")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/lz4/lib/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/lz4")
 foreach(codec libpng zlib plutosvg)
     install(FILES "${PROJECT_SOURCE_DIR}/third_party/${codec}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/${codec}")

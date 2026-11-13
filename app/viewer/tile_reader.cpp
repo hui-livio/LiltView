@@ -2,20 +2,19 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <exception>
-#include <fcntl.h>
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
-#include "platform/file_io.hpp"
 #include <unordered_map>
 #include <utility>
-#include <zlib.h>
+#include "cache_codec.hpp"
 
 namespace liltview
 {
@@ -29,25 +28,21 @@ std::uint64_t raw_bytes(const TileReader::Request &request)
         throw std::invalid_argument("Invalid cached tile read size");
     return size * 4;
 }
-std::vector<std::uint8_t> read_tile(int fd, const TileReader::Request &request)
+MemoryBlock read_tile(const MemoryTileCache &cache, const TileReader::Request &request, double &read_ms, double &decode_ms)
 {
+    const auto start = std::chrono::steady_clock::now();
     const auto bytes = raw_bytes(request);
-    if (request.offset > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) - request.bytes)
-        throw std::invalid_argument("Cached tile file offset overflow");
-    std::vector<std::uint8_t> compressed(request.bytes);
-    std::size_t at = 0;
-    while (at < compressed.size())
+    const auto compressed = cache.find(request.offset, request.bytes);
+    const auto read_done = std::chrono::steady_clock::now();
+    read_ms = std::chrono::duration<double, std::milli>(read_done - start).count();
+    if (!compressed->compressed)
     {
-        const auto count = platform::read_at(fd, compressed.data() + at,
-            std::min<std::size_t>(65536, compressed.size() - at), request.offset + at);
-        if (!count)
-            throw std::system_error(EIO, std::generic_category(), "Cannot read cached native tile");
-        at += static_cast<std::size_t>(count);
+        if (compressed->data.size() != bytes)
+            throw std::runtime_error("Invalid raw tile cache data size");
+        return compressed->data; // Retain the same C memory block, no decode or payload copy.
     }
-    std::vector<std::uint8_t> data(static_cast<std::size_t>(bytes));
-    uLongf length = data.size();
-    if (uncompress(data.data(), &length, compressed.data(), compressed.size()) != Z_OK || length != data.size())
-        throw std::system_error(EIO, std::generic_category(), "Invalid compressed native tile cache");
+    MemoryBlock data(decode_cache(compressed->data, static_cast<std::size_t>(bytes)));
+    decode_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - read_done).count();
     return data;
 }
 struct KeyHash
@@ -66,11 +61,12 @@ struct TileReader::State
         std::exception_ptr error;
         std::uint64_t touched;
     };
-    int fd;
+    std::shared_ptr<const MemoryTileCache> source;
     lv_wakeup_fn wake;
     void *userdata;
     std::uint64_t budget, used = 0, clock = 0, reads = 0, hits = 0;
     Loader loader;
+    double read_ms = 0, decode_ms = 0, max_decode_ms = 0;
     mutable std::mutex mutex;
     std::condition_variable changed;
     bool stopping = false;
@@ -81,12 +77,12 @@ struct TileReader::State
     std::exception_ptr fatal;
     std::thread worker;
 
-    State(int file, lv_wakeup_fn notify, void *user, std::uint64_t limit, Loader load) :
-        fd(file),
+    State(std::shared_ptr<const MemoryTileCache> cache, lv_wakeup_fn notify, void *user, std::uint64_t limit, Loader load) :
+        source(std::move(cache)),
         wake(notify),
         userdata(user),
         budget(limit),
-        loader(load ? std::move(load) : read_tile)
+        loader(std::move(load))
     {
     }
     void run() noexcept
@@ -105,14 +101,15 @@ struct TileReader::State
                     pending.pop_front();
                     active = request.key;
                 }
+                double io_elapsed = 0, decode_elapsed = 0;
                 Data data;
                 std::exception_ptr error;
                 try
                 {
-                    auto loaded = loader(fd, request);
+                    auto loaded = loader ? MemoryBlock(loader(request)) : read_tile(*source, request, io_elapsed, decode_elapsed);
                     if (loaded.size() != raw_bytes(request))
                         throw std::runtime_error("Cached tile loader returned an invalid size");
-                    data = std::make_shared<const std::vector<std::uint8_t>>(std::move(loaded));
+                    data = MemoryBlock(std::move(loaded));
                 } catch (...)
                 {
                     error = std::current_exception();
@@ -123,6 +120,9 @@ struct TileReader::State
                     if (stopping)
                         return;
                     ++reads;
+                    read_ms += io_elapsed;
+                    decode_ms += decode_elapsed;
+                    max_decode_ms = std::max(max_decode_ms, decode_elapsed);
                     const auto bytes = data ? data->size() : 0;
                     while (!cache.empty() && (used + bytes > budget || cache.size() >= 512))
                     {
@@ -151,25 +151,26 @@ struct TileReader::State
         }
     }
 };
-TileReader::TileReader(int fd, lv_wakeup_fn wake, void *userdata, std::uint64_t budget, Loader loader)
+TileReader::TileReader(std::shared_ptr<const MemoryTileCache> cache, lv_wakeup_fn wake, void *userdata, std::uint64_t budget, Loader loader)
 {
     if (!budget)
         throw std::invalid_argument("A native tile RAM cache needs a nonzero budget");
-    const int copy = platform::duplicate_descriptor(fd);
-    try
-    {
-        state_         = std::make_unique<State>(copy, wake, userdata, budget, std::move(loader));
-        state_->worker = std::thread([state = state_.get()] {
-            state->run();
-            state->finished.store(true, std::memory_order_release);
-            if (state->wake) state->wake(state->userdata);
-        });
-    } catch (...)
-    {
-        platform::close_descriptor(copy);
-        throw;
-    }
+    if (!cache) throw std::invalid_argument("Missing memory tile cache");
+    state_ = std::make_unique<State>(std::move(cache), wake, userdata, budget, std::move(loader));
+    state_->worker = std::thread([state = state_.get()] {
+        state->run();
+        // Large CPU cleanup is part of worker retirement, before done is visible.
+        state->source.reset();
+        {
+            std::lock_guard lock(state->mutex);
+            state->cache.clear();
+            state->used = 0;
+        }
+        state->finished.store(true, std::memory_order_release);
+        if (state->wake) state->wake(state->userdata);
+    });
 }
+
 void TileReader::cancel() noexcept
 {
     { std::lock_guard lock(state_->mutex); state_->stopping = true; state_->pending.clear(); }
@@ -180,7 +181,6 @@ TileReader::~TileReader()
 {
     cancel();
     state_->worker.join();
-    platform::close_descriptor(state_->fd);
 }
 void TileReader::request(const std::vector<Request> &requests)
 {
@@ -237,6 +237,7 @@ TileReader::Data TileReader::find(Key key)
 TileReader::Stats TileReader::stats() const
 {
     std::lock_guard lock(state_->mutex);
-    return {state_->reads, state_->hits, state_->used, state_->pending.size(), state_->cache.size(), state_->active.has_value()};
+    return {state_->reads, state_->hits, state_->used, state_->pending.size(), state_->cache.size(), state_->active.has_value(),
+        state_->read_ms, state_->decode_ms, state_->max_decode_ms};
 }
 } // namespace liltview

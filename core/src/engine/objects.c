@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../internal.h"
+#include <liltview/memory.h>
 
 bool lv_stopped(lv_core *core, lv_request *request)
 {
@@ -247,6 +248,21 @@ void lv_pixels_drop_locked(lv_pixels *pixels, bool outside)
 const lv_pixel_view *LV_CALL lv_pixels_get_view(const lv_pixels *pixels)
 {
     return pixels ? &pixels->view : nullptr;
+}
+static void LV_CALL release_pixel_memory(void *context, void *data, uint64_t size)
+{
+    (void)data;
+    (void)size;
+    lv_pixels_release(context);
+}
+lv_memory_block *LV_CALL lv_pixels_acquire_memory(lv_pixels *pixels)
+{
+    if (!pixels) return nullptr;
+    lv_pixels_retain(pixels);
+    lv_memory_block *block = lv_memory_block_wrap((void *)pixels->view.data, pixels->view.byte_count,
+                                                 release_pixel_memory, pixels);
+    if (!block) lv_pixels_release(pixels);
+    return block;
 }
 void LV_CALL lv_pixels_retain(lv_pixels *pixels)
 {

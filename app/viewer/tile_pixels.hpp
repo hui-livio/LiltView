@@ -3,10 +3,11 @@
 #include <cstring>
 #include <optional>
 #include <vector>
+#include <span>
 #include "renderer/renderer.hpp"
 namespace liltview::tile_pixels
 {
-inline std::optional<std::uint32_t> uniform_color(const std::vector<std::uint8_t> &data)
+inline std::optional<std::uint32_t> uniform_color(std::span<const std::uint8_t> data)
 {
     std::uint32_t first;
     std::memcpy(&first, data.data(), 4);
@@ -34,7 +35,7 @@ inline std::vector<std::uint8_t> solid(render::Size size, std::uint32_t color)
 
 // Built once during native decode, not on zoom. Alpha-correct box filtering
 // supplies texture LODs without keeping a separate full-image thumbnail.
-inline std::vector<std::uint8_t> reduce(const std::vector<std::uint8_t> &in, render::Size size)
+inline std::vector<std::uint8_t> reduce(std::span<const std::uint8_t> in, render::Size size)
 {
     const render::Size next{(size.width + 1) / 2, (size.height + 1) / 2};
     std::vector<std::uint8_t> out(static_cast<std::size_t>(next.width) * next.height * 4);

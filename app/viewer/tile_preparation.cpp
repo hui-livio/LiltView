@@ -3,15 +3,13 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
 #include <tuple>
 #include <utility>
-#include <zlib.h>
-#include "platform/file_io.hpp"
+#include "cache_codec.hpp"
 #include "tile_pixels.hpp"
 
 namespace liltview
@@ -24,8 +22,6 @@ double elapsed(Clock::time_point start)
     return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
 }
 constexpr std::uint64_t MiB       = 1024 * 1024;
-constexpr std::uint64_t max_cache = 16ULL * 1024 * MiB;
-std::atomic<std::uint64_t> all_cache_bytes{0};
 std::uint64_t output_cost(const PreparedTile &tile)
 {
     return tile.pixels.capacity() + tile.levels.capacity() * sizeof(PreparedLevel) + sizeof(PreparedTile);
@@ -34,36 +30,27 @@ using tile_pixels::reduce;
 using tile_pixels::solid;
 using tile_pixels::uniform_color;
 } // namespace
-void reserve_tile_cache(std::uint64_t bytes)
-{
-    auto used = all_cache_bytes.load();
-    do
-    {
-        if (bytes > max_cache - used)
-            throw render::Error(render::ErrorCode::memory_budget, "Active/retiring tile caches exceed 16 GiB");
-    } while (!all_cache_bytes.compare_exchange_weak(used, used + bytes));
-}
-void release_tile_cache(std::uint64_t bytes) noexcept
-{
-    all_cache_bytes.fetch_sub(bytes);
-}
-TilePreparation::TilePreparation(unsigned level, Mode mode, lv_wakeup_fn wake, void *userdata, std::uint64_t generation) :
+TilePreparation::TilePreparation(unsigned level, Mode mode, lv_wakeup_fn wake, void *userdata, std::uint64_t generation, unsigned workers, bool compression) :
     overview_level_(level),
+    worker_limit_(std::clamp(workers, 1u, 2u)),
+    direct_(level == 0 && mode == Mode::pipeline),
+    compression_(compression),
+    input_limit_(direct_ ? 4 : (level ? 8 : 2)),
     generation_(generation),
     mode_(mode),
     wake_(wake),
-    userdata_(userdata),
-    worker_([this] { run(); })
+    userdata_(userdata)
 {
+    stats_.workers = direct_ ? 0 : worker_limit_;
+    stats_.scratch_limit_bytes = direct_ ? 0 : worker_limit_ * 4 * MiB;
+    if (!direct_) worker_ = std::thread([this] { run(); });
 }
 TilePreparation::~TilePreparation()
 {
     cancel();
     if (worker_.joinable())
         worker_.join();
-    if (cache_)
-        std::fclose(cache_);
-    release_tile_cache(cache_reserved_);
+    cache_.reset();
 }
 void TilePreparation::wake() noexcept
 {
@@ -73,18 +60,48 @@ void TilePreparation::wake() noexcept
 bool TilePreparation::can_accept() const
 {
     std::lock_guard lock(mutex_);
-    return !finishing_ && !cancelled_ && !done_ && retained_ < 2;
+    return !finishing_ && !cancelled_ && !done_ && retained_ < input_limit_;
 }
 void TilePreparation::submit(const lv_region_info &region)
 {
+    if (direct_)
+    {
+        try
+        {
+            const auto bytes = static_cast<std::uint64_t>(region.rect.width) * region.rect.height * 4;
+            if (!bytes || bytes > MiB) throw render::Error(render::ErrorCode::memory_budget, "Invalid direct tile size");
+            PreparedTile tile;
+            tile.id = region.tile_id; tile.generation = generation_; tile.rect = region.rect;
+            tile.size = {region.rect.width, region.rect.height};
+            tile.stride_bytes = lv_pixels_get_view(region.pixels)->stride_bytes;
+            tile.pixels = MemoryBlock::pixels(region.pixels);
+            tile.borrowed = true;
+            std::lock_guard lock(mutex_);
+            if (cancelled_ || finishing_ || retained_ >= input_limit_) throw std::logic_error("Direct input admission");
+            output_bytes_ += output_cost(tile);
+            outputs_.push_back(std::move(tile));
+            ++retained_; ++stats_.tiles;
+            stats_.input_peak = std::max(stats_.input_peak, retained_);
+            stats_.output_peak = std::max(stats_.output_peak, output_bytes_);
+        }
+        catch (...)
+        {
+            record_error(std::current_exception());
+            std::lock_guard lock(mutex_);
+            outputs_.clear(); output_bytes_ = 0; retained_ = 0;
+            stats_.finished_at = Clock::now();
+            done_.store(true, std::memory_order_release);
+        }
+        return;
+    }
     // Retain before event release; the original backing may be larger than this view.
-    lv_pixels_retain(region.pixels);
-    std::shared_ptr<lv_pixels> pixels(region.pixels, lv_pixels_release);
+    auto pixels = MemoryBlock::pixels(region.pixels);
+    const auto stride = lv_pixels_get_view(region.pixels)->stride_bytes;
     {
         std::lock_guard lock(mutex_);
-        if (cancelled_ || finishing_ || retained_ >= 2)
+        if (cancelled_ || finishing_ || retained_ >= input_limit_)
             throw std::logic_error("Preparation input admission");
-        inputs_.push_back({region.tile_id, region.rect, std::move(pixels)});
+        inputs_.push_back({region.tile_id, region.rect, std::move(pixels), stride});
         ++retained_;
         stats_.input_peak = std::max(stats_.input_peak, retained_);
     }
@@ -95,6 +112,7 @@ void TilePreparation::finish()
     {
         std::lock_guard lock(mutex_);
         finishing_ = true;
+        if (direct_) { stats_.finished_at = Clock::now(); done_.store(true, std::memory_order_release); }
     }
     changed_.notify_all();
 }
@@ -103,6 +121,10 @@ void TilePreparation::cancel() noexcept
     {
         std::lock_guard lock(mutex_);
         cancelled_ = true;
+        if (direct_) {
+            outputs_.clear(); output_bytes_ = 0; retained_ = 0;
+            stats_.finished_at = Clock::now(); done_.store(true, std::memory_order_release);
+        }
     }
     changed_.notify_all();
 }
@@ -114,6 +136,7 @@ bool TilePreparation::pop(PreparedTile &result)
             return false;
         result = std::move(outputs_.front());
         outputs_.pop_front();
+        if (result.borrowed) --retained_;
         output_bytes_ -= output_cost(result);
     }
     changed_.notify_all();
@@ -134,86 +157,102 @@ std::exception_ptr TilePreparation::error() const
     std::lock_guard lock(mutex_);
     return error_;
 }
-std::FILE *TilePreparation::take_cache()
+std::shared_ptr<MemoryTileCache> TilePreparation::take_cache()
 {
     std::lock_guard lock(mutex_);
     if (!done_ || !outputs_.empty() || error_)
         throw std::logic_error("Cache transfer before preparation completed");
-    cache_reserved_ = 0; // The receiving Tiles now owns this reservation.
-    return std::exchange(cache_, nullptr);
+    return std::exchange(cache_, {});
 }
-void TilePreparation::run() noexcept
+unsigned TilePreparation::workers_for(const lv_image_info &info)
 {
-    const auto started = Clock::now();
-    Stats measured;
-    std::map<std::tuple<std::uint32_t, unsigned, unsigned>, std::vector<PreparedLevel>> uniform;
+    // Small jobs retain one worker. Work, not a 4K dimension cutoff, controls
+    // concurrency: >32 MiB RGBA and more than one tile may use two CPU workers.
+    const auto pixels = static_cast<std::uint64_t>(info.canvas.width) * info.canvas.height;
+    if (!info.tile_edge || pixels <= 8ULL * 1024 * 1024 || std::thread::hardware_concurrency() == 1)
+        return 1;
+    return info.canvas.width > info.tile_edge || info.canvas.height > info.tile_edge ? 2 : 1;
+}
+void TilePreparation::record_error(std::exception_ptr error) noexcept
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (!error_) error_ = error;
+        cancelled_ = true;
+    }
+    changed_.notify_all();
+    wake();
+}
+void TilePreparation::consume() noexcept
+{
+    bool active = false;
     try
     {
-        if (overview_level_)
-        {
-            const auto start = Clock::now();
-            std::filesystem::path directory;
-            if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
-                directory = xdg;
-            else if (const char *home = std::getenv("HOME"); home && *home)
-                directory = std::filesystem::path(home) / ".cache";
-            else
-                directory = std::filesystem::temp_directory_path();
-            directory /= "liltview";
-            std::filesystem::create_directories(directory);
-            cache_             = platform::temporary_file(directory);
-            measured.write_ms += elapsed(start);
-        }
+        CacheEncoder encoder;
+        // Per-worker immutable-level deduplication. Both tables and their LOD
+        // metadata are bounded; concurrent first occurrences may be duplicated.
+        std::map<std::tuple<std::uint32_t, unsigned, unsigned>, std::vector<PreparedLevel>> uniform;
         for (;;)
         {
             Input input;
             {
                 std::unique_lock lock(mutex_);
                 changed_.wait(lock, [&] { return cancelled_ || !inputs_.empty() || finishing_; });
-                if (cancelled_ || (inputs_.empty() && finishing_))
-                    break;
+                if (cancelled_ || (inputs_.empty() && finishing_)) break;
                 input = std::move(inputs_.front());
                 inputs_.pop_front();
+                active = true;
+                stats_.worker_peak = std::max(stats_.worker_peak, ++active_workers_);
             }
+            Stats measured;
             PreparedTile result;
-            result.id         = input.id;
+            result.id = input.id;
             result.generation = generation_;
-            result.rect       = input.rect;
+            result.rect = input.rect;
             render::Size size{input.rect.width, input.rect.height};
-            auto start         = Clock::now();
-            const auto &pixels = *lv_pixels_get_view(input.pixels.get());
-            // A Core tile must fit this fixed scratch bound; never allocate an unbounded full-image copy.
+            auto start = Clock::now();
+            const auto stride = input.stride_bytes;
             const auto data_bytes = static_cast<std::uint64_t>(size.width) * size.height * 4;
-            if (data_bytes > MiB)
+            if (!data_bytes || data_bytes > MiB)
                 throw render::Error(render::ErrorCode::memory_budget, "Preparation tile exceeds 512px RGBA scratch");
-            std::vector<std::uint8_t> data(static_cast<std::size_t>(data_bytes));
-            for (unsigned y = 0; y < size.height; ++y)
-                std::copy_n(pixels.data + y * pixels.stride_bytes, static_cast<std::size_t>(size.width) * 4,
-                            data.data() + static_cast<std::size_t>(y) * size.width * 4);
-            input.pixels.reset(); // Release Core backing before waiting for output space or COMPLETE.
+            MemoryBlock data;
+            // Contiguous input is referenced directly. Only strided compression
+            // input and batch diagnostics need a packed copy; UI accepts stride.
+            const bool direct_reference = !cache_ && mode_ == Mode::pipeline;
+            if (direct_reference || stride == static_cast<std::uint64_t>(size.width) * 4)
+                data = input.pixels;
+            else
             {
-                std::lock_guard lock(mutex_);
-                --retained_;
+                std::vector<std::uint8_t> packed(static_cast<std::size_t>(data_bytes));
+                for (unsigned y = 0; y < size.height; ++y)
+                    std::copy_n(input.pixels.data() + y * stride, static_cast<std::size_t>(size.width) * 4,
+                                packed.data() + static_cast<std::size_t>(y) * size.width * 4);
+                data = MemoryBlock(std::move(packed));
             }
-            wake();
+            // Batch waits for COMPLETE; it must not pin all Core backing buffers.
+            if (!cache_ && mode_ == Mode::batch && data.capacity() == 0)
+                data = MemoryBlock(std::vector<std::uint8_t>(data.begin(), data.begin() + static_cast<std::ptrdiff_t>(data_bytes)));
+            result.borrowed = direct_reference;
+            result.stride_bytes = direct_reference ? stride : 0;
+            input.pixels.reset();
             measured.pack_ms += elapsed(start);
             if (!cache_)
             {
-                result.size   = size;
+                result.size = size;
                 result.pixels = std::move(data);
             }
             else
             {
-                start             = Clock::now();
-                const auto color  = uniform_color(data);
-                measured.lod_ms  += elapsed(start);
-                const auto key    = std::make_tuple(color.value_or(0), size.width, size.height);
-                const auto found  = color ? uniform.find(key) : uniform.end();
+                start = Clock::now();
+                const auto color = uniform_color(data);
+                measured.lod_ms += elapsed(start);
+                const auto key = std::make_tuple(color.value_or(0), size.width, size.height);
+                const auto found = color ? uniform.find(key) : uniform.end();
                 if (found != uniform.end())
                 {
                     result.levels = found->second;
-                    result.level  = std::min(overview_level_, static_cast<unsigned>(result.levels.size() - 1));
-                    result.size   = result.levels[result.level].size;
+                    result.level = std::min(overview_level_, static_cast<unsigned>(result.levels.size() - 1));
+                    result.size = result.levels[result.level].size;
                     result.pixels = solid(result.size, *color);
                 }
                 else
@@ -222,87 +261,108 @@ void TilePreparation::run() noexcept
                     {
                         {
                             std::lock_guard lock(mutex_);
-                            if (cancelled_)
-                                break;
+                            if (cancelled_) break;
                         }
                         start = Clock::now();
-                        std::vector<std::uint8_t> compressed(compressBound(static_cast<uLong>(data.size())));
-                        uLongf bytes = static_cast<uLongf>(compressed.size());
-                        if (compress2(compressed.data(), &bytes, data.data(), static_cast<uLong>(data.size()), Z_BEST_SPEED) !=
-                            Z_OK)
-                            throw std::runtime_error("Cannot compress prepared tile");
-                        measured.compress_ms += elapsed(start);
-                        if (measured.cache_bytes + bytes > max_cache)
-                            throw render::Error(render::ErrorCode::memory_budget, "Prepared cache exceeds 16 GiB");
-                        reserve_tile_cache(bytes);
-                        cache_reserved_ += bytes;
-                        start            = Clock::now();
-                        if (std::fwrite(compressed.data(), 1, bytes, cache_) != bytes)
-                            throw std::system_error(errno ? errno : EIO, std::generic_category(), "Cannot write prepared cache");
-                        measured.write_ms += elapsed(start);
-                        result.levels.push_back({size, measured.cache_bytes, static_cast<std::uint32_t>(bytes)});
-                        measured.cache_bytes += bytes;
+                        // A long-lived raw cache must not pin the bounded Core pool.
+                        // Only borrowed contiguous Core data needs this ownership copy;
+                        // packed input and generated LOD allocations are shared as-is.
+                        MemoryBlock stored;
+                        if (compression_)
+                        {
+                            stored = encoder.encode(data);
+                            measured.compress_ms += elapsed(start);
+                        }
+                        else
+                        {
+                            if (data.capacity() == 0)
+                                data = MemoryBlock(std::vector<std::uint8_t>(data.begin(), data.end()));
+                            stored = data;
+                            measured.pack_ms += elapsed(start);
+                        }
+                        {
+                            // Exactly one writer at a time; levels may finish out of
+                            // order and are addressed by immutable offsets, not tile order.
+                            std::lock_guard write_lock(cache_mutex_);
+                            const auto bytes = stored.size();
+                            start = Clock::now();
+                            const auto offset = cache_->append(stored, compression_);
+                            measured.store_ms += elapsed(start); // RAM insertion, never file I/O.
+                            result.levels.push_back({size, offset, static_cast<std::uint32_t>(bytes)});
+                            measured.cache_bytes += bytes;
+                        }
                         if (level == overview_level_ || (size.width == 1 && size.height == 1 && result.pixels.empty()))
                         {
-                            result.level  = level;
-                            result.size   = size;
+                            result.level = level;
+                            result.size = size;
                             result.pixels = data;
                         }
-                        if (size.width == 1 && size.height == 1)
-                            break;
+                        if (size.width == 1 && size.height == 1) break;
                         start = Clock::now();
                         const render::Size next{(size.width + 1) / 2, (size.height + 1) / 2};
-                        data             = color ? solid(next, *color) : reduce(data, size);
-                        size             = next;
+                        data = color ? solid(next, *color) : reduce(data, size);
+                        size = next;
                         measured.lod_ms += elapsed(start);
                     }
-                    if (color && uniform.size() < 256)
-                        uniform.emplace(key, result.levels);
+                    if (color && uniform.size() < 256) uniform.emplace(key, result.levels);
                 }
             }
+            data.reset();
             {
                 std::unique_lock lock(mutex_);
-                const auto limit = mode_ == Mode::batch ? 64 * MiB : 8 * MiB;
+                if (!result.borrowed) --retained_;
+                changed_.notify_all();
+                stats_.pack_ms += measured.pack_ms;
+                stats_.lod_ms += measured.lod_ms;
+                stats_.compress_ms += measured.compress_ms;
+                stats_.store_ms += measured.store_ms;
+                stats_.cache_bytes += measured.cache_bytes;
+                const auto limit = mode_ == Mode::batch ? 80 * MiB : 8 * MiB;
                 if (output_cost(result) > limit || (mode_ == Mode::batch && output_bytes_ + output_cost(result) > limit))
-                    throw render::Error(render::ErrorCode::memory_budget, "Batch diagnostic staging exceeds 64 MiB");
+                    throw render::Error(render::ErrorCode::memory_budget, "Batch diagnostic staging exceeds 80 MiB");
                 changed_.wait(lock, [&] { return cancelled_ || output_bytes_ + output_cost(result) <= limit; });
-                if (cancelled_)
-                    break;
+                if (cancelled_) break;
                 output_bytes_ += output_cost(result);
                 outputs_.push_back(std::move(result));
-                ++measured.tiles;
-                const auto input_peak = stats_.input_peak;
-                measured.output_peak  = std::max(measured.output_peak, output_bytes_);
-                stats_                = measured;
-                stats_.input_peak     = input_peak;
+                ++stats_.tiles;
+                stats_.output_peak = std::max(stats_.output_peak, output_bytes_);
+                --active_workers_;
+                active = false;
             }
             wake();
         }
-        if (cache_)
-        {
-            const auto start = Clock::now();
-            if (std::fflush(cache_) != 0)
-                throw std::system_error(errno ? errno : EIO, std::generic_category(), "Cannot flush prepared cache");
-            measured.write_ms += elapsed(start);
-        }
-    } catch (...)
+    }
+    catch (...) { record_error(std::current_exception()); }
+    if (active)
     {
         std::lock_guard lock(mutex_);
-        error_ = std::current_exception();
+        --active_workers_;
     }
-    bool discard = false;
+}
+void TilePreparation::run() noexcept
+{
+    const auto started = Clock::now();
+    std::thread sibling;
+    try
+    {
+        {
+            std::lock_guard lock(mutex_);
+            stats_.workers = worker_limit_;
+            stats_.scratch_limit_bytes = worker_limit_ * 4 * MiB;
+        }
+        if (overview_level_) cache_ = std::make_shared<MemoryTileCache>();
+        if (worker_limit_ > 1) sibling = std::thread([this] { consume(); });
+        consume();
+    }
+    catch (...) { record_error(std::current_exception()); }
+    // Never join on the UI thread; all CPU locals are destroyed before done.
+    if (sibling.joinable()) sibling.join();
+    bool discard;
     {
         std::lock_guard lock(mutex_);
         discard = cancelled_ || static_cast<bool>(error_);
     }
-    if (discard && cache_)
-    {
-        std::fclose(cache_);
-        cache_ = nullptr;
-        release_tile_cache(cache_reserved_);
-        cache_reserved_ = 0;
-    }
-    uniform.clear(); // Finish potentially large CPU destruction before publishing done.
+    if (discard) cache_.reset();
     {
         std::lock_guard lock(mutex_);
         inputs_.clear();
@@ -312,10 +372,8 @@ void TilePreparation::run() noexcept
             outputs_.clear();
             output_bytes_ = 0;
         }
-        measured.input_peak  = stats_.input_peak;
-        measured.worker_ms   = elapsed(started);
-        measured.finished_at = Clock::now();
-        stats_               = measured;
+        stats_.worker_ms = elapsed(started);
+        stats_.finished_at = Clock::now();
         done_.store(true, std::memory_order_release);
     }
     wake();

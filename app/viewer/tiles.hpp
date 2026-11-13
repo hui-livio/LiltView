@@ -13,7 +13,7 @@
 namespace liltview
 {
 // One immutable native-resolution scene. Small scenes stay on the GPU; large
-// scenes keep compressed native tiles/mip levels in an anonymous local cache.
+// scenes keep raw or LZ4 native tiles/mip levels in a bounded memory cache.
 // Camera changes never submit a decode or resample image contents.
 class Tiles
 {
@@ -33,10 +33,10 @@ public:
     void begin(const lv_image_info &, bool defer_cache = false);
     unsigned overview_level() const { return overview_level_; }
     void install(PreparedTile);
-    void adopt_cache(std::FILE *file, std::uint64_t bytes) { cache_ = file; cache_bytes_ = bytes; cache_dirty_ = false; }
+    void adopt_cache(std::shared_ptr<MemoryTileCache> cache, std::uint64_t bytes) { cache_ = std::move(cache); cache_bytes_ = bytes; }
     void upload(const lv_region_info &);
     void clear() noexcept;
-    bool retire_ready() noexcept { if (!reader_) return true; reader_->cancel(); return reader_->done(); }
+    bool retire_ready() noexcept;
     void release_details() noexcept;
     void retry_reads()
     {
@@ -120,7 +120,7 @@ private:
     void *userdata_;
     std::unique_ptr<TileReader> reader_;
     std::unordered_set<std::size_t> resident_, preserved_;
-    bool cache_dirty_ = false, upload_pending_ = false;
+    bool upload_pending_ = false;
     std::uint64_t gpu_restores_ = 0;
     std::size_t indexed_tiles_  = 0;
     lv_image_info info_{};
@@ -128,7 +128,7 @@ private:
     std::vector<Atlas> atlases_;
     std::map<std::tuple<std::uint32_t, unsigned, unsigned>, std::vector<Level>> uniform_levels_;
     unsigned atlas_edge_ = 0, atlas_columns_ = 0;
-    std::FILE *cache_          = nullptr;
+    std::shared_ptr<MemoryTileCache> cache_;
     std::uint64_t cache_bytes_ = 0, clock_ = 0;
     std::size_t ready_       = 0;
     unsigned overview_level_ = 0;

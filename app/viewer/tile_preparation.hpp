@@ -2,7 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <cstdio>
+#include "memory_tile_cache.hpp"
 #include <deque>
 #include <exception>
 #include <liltview/core.h>
@@ -30,11 +30,14 @@ struct PreparedTile
     unsigned level = 0;
     render::Size size{};
     std::vector<PreparedLevel> levels;
-    std::vector<std::uint8_t> pixels;
+    MemoryBlock pixels;
+    std::uint64_t stride_bytes = 0;
+    bool borrowed = false;
 };
 // CPU-only first-load pipeline. All SDL/ImGui/texture work stays on the main thread.
-// At most two retained Core inputs (including the active input), bounded output,
-// and one tile's scratch. Cancellation wakes both queue waits; no UI-thread join.
+// At most eight retained Core inputs (four for direct upload), bounded output,
+// <=2 CPU workers, each with <=4 MiB conservative scratch allowance.
+// Cancellation wakes every wait; joining the sibling happens on the root worker.
 class TilePreparation
 {
 public:
@@ -45,12 +48,15 @@ public:
     };
     struct Stats
     {
-        double pack_ms = 0, lod_ms = 0, compress_ms = 0, write_ms = 0, worker_ms = 0;
+        double pack_ms = 0, lod_ms = 0, compress_ms = 0, store_ms = 0, worker_ms = 0;
         std::uint64_t tiles = 0, cache_bytes = 0, output_peak = 0;
         std::size_t input_peak = 0;
+        unsigned workers = 1, worker_peak = 0;
+        std::uint64_t scratch_limit_bytes = 4ULL * 1024 * 1024;
         std::chrono::steady_clock::time_point finished_at{};
     };
-    TilePreparation(unsigned overview_level, Mode, lv_wakeup_fn = nullptr, void * = nullptr, std::uint64_t generation = 0);
+    TilePreparation(unsigned overview_level, Mode, lv_wakeup_fn = nullptr, void * = nullptr, std::uint64_t generation = 0, unsigned workers = 1, bool compression = true);
+    static unsigned workers_for(const lv_image_info &);
     ~TilePreparation();
     std::uint64_t generation() const
     {
@@ -68,22 +74,30 @@ public:
     bool drained() const;
     Stats stats() const;
     std::exception_ptr error() const;
-    std::FILE *take_cache(); // Only after successful done + drained; transfers ownership.
+    std::shared_ptr<MemoryTileCache> take_cache(); // Only after successful done + drained; transfers ownership.
 private:
     struct Input
     {
         std::uint64_t id;
         lv_rect_u32 rect;
-        std::shared_ptr<lv_pixels> pixels;
+        MemoryBlock pixels;
+        std::uint64_t stride_bytes;
     };
     void run() noexcept;
     void wake() noexcept;
+    void consume() noexcept;
+    void record_error(std::exception_ptr) noexcept;
     unsigned overview_level_;
+    unsigned worker_limit_, active_workers_ = 0;
+    bool direct_;
+    bool compression_;
+    std::size_t input_limit_;
     std::uint64_t generation_;
     Mode mode_;
     lv_wakeup_fn wake_;
     void *userdata_;
     mutable std::mutex mutex_;
+    std::mutex cache_mutex_;
     std::condition_variable changed_;
     std::deque<Input> inputs_;
     std::deque<PreparedTile> outputs_;
@@ -93,8 +107,7 @@ private:
     std::atomic<bool> done_{false};
     std::exception_ptr error_;
     Stats stats_;
-    std::FILE *cache_             = nullptr;
-    std::uint64_t cache_reserved_ = 0;
+    std::shared_ptr<MemoryTileCache> cache_;
     std::thread worker_;
 };
 } // namespace liltview

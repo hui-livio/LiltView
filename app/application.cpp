@@ -135,6 +135,7 @@ private:
         viewer_ = std::make_unique<Viewer>(*renderer_);
         viewer_->set_static_upload_mode(settings_.static_upload_mode == StaticUploadMode::batch ?
             Viewer::StaticUploadMode::batch : Viewer::StaticUploadMode::pipeline);
+        viewer_->set_static_cache_compression(settings_.static_cache_compression);
         if (!options.image_path.empty())
             viewer_->open(utf8_path(options.image_path));
         smoke_started_ = SDL_GetTicks();

@@ -94,6 +94,7 @@ int main(int argc, char **argv)
             {
                 Viewer viewer(*renderer);
                 viewer.set_static_upload_mode(batch ? Viewer::StaticUploadMode::batch : Viewer::StaticUploadMode::pipeline);
+                viewer.set_static_cache_compression(settings.static_cache_compression);
                 std::vector<double> work, pump, submit, present, event_delay;
                 std::ofstream frames(std::string(argv[3]) + ".frames.csv");
                 frames << "frame,pump_ms,layout_ms,submit_ms,present_ms,work_ms,loading,tiles\n";
@@ -197,6 +198,39 @@ int main(int argc, char **argv)
                     hash ^= byte;
                     hash *= 1099511628211ULL;
                 }
+                // Independent full-image rendering probes, outside first-load timing.
+                std::vector<double> fit_submit, fit_present, fit_work, actual_work;
+                const auto probe_frame = [&](bool fit) {
+                    const auto tick = Clock::now();
+                    SDL_Event e;
+                    while (SDL_PollEvent(&e)) ImGui_ImplSDL3_ProcessEvent(&e);
+                    viewer.pump();
+                    renderer->begin_frame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame();
+                    const auto &io = ImGui::GetIO();
+                    ImGui::SetNextWindowPos({0, 0}); ImGui::SetNextWindowSize(io.DisplaySize);
+                    ImGui::Begin("loading", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
+                    viewer.draw({0, 0}, {io.DisplaySize.x, io.DisplaySize.y}, io.DisplayFramebufferScale.x, false);
+                    ImGui::End(); ImGui::Render();
+                    auto phase = Clock::now();
+                    renderer->render_frame(ImGui::GetDrawData());
+                    const auto draw_ms = since(phase);
+                    phase = Clock::now(); renderer->present();
+                    const auto present_ms = since(phase);
+                    if (fit) { fit_submit.push_back(draw_ms); fit_present.push_back(present_ms); fit_work.push_back(since(tick)); }
+                    else actual_work.push_back(since(tick));
+                    if (cadence > 0) std::this_thread::sleep_until(tick +
+                        std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double, std::milli>(cadence)));
+                };
+                const auto load_usage = process_usage();
+                for (unsigned i = 0; i < 60; ++i) probe_frame(true);
+                const auto zoom_start = Clock::now();
+                viewer.actual_size();
+                do {
+                    probe_frame(false);
+                    if (since(zoom_start) > 10000) throw std::runtime_error("Actual-size restore timeout");
+                } while (!viewer.detail_ready());
+                const auto actual_ready_ms = since(zoom_start);
+                for (unsigned i = 0; i < 30; ++i) probe_frame(false);
                 const auto &t = viewer.static_load_stats();
                 int interval  = -1;
                 SDL_GetRenderVSync(SDL_GetRenderer(window), &interval);
@@ -221,7 +255,12 @@ int main(int argc, char **argv)
                 field("pack_ms", t.preparation.pack_ms);
                 field("lod_ms", t.preparation.lod_ms);
                 field("compress_ms", t.preparation.compress_ms);
-                field("write_ms", t.preparation.write_ms);
+                field("store_ms", t.preparation.store_ms);
+                field("cache_compression", settings.static_cache_compression);
+                field("cache_disk_bytes", 0);
+                field("workers", t.preparation.workers);
+                field("worker_peak", t.preparation.worker_peak);
+                field("scratch_limit_bytes", t.preparation.scratch_limit_bytes);
                 field("input_peak", t.preparation.input_peak);
                 field("output_peak", t.preparation.output_peak);
                 field("cache_bytes", t.preparation.cache_bytes);
@@ -233,6 +272,14 @@ int main(int argc, char **argv)
                 field("work_p99_ms", percentile(work, .99));
                 field("work_max_ms", percentile(work, 1));
                 field("pump_max_ms", percentile(pump, 1));
+                field("submit_p50_ms", percentile(submit, .50));
+                field("submit_p95_ms", percentile(submit, .95));
+                field("present_p50_ms", percentile(present, .50));
+                field("present_p95_ms", percentile(present, .95));
+                const auto cache_stats = viewer.cache_stats();
+                field("cache_read_ms", cache_stats.ram.read_ms);
+                field("cache_decode_ms", cache_stats.ram.decode_ms);
+                field("cache_max_decode_ms", cache_stats.ram.max_decode_ms);
                 field("submit_max_ms", percentile(submit, 1));
                 field("present_max_ms", percentile(present, 1));
                 field("event_p95_ms", percentile(event_delay, .95));
@@ -240,6 +287,15 @@ int main(int argc, char **argv)
                 const auto usage = process_usage();
                 field("peak_rss_bytes", usage.first);
                 field("process_cpu_ms", usage.second);
+                field("load_peak_rss_bytes", load_usage.first);
+                field("steady_fit_submit_p50_ms", percentile(fit_submit, .50));
+                field("steady_fit_submit_p95_ms", percentile(fit_submit, .95));
+                field("steady_fit_present_p95_ms", percentile(fit_present, .95));
+                field("steady_fit_work_p95_ms", percentile(fit_work, .95));
+                field("steady_fit_work_max_ms", percentile(fit_work, 1));
+                field("actual_ready_ms", actual_ready_ms);
+                field("actual_work_p95_ms", percentile(actual_work, .95));
+                field("actual_work_max_ms", percentile(actual_work, 1));
                 field("frames", count);
                 field("partial_frames", partial);
                 field("image_bytes", renderer->capabilities().image_bytes);

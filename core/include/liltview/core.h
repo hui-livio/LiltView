@@ -34,6 +34,7 @@ extern "C" {
 typedef struct lv_core lv_core;
 typedef struct lv_event lv_event;
 typedef struct lv_pixels lv_pixels;
+typedef struct lv_memory_block lv_memory_block;
 typedef uint64_t lv_request_id;
 typedef uint64_t lv_animation_id;
 #define LV_ANIMATION_NONE UINT64_C(0)
@@ -537,6 +538,12 @@ LV_API lv_status LV_CALL lv_core_close_animation(lv_core *core, lv_animation_id 
 LV_API const lv_event_view *LV_CALL lv_event_get_view(const lv_event *event);
 LV_API void LV_CALL lv_event_release(lv_event *event);
 LV_API const lv_pixel_view *LV_CALL lv_pixels_get_view(const lv_pixels *pixels);
+/* Owned reference to the existing pixel bytes; no copy. Pins the original Core
+ * allocation (including any shared backing) until the last block release.
+ * Shutdown/join preserve these references; release before Core destroy,
+ * just like references obtained through lv_pixels_retain.
+ * Size/layout/format remain in lv_pixel_view, not in the generic byte block. */
+LV_API lv_memory_block *LV_CALL lv_pixels_acquire_memory(lv_pixels *pixels);
 LV_API void LV_CALL lv_pixels_retain(lv_pixels *pixels);
 LV_API void LV_CALL lv_pixels_release(lv_pixels *pixels);
 

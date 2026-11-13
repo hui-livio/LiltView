@@ -7,10 +7,11 @@
 #include <memory>
 #include <vector>
 #include "renderer/renderer.hpp"
+#include "memory_tile_cache.hpp"
 
 namespace liltview
 {
-// Disk reads and decompression only. No source codec, GL or viewer state is
+// In-memory cache lookup and decompression only. No source codec or viewer state is
 // accessed by this worker. Jobs refer to immutable, already-generated LODs.
 class TileReader
 {
@@ -33,13 +34,14 @@ public:
         std::uint64_t reads = 0, hits = 0, cached_bytes = 0;
         std::size_t queued = 0, entries = 0;
         bool active = false;
+        double read_ms = 0, decode_ms = 0, max_decode_ms = 0;
     };
-    using Data                                    = std::shared_ptr<const std::vector<std::uint8_t>>;
-    using Loader                                  = std::function<std::vector<std::uint8_t>(int, const Request &)>;
+    using Data                                    = MemoryBlock;
+    using Loader                                  = std::function<std::vector<std::uint8_t>(const Request &)>;
     static constexpr std::size_t max_requests     = 64;
     static constexpr std::uint64_t default_budget = 32ULL * 1024 * 1024;
 
-    TileReader(int fd, lv_wakeup_fn = nullptr, void *userdata = nullptr, std::uint64_t budget = default_budget, Loader = {});
+    TileReader(std::shared_ptr<const MemoryTileCache> cache, lv_wakeup_fn = nullptr, void *userdata = nullptr, std::uint64_t budget = default_budget, Loader = {});
     ~TileReader();
     TileReader(const TileReader &)            = delete;
     TileReader &operator=(const TileReader &) = delete;

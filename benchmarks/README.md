@@ -13,7 +13,7 @@ build/app-release/tests/liltview_viewer_benchmark /path/to/large.png 1600 1000
 LILTVIEW_BENCH_DIRECT=1 build/app-release/tests/liltview_viewer_benchmark /path/to/large.png 1600 1000
 ```
 
-基准记录实际 SDL / GL 驱动、swap interval、pump / prepare / upload / submit / present、帧分位数、目标完成延迟、读取 / 恢复和资源计数。隐藏窗口、关闭 VSync，不含截图读回或应用菜单；帧间测试节流计入阶段总时间，不计单帧。具体矩阵与采集口径见下文。
+基准记录实际 SDL_Render 驱动、swap interval、pump / prepare / upload / submit / present、帧分位数、目标完成延迟、读取 / 恢复和资源计数。隐藏窗口、关闭 VSync，不含截图读回或应用菜单；帧间测试节流计入阶段总时间，不计单帧。具体矩阵与采集口径见下文。
 
 ## 当前输入与新增范围
 
@@ -135,3 +135,18 @@ python benchmarks/loading_compare.py --exe build/msvc-release/app/liltview_loadi
 已完成的 30+30 主组与 10+10 吞吐诊断组数据见 [2026-11-13 实测报告](results/2026-11-13-first-load-8k/README.md)。
 
 已有本地图片可直接使用 `liltview_loading_benchmark IMAGE SETTINGS_YAML REPORT_JSON [VSYNC=1] [FRAME_MS=16.667] [SCREENSHOT_PPM]`，可选截图在首屏计时结束后保存；不要使用会生成固定 8K 输入的 Python runner 代替任意图片测试。
+
+## 内存缓存压缩开启 / 关闭对照
+
+使用同一个 Release `liltview_loading_benchmark`，只修改隐藏配置 `static_cache_compression`。Windows 示例：
+
+```powershell
+python benchmarks/cache_compression_compare.py --exe build/msvc-release/app/liltview_loading_benchmark.exe --output build/cache-compression-4k-8k-16k --source D:/share/images/1moban.png --runs 5
+# 已有输入时使用 --inputs <包含 4k.png / 8k.png / 16k.png 的目录>，不再传 --source
+```
+
+`--source` 需 Pillow，并要求本地可信源至少 15360×8640，最多 240MP；生成居中、不缩放的 3840×2160、7680×4320、15360×8640 PNG。个人图片及裁图只留在 build，不提交。每组使用独立进程，串行交替开关顺序，不主动清 OS 文件缓存，记录实际 driver / VSync / cadence。不要同时运行构建或其他基准。
+
+输出逐轮 JSON / frame CSV / 日志和 summary.json，校验两模式 framebuffer hash 一致、无半成品显示、worker / 队列有界、关闭模式压缩与解压时间均为零。主要比较完整首屏 ready / present 返回，另记录 FIT 60 帧、100% 恢复与后续 30 帧、峰值 RSS、容量和阶段累计。`load_peak_rss_bytes` 在渲染探针前采样；`peak_rss_bytes` / CPU 包含后续探针。worker 阶段时间可重叠，不能相加解释端到端时延。
+
+当前同源 PNG 开关结果见 [2026-11-13 报告](results/2026-11-13-cache-compression/README.md)。这不是旧版 zlib / 磁盘实现与新版的同条件 A/B；也不代表所有格式、不同硬件或冷磁盘秒开。

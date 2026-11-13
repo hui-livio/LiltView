@@ -37,6 +37,7 @@ public:
     void pump();
     using StaticUploadMode = TilePreparation::Mode;
     void set_static_upload_mode(StaticUploadMode mode) { if (loading_) throw std::logic_error("Cannot change upload mode during a load"); static_mode_ = mode; }
+    void set_static_cache_compression(bool enabled) { if (loading_) throw std::logic_error("Cannot change cache compression during a load"); static_cache_compression_ = enabled; }
     void prepare_loading_view() { if (loading_) set_viewport(canvas_min_, canvas_max_, canvas_density_); }
     struct StaticLoadStats
     {
@@ -188,6 +189,7 @@ private:
     void commit_static_if_ready();
     double load_elapsed_ms() const;
     StaticUploadMode static_mode_ = StaticUploadMode::pipeline;
+    bool static_cache_compression_ = true;
     StaticLoadStats static_stats_;
     std::chrono::steady_clock::time_point load_started_;
     std::unique_ptr<TilePreparation> preparation_, retired_preparation_;

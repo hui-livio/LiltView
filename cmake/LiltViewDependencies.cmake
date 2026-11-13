@@ -19,6 +19,16 @@ function(liltview_require_app_headers)
     target_include_directories(liltview_iguana SYSTEM INTERFACE "${vendor}/iguana/include")
 endfunction()
 
+function(liltview_require_lz4)
+    if(TARGET LiltView::lz4)
+        return()
+    endif()
+    liltview_dependency_source(lz4 lib/lz4.c source)
+    add_library(liltview_lz4 STATIC "${source}/lib/lz4.c" "${source}/lib/xxhash.c")
+    target_include_directories(liltview_lz4 SYSTEM PUBLIC "${source}/lib")
+    add_library(LiltView::lz4 ALIAS liltview_lz4)
+endfunction()
+
 # CMake only reads local sources. Git gitlinks are the submodule version lock.
 function(liltview_dependency_source name marker output)
     file(READ "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/dependencies.json" manifest)

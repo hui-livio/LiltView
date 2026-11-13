@@ -1,0 +1,23 @@
+[
+  {
+    "label": "4k",
+    "width": 3840,
+    "height": 2160,
+    "bytes": 15289780,
+    "sha256": "3650ec2489c6e0391cbd3fef952ceff0fb935c207b7fb458761f05d65ffab7f3"
+  },
+  {
+    "label": "8k",
+    "width": 7680,
+    "height": 4320,
+    "bytes": 58479289,
+    "sha256": "c3d9e383594f0ef45e41f1b79a91225293c64d1c20f810e88a1237a88cd3f3e2"
+  },
+  {
+    "label": "16k",
+    "width": 15360,
+    "height": 8640,
+    "bytes": 235671659,
+    "sha256": "c33b3861369afe04f5f0906f2e9a67b236d1f06e158bb5c61463d287a2fe12bc"
+  }
+]

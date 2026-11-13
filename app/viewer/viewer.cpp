@@ -349,7 +349,7 @@ void Viewer::consume(const lv_event_view &view)
         // GPU residency prevent admission of the replacement native scene.
         scene_.release_details();
         pending_scene_.begin(pending_info_, true);
-        preparation_ = std::make_unique<TilePreparation>(pending_scene_.overview_level(), static_mode_, wake_core, nullptr, generation_);
+        preparation_ = std::make_unique<TilePreparation>(pending_scene_.overview_level(), static_mode_, wake_core, nullptr, generation_, TilePreparation::workers_for(pending_info_), static_cache_compression_);
     }
     if (current && view.type == LV_EVENT_REGION_READY)
     {

@@ -24,6 +24,8 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `giflib/` | 6.1.3 | `edff4aed17f857442ab0cac31566572ba08f93d3` | submodule、静态解码库，编码库仅测试 |
 | `libtiff/` | v4.7.2 | `d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d` | submodule、裁剪版静态库 |
 | `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
+| `lz4/` | v1.10.0 | `ebb370ca83af193212df4dcbadcc5d87bc0de2f0` | submodule、仅 lz4.c / xxhash.c 静态库 |
+| `dav1d-ref/` | 引用生命周期受控子集 | `39834d7f71c85a9c555f2ddd7a7add6d671750de` | C11 头文件抽取 / 改编，BSD-2-Clause；非完整 decoder |
 | `iguana/` | 2026-08-12 快照 | `2c05e011942c652d020a6782d026c2378c42008a` | YAML 及传递头文件直接保存 |
 
 初始化脚本读取 `dependencies.json`，其发布页字段记录版本来源。基线不是“最新版本”声明，升级时需同时审阅 manifest 和 gitlink 改动。
@@ -37,7 +39,7 @@ SVG 当前只使用上述 PlutoSVG / PlutoVG 基础静态 profile，复杂 SVG �
 
 ## 首次注册
 
-当前声明 11 个直接 submodule 及 PlutoSVG 嵌套的 PlutoVG；版本以 `dependencies.json`、gitlink 和实际 checkout 为准，使用 `python3 scripts/init_submodules.py --check` 检查。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、SDL_Render（含平台驱动）和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。平台图形驱动由 SDL 在运行时选择与加载，应用不直接链接 OpenGL；平台运行库仍按动态方式使用，Linux 还依赖 Fontconfig 等桌面组件，这不是完整静态应用。
+当前声明 12 个直接 submodule 及 PlutoSVG 嵌套的 PlutoVG；版本以 `dependencies.json`、gitlink 和实际 checkout 为准，使用 `python3 scripts/init_submodules.py --check` 检查。SDL3 设置 `SDL_SHARED=OFF`、`SDL_STATIC=ON`，应用明确链接 `SDL3::SDL3-static`。关闭音频、相机、手柄、传感器等未用子系统，保留窗口、输入、SDL_Render（含平台驱动）和 Linux 的 X11 / Wayland。不安装裁剪版 SDL 动态库，也不选择系统 SDL。平台图形驱动由 SDL 在运行时选择与加载，应用不直接链接 OpenGL；平台运行库仍按动态方式使用，Linux 还依赖 Fontconfig 等桌面组件，这不是完整静态应用。
 
 `plasma-wayland-protocols/` 保存 KDE appmenu 协议描述、原 MIT 许可和带 SHA-256 的来源清单。它是构建时生成 Wayland C 接口所需的协议数据，不是完整第三方库；没有复制 Qt 实现或链接 Qt。生成工具 wayland-scanner、GIO / GLib、Wayland 和 X11 由系统开发环境提供。
 
@@ -72,3 +74,5 @@ ctest --preset dev
 头文件库在 CMake 中用 INTERFACE target 暴露包含路径；上游目录标记为 SYSTEM，避免将项目自身的严格告警施加给第三方代码。第三方文件遵循原许可证，不改标为本项目 Apache-2.0。
 
 CLI11 保存未修改的 include/CLI 目录；iguana 保存 YAML reader / writer 和传递头文件，含其上游自带 frozen。iguana yaml_reader.hpp 有最小的类型 / 缩进校验补丁，差异保存在 patches/yaml-validation.patch，其余头文件保持上游原样。每库 source.json 记录来源、提交、补丁与逐文件 SHA-256。不调用两者上游 CMake，不编译其示例 / 测试。iguana 的 bundled 转换器各自原始许可另保存在 THIRD_PARTY_NOTICES.txt 和 LICENSE-Boost；安装包一并带上。
+
+LZ4 用于应用内存图块缓存，与 PNG 解码继续使用的 zlib 分开。`dav1d-ref` 只抽取并改编固定提交的引用计数布局 / init / inc / dec，去掉 decoder、pool 和 allocator 依赖，使用标准 C11 原子；不是上游原样头文件。`source.json` 记录上下游 hash 与改动，安装包保留各自许可。

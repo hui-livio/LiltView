@@ -1,10 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <filesystem>
 #include <thread>
 #include "../fixtures/checkerboard.hpp"
 #include "platform/file_io.hpp"
 #include "viewer/tile_preparation.hpp"
+#include "viewer/cache_codec.hpp"
+#include "viewer/tile_pixels.hpp"
 #include "viewer/tile_reader.hpp"
 
 namespace
@@ -84,6 +87,9 @@ TEST_CASE("first preparation publishes pixels before terminal and releases borro
     CHECK(tile.generation == 77);
     CHECK(tile.pixels.size() == 512 * 512 * 4);
     CHECK(tile.pixels[3] == 255);
+    CHECK(tile.pixels.data() == lv_pixels_get_view(source.region.pixels)->data);
+    CHECK(tile.borrowed);
+    CHECK(preparation.stats().workers == 0);
     CHECK(preparation.stats().input_peak <= 2);
     preparation.finish();
     until([&] { return preparation.done(); });
@@ -107,7 +113,7 @@ TEST_CASE("batch preparation withholds every texture until the producer has fini
     CHECK(preparation.drained());
     CHECK_FALSE(preparation.error());
 }
-TEST_CASE("cancelling a full preparation queue wakes backpressure without a UI join", "[preparation][cancel]")
+TEST_CASE("cancelling a full retained-input queue wakes backpressure without a UI join", "[preparation][cancel]")
 {
     CoreTile source;
     TilePreparation preparation(0, TilePreparation::Mode::pipeline);
@@ -121,10 +127,10 @@ TEST_CASE("cancelling a full preparation queue wakes backpressure without a UI j
                 region.tile_id = submitted++;
                 preparation.submit(region);
             }
-            return preparation.stats().output_peak > 7ULL * 1024 * 1024 && !preparation.can_accept();
+            return preparation.stats().tiles >= 2 && !preparation.can_accept();
         });
     CHECK(preparation.stats().output_peak <= 8ULL * 1024 * 1024);
-    CHECK(preparation.stats().input_peak <= 2);
+    CHECK(preparation.stats().input_peak <= 4);
     preparation.cancel();
     until([&] { return preparation.done(); });
     CHECK(preparation.drained());
@@ -143,10 +149,10 @@ TEST_CASE("prepared cache is readable after transfer and retains all source leve
     REQUIRE(tile.levels.size() == 10);
     CHECK(tile.level == 2);
     CHECK(tile.size.width == 128);
-    auto *file = preparation.take_cache();
+    auto file = preparation.take_cache();
     REQUIRE(file);
     {
-        TileReader reader(platform::file_descriptor(file));
+        TileReader reader(file);
         const auto &level = tile.levels.front();
         reader.request({{{0, 0}, level.size, level.offset, level.bytes}});
         TileReader::Data decoded;
@@ -160,8 +166,7 @@ TEST_CASE("prepared cache is readable after transfer and retains all source leve
         const auto &pixels = *lv_pixels_get_view(source.region.pixels);
         CHECK(std::equal(decoded->begin(), decoded->end(), pixels.data));
     }
-    std::fclose(file);
-    release_tile_cache(preparation.stats().cache_bytes);
+    file.reset();
 }
 TEST_CASE("preparation errors terminate and return retained inputs", "[preparation][error]")
 {
@@ -178,10 +183,117 @@ TEST_CASE("preparation errors terminate and return retained inputs", "[preparati
 
 TEST_CASE("tile cache budget is shared across displayed and pending scenes", "[preparation][budget]")
 {
-    constexpr auto limit = 16ULL * 1024 * 1024 * 1024;
+    constexpr auto limit = MemoryTileCache::budget;
     reserve_tile_cache(limit);
     CHECK_THROWS_AS(reserve_tile_cache(1), render::Error);
     release_tile_cache(limit);
     CHECK_NOTHROW(reserve_tile_cache(1));
     release_tile_cache(1);
+}
+
+TEST_CASE("LZ4 cache blocks preserve bytes and detect corrupt truncated or mismatched data", "[preparation][lz4]")
+{
+    liltview::CacheEncoder encoder;
+    for (std::size_t bytes : {4u, 60u, 1024u, 1048576u})
+    {
+        std::vector<std::uint8_t> data(bytes);
+        std::uint32_t state = 123;
+        for (auto &byte : data) { state = state * 1664525u + 1013904223u; byte = static_cast<std::uint8_t>(state >> 24); }
+        const auto encoded = encoder.encode(data);
+        std::vector<std::uint8_t> compressed(encoded.begin(), encoded.end());
+        CHECK(liltview::decode_cache(compressed, bytes) == data);
+        CHECK_THROWS(liltview::decode_cache(compressed, bytes + 4));
+        auto corrupt = compressed;
+        corrupt[4] ^= 1; // Checksum, even if the LZ4 stream remains structurally valid.
+        CHECK_THROWS(liltview::decode_cache(corrupt, bytes));
+        compressed.pop_back();
+        CHECK_THROWS(liltview::decode_cache(compressed, bytes));
+    }
+    CHECK_THROWS(encoder.encode({}));
+    CHECK_THROWS(liltview::decode_cache({}, 4));
+}
+TEST_CASE("preparation workers adapt to actual pixel work rather than a 4K cutoff", "[preparation][workers]")
+{
+    lv_image_info info{};
+    info.tile_edge = 512;
+    info.canvas = {1920, 1080};
+    CHECK(TilePreparation::workers_for(info) == 1);
+    info.canvas = {4096, 4096};
+    CHECK(TilePreparation::workers_for(info) == (std::thread::hardware_concurrency() == 1 ? 1u : 2u));
+    info.canvas = {8192, 8192};
+    CHECK(TilePreparation::workers_for(info) <= 2);
+    info.canvas = {17952, 13200};
+    CHECK(TilePreparation::workers_for(info) <= 2);
+    info.canvas = {32768, 16};
+    CHECK(TilePreparation::workers_for(info) == 1); // A long edge alone is not a large CPU task.
+}
+TEST_CASE("two preparation workers keep independent LZ4 levels and bounded shared output", "[preparation][workers][cache]")
+{
+    CoreTile source;
+    const bool compression = GENERATE(true, false);
+    TilePreparation preparation(2, TilePreparation::Mode::pipeline, nullptr, nullptr, 101, 2, compression);
+    std::uint64_t submitted = 0;
+    std::vector<PreparedTile> tiles;
+    const auto *pixels = lv_pixels_get_view(source.region.pixels)->data;
+    std::vector<std::vector<std::uint8_t>> expected{std::vector<std::uint8_t>(pixels, pixels + 512 * 512 * 4)};
+    render::Size expected_size{512, 512};
+    while (expected_size.width > 1)
+    {
+        expected.push_back(tile_pixels::reduce(expected.back(), expected_size));
+        expected_size = {(expected_size.width + 1) / 2, (expected_size.height + 1) / 2};
+    }
+    until([&] {
+        if (submitted < 24 && preparation.can_accept())
+        {
+            auto region = source.region;
+            region.tile_id = submitted++;
+            preparation.submit(region);
+        }
+        PreparedTile tile;
+        while (preparation.pop(tile)) tiles.push_back(std::move(tile));
+        return submitted == 24;
+    });
+    preparation.finish();
+    until([&] { return preparation.done(); });
+    PreparedTile tile;
+    while (preparation.pop(tile)) tiles.push_back(std::move(tile));
+    REQUIRE_FALSE(preparation.error());
+    REQUIRE(tiles.size() == 24);
+    if (!compression) CHECK(preparation.stats().compress_ms == 0);
+    CHECK(preparation.stats().workers == 2);
+    CHECK(preparation.stats().worker_peak <= 2);
+    CHECK(preparation.stats().input_peak <= 8);
+    CHECK(preparation.stats().output_peak <= 8ULL * 1024 * 1024);
+    CHECK(preparation.stats().scratch_limit_bytes == 8ULL * 1024 * 1024);
+    auto file = preparation.take_cache();
+    REQUIRE(file);
+    {
+        TileReader reader(file);
+        std::vector<bool> seen(24);
+        for (const auto &ready : tiles)
+        {
+            REQUIRE(ready.id < seen.size());
+            CHECK_FALSE(seen[ready.id]);
+            seen[ready.id] = true;
+            CHECK(ready.generation == 101);
+            REQUIRE(ready.levels.size() == 10);
+            for (unsigned level = 0; level < ready.levels.size(); ++level)
+            {
+                const auto &entry = ready.levels[level];
+                reader.request({{{ready.id, level}, entry.size, entry.offset, entry.bytes}});
+                TileReader::Data decoded;
+                until([&] { decoded = reader.find({ready.id, level}); return static_cast<bool>(decoded); });
+                CHECK(decoded->size() == static_cast<std::size_t>(entry.size.width) * entry.size.height * 4);
+                CHECK((*decoded)[3] == 255);
+                CHECK(decoded == expected[level]);
+                if (!compression)
+                {
+                    const auto stored = file->find(entry.offset, entry.bytes);
+                    CHECK_FALSE(stored->compressed);
+                    CHECK(decoded.data() == stored->data.data());
+                }
+            }
+        }
+    }
+    file.reset();
 }

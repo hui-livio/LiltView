@@ -47,7 +47,7 @@ void Viewer::advance_static()
                 static_stats_.first_upload_ms = load_elapsed_ms();
             if (tile.generation != generation_)
                 throw std::logic_error("Stale preparation generation");
-            bytes += tile.pixels.size();
+            bytes += static_cast<std::uint64_t>(tile.size.width) * tile.size.height * 4;
             pending_scene_.install(std::move(tile));
             ++count;
             ++static_stats_.tiles;
@@ -116,20 +116,25 @@ void Viewer::commit_static_if_ready()
         {
             if (pending_scene_.upload_pending())
                 wake_static(nullptr);
-            return; // TileReader wakes on completed disk work; no polling loop on the UI thread.
+            return; // TileReader wakes on completed memory cache work; no polling loop on the UI thread.
         }
         static_stats_.ready_ms = load_elapsed_ms();
         accept_completed();
         first_commit_this_frame_ = true;
         spdlog::info(
-            "static_load_ready generation={} mode={} ready_ms={:.3f} core_ms={:.3f} first_region_ms={:.3f} decode_done_ms={:.3f} prepare_done_ms={:.3f} first_upload_ms={:.3f} last_upload_ms={:.3f} upload_cpu_ms={:.3f} max_upload_slice_ms={:.3f} max_pump_ms={:.3f} tiles={} upload_bytes={} pack_ms={:.3f} lod_ms={:.3f} compress_ms={:.3f} cache_write_ms={:.3f} cache_bytes={} input_peak={} output_peak={}",
-            generation_, static_stats_.batch ? "batch" : "pipeline", static_stats_.ready_ms, static_stats_.core_ms,
+            "static_load_ready generation={} mode={} cache_compression={} ready_ms={:.3f} core_ms={:.3f} first_region_ms={:.3f} decode_done_ms={:.3f} prepare_done_ms={:.3f} first_upload_ms={:.3f} last_upload_ms={:.3f} upload_cpu_ms={:.3f} max_upload_slice_ms={:.3f} max_pump_ms={:.3f} tiles={} upload_bytes={} pack_ms={:.3f} lod_ms={:.3f} compress_ms={:.3f} cache_store_ms={:.3f} cache_bytes={} input_peak={} output_peak={}",
+            generation_, static_stats_.batch ? "batch" : "pipeline", static_cache_compression_, static_stats_.ready_ms, static_stats_.core_ms,
             static_stats_.first_region_ms, static_stats_.decode_done_ms, static_stats_.prepare_done_ms,
             static_stats_.first_upload_ms, static_stats_.last_upload_ms, static_stats_.upload_cpu_ms,
             static_stats_.max_upload_slice_ms, static_stats_.max_pump_ms, static_stats_.tiles, static_stats_.uploaded_bytes,
             static_stats_.preparation.pack_ms, static_stats_.preparation.lod_ms, static_stats_.preparation.compress_ms,
-            static_stats_.preparation.write_ms, static_stats_.preparation.cache_bytes, static_stats_.preparation.input_peak,
+            static_stats_.preparation.store_ms, static_stats_.preparation.cache_bytes, static_stats_.preparation.input_peak,
             static_stats_.preparation.output_peak);
+        const auto ram = scene_.stats().ram;
+        spdlog::info("static_load_cache generation={} codec={} workers={} worker_peak={} scratch_limit_bytes={} restore_reads={} restore_read_ms={:.3f} restore_decode_ms={:.3f} restore_max_decode_ms={:.3f}",
+            generation_, static_stats_.preparation.cache_bytes ? (static_cache_compression_ ? "lz4" : "raw-rgba") : "none/direct-rgba",
+            static_stats_.preparation.workers, static_stats_.preparation.worker_peak,
+            static_stats_.preparation.scratch_limit_bytes, ram.reads, ram.read_ms, ram.decode_ms, ram.max_decode_ms);
     } catch (const std::exception &error)
     {
         spdlog::error("static_load_first_view_failed generation={} reason={}", generation_, error.what());

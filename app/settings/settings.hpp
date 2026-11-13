@@ -43,6 +43,7 @@ struct Settings
     bool system_titlebar  = false;
     bool disable_rounding = false;
     StaticUploadMode static_upload_mode = StaticUploadMode::pipeline;
+    bool static_cache_compression = true; // YAML-only; direct GPU uploads bypass this.
 };
 
 // YAML only. Invalid syntax returns defaults; missing keys keep their defaults.
