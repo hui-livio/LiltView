@@ -283,7 +283,7 @@ bool DockToolbar::hit(const DockLayout &layout, ImVec2 mouse) const noexcept
 void DockToolbar::reset()
 {
     visibility_.reset();
-    tooltip_pending_ = focused_ = pressed_ = false;
+    tooltip_pending_ = focused_ = pressed_ = keyboard_navigation_ = false;
 }
 void DockToolbar::image_changed() noexcept
 {
@@ -293,7 +293,8 @@ void DockToolbar::image_changed() noexcept
 bool DockToolbar::keyboard_focus(const DockLayout &layout) const
 {
     const auto &g = *ImGui::GetCurrentContext();
-    if (!g.NavCursorVisible || g.NavWindow != ImGui::GetCurrentWindow())
+    // A hidden overlay cannot regain focus from an old ImGui navigation ID.
+    if (visibility_.opacity() == 0 || !keyboard_navigation_ || !g.NavCursorVisible || g.NavWindow != ImGui::GetCurrentWindow())
         return false;
     ImGui::PushID("dock_toolbar");
     bool focused = false;
@@ -304,6 +305,11 @@ bool DockToolbar::keyboard_focus(const DockLayout &layout) const
 }
 bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held, bool blocked, bool retain_visible)
 {
+    const auto &g = *ImGui::GetCurrentContext();
+    if (visibility_.opacity() == 0 || blocked || !g.NavCursorVisible)
+        keyboard_navigation_ = false;
+    else if (g.NavWindow == ImGui::GetCurrentWindow() && g.NavJustMovedToId != 0 && g.NavJustMovedToIsTabbing)
+        keyboard_navigation_ = true;
     const bool more      = ImGui::IsPopupOpen(popup);
     const bool any_popup = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     // IsWindowHovered() normally becomes false while ANY widget is active,
@@ -361,7 +367,10 @@ MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Lan
             ImGui::BeginDisabled(!enabled);
             // The ID is generated from the action, including a stable shared FIT/100% slot.
             ImGui::PushOverrideID(button_id(button));
-            const bool pressed = ImGui::InvisibleButton("", {36 * s, 36 * s}, ImGuiButtonFlags_EnableNav);
+            // Mouse activation must not seed arrow-key navigation; Tab can still
+            // enter the visible Dock and keyboard activation keeps its existing ID.
+            const bool pressed =
+                ImGui::InvisibleButton("", {36 * s, 36 * s}, ImGuiButtonFlags_EnableNav | ImGuiButtonFlags_NoNavFocus);
             ImGui::PopID();
             const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
             const bool focused = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;

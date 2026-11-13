@@ -173,7 +173,12 @@ MenuAction menu_action_for_shortcut(const MenuItem &root, const std::vector<std:
 MenuAction menu_action_for_input(const MenuItem &menu, const std::vector<std::string> &shortcut, bool repeat,
                                  const ShortcutContext &context)
 {
-    if (context.blocked || context.loading)
+    // Only unmodified Dock navigation wins over image commands. Shift+arrows
+    // still pan; Tab/Shift+Tab have no image binding and remain with ImGui.
+    const bool dock_key = context.dock_keyboard_focus && shortcut.size() == 1 &&
+        (shortcut.back() == "Left" || shortcut.back() == "Right" || shortcut.back() == "Up" || shortcut.back() == "Down" ||
+         shortcut.back() == "Tab" || shortcut.back() == "Return" || shortcut.back() == "Space" || shortcut.back() == "Escape");
+    if (context.blocked || context.loading || dock_key)
         return MenuAction::none;
     if (shortcut == std::vector<std::string>{"Escape"})
     {

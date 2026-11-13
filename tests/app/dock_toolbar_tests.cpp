@@ -436,3 +436,127 @@ TEST_CASE("More stays attached above the dock and scrolls rather than covering i
     CHECK(menu->ScrollbarY);
     CHECK_FALSE(ImRect(menu->Pos, {menu->Pos.x + menu->Size.x, menu->Pos.y + menu->Size.y}).Contains(gui.center(9)));
 }
+
+TEST_CASE("hidden Dock never revives stale mouse or keyboard navigation focus", "[dock][imgui][regression]")
+{
+    for (const bool keyboard : {false, true})
+        for (const bool image_change : {false, true})
+        {
+            CAPTURE(keyboard, image_change);
+            DockGui gui;
+            gui.frame();
+            gui.reveal();
+            CHECK(gui.click(3) == MenuAction::actual_size);
+            auto &io = ImGui::GetIO();
+            io.AddMousePosEvent(20, 100);
+            if (keyboard)
+            {
+                io.AddKeyEvent(ImGuiKey_Tab, true);
+                gui.frame();
+                io.AddKeyEvent(ImGuiKey_Tab, false);
+                gui.frame();
+                REQUIRE(gui.toolbar.has_keyboard_focus());
+                io.AddKeyEvent(ImGuiKey_Escape, true);
+                gui.frame();
+                io.AddKeyEvent(ImGuiKey_Escape, false);
+            }
+            for (int i = 0; i < 30; ++i)
+                gui.frame();
+            REQUIRE_FALSE(gui.toolbar.hit(gui.layout, gui.center(3)));
+            REQUIRE_FALSE(gui.toolbar.has_keyboard_focus());
+            if (image_change)
+                gui.toolbar.image_changed();
+            for (const auto key : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_DownArrow})
+            {
+                CAPTURE(key);
+                io.AddKeyEvent(key, true);
+                CHECK(gui.frame() == MenuAction::none);
+                io.AddKeyEvent(key, false);
+                for (int i = 0; i < 30; ++i)
+                    CHECK(gui.frame() == MenuAction::none);
+                CHECK_FALSE(gui.toolbar.has_keyboard_focus());
+                CHECK_FALSE(gui.toolbar.hit(gui.layout, gui.center(3)));
+            }
+        }
+}
+
+TEST_CASE("mouse Dock activation does not acquire directional keyboard navigation", "[dock][imgui][regression]")
+{
+    DockGui gui;
+    gui.frame();
+    gui.reveal();
+    CHECK(gui.click(3) == MenuAction::actual_size);
+    auto &io = ImGui::GetIO();
+    io.AddKeyEvent(ImGuiKey_RightArrow, true);
+    gui.frame();
+    io.AddKeyEvent(ImGuiKey_RightArrow, false);
+    gui.frame();
+    CHECK_FALSE(gui.toolbar.has_keyboard_focus());
+}
+
+TEST_CASE("visible Dock retains forward and reverse Tab navigation after mouse activation", "[dock][imgui][regression]")
+{
+    DockGui gui;
+    gui.frame();
+    gui.reveal();
+    CHECK(gui.click(3) == MenuAction::actual_size);
+    auto &io = ImGui::GetIO();
+    io.AddMousePosEvent(20, 100);
+    io.AddKeyEvent(ImGuiKey_Tab, true);
+    gui.frame();
+    io.AddKeyEvent(ImGuiKey_Tab, false);
+    gui.frame();
+    gui.frame();
+    REQUIRE(gui.toolbar.has_keyboard_focus());
+    const auto first = ImGui::GetCurrentContext()->NavId;
+    REQUIRE(first != 0);
+    io.AddKeyEvent(ImGuiKey_Tab, true);
+    gui.frame();
+    io.AddKeyEvent(ImGuiKey_Tab, false);
+    gui.frame();
+    gui.frame();
+    REQUIRE(gui.toolbar.has_keyboard_focus());
+    CHECK(ImGui::GetCurrentContext()->NavId != first);
+    io.AddKeyEvent(ImGuiMod_Shift, true);
+    io.AddKeyEvent(ImGuiKey_Tab, true);
+    gui.frame();
+    io.AddKeyEvent(ImGuiKey_Tab, false);
+    io.AddKeyEvent(ImGuiMod_Shift, false);
+    gui.frame();
+    gui.frame();
+    CHECK(gui.toolbar.has_keyboard_focus());
+    CHECK(ImGui::GetCurrentContext()->NavId == first);
+}
+
+TEST_CASE("explicit Dock keyboard navigation survives a temporarily busy replacement", "[dock][imgui][regression]")
+{
+    DockGui gui;
+    gui.frame();
+    gui.reveal();
+    auto &io = ImGui::GetIO();
+    io.AddKeyEvent(ImGuiKey_Tab, true);
+    gui.frame();
+    io.AddKeyEvent(ImGuiKey_Tab, false);
+    gui.frame();
+    gui.frame();
+    REQUIRE(gui.toolbar.has_keyboard_focus());
+    io.AddMousePosEvent(20, 100);
+    gui.frame();
+    // Keyboard focus, rather than pointer hover, owns visibility during loading.
+    io.AddKeyEvent(ImGuiKey_Tab, true);
+    gui.frame();
+    io.AddKeyEvent(ImGuiKey_Tab, false);
+    gui.frame();
+    gui.frame();
+    REQUIRE(gui.toolbar.has_keyboard_focus());
+    gui.toolbar.image_changed();
+    for (int i = 0; i < 30; ++i)
+    {
+        CHECK(gui.frame(false, false, false, false, true) == MenuAction::none);
+        CHECK(gui.toolbar.hit(gui.layout, gui.center(3)));
+        CHECK_FALSE(gui.toolbar.has_keyboard_focus()); // Input stays disabled until ready.
+    }
+    gui.frame();
+    CHECK(gui.toolbar.has_keyboard_focus());
+    CHECK(gui.toolbar.hit(gui.layout, gui.center(3)));
+}

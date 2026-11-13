@@ -1294,3 +1294,55 @@ TEST_CASE("a shown Dock survives progressive replacement but still auto hides wh
     s.frames(15);
     CHECK_FALSE(s.dock_visible());
 }
+
+TEST_CASE("full shell image arrows keep navigating after a mouse Dock action has auto hidden",
+          "[dock][shell][shortcut][regression]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    auto &io        = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    for (const auto name : {"a.bmp", "b.bmp", "c.bmp"})
+        std::filesystem::copy_file(s.source.path, s.source.directory / name);
+    s.viewer.open(s.source.directory / "a.bmp");
+    s.settle();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (s.viewer.navigation().scanning)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        s.frame();
+        SDL_Delay(1);
+    }
+    s.reveal();
+    const auto point = s.dock_center();
+    io.AddMousePosEvent(point.x, point.y);
+    s.frame();
+    io.AddMouseButtonEvent(0, true);
+    s.frame();
+    io.AddMouseButtonEvent(0, false);
+    REQUIRE(s.frame() == MenuAction::actual_size);
+    s.viewer.actual_size();
+    s.settle();
+    io.AddMousePosEvent(300, 200);
+    s.frames(30);
+    REQUIRE_FALSE(s.dock_visible());
+    for (const int direction : {1, 1, -1, -1})
+    {
+        CAPTURE(direction, s.viewer.filename());
+        REQUIRE_FALSE(s.shell.dock_keyboard_focus());
+        const auto menu = build_menu(Settings{}, Language::english, true, false, s.viewer.has_image(), s.viewer.can_actual_size(),
+                                     s.viewer.navigation().can_previous, s.viewer.navigation().can_next);
+        const ShortcutContext context{false, false, false, !s.viewer.settled(), s.shell.dock_keyboard_focus()};
+        io.AddKeyEvent(direction > 0 ? ImGuiKey_RightArrow : ImGuiKey_LeftArrow, true);
+        REQUIRE(menu_action_for_input(menu, {direction > 0 ? "Right" : "Left"}, false, context) ==
+                (direction > 0 ? MenuAction::next : MenuAction::previous));
+        s.viewer.navigate(direction); // Application dispatches shortcuts before ImGui::NewFrame.
+        s.frame(false);
+        io.AddKeyEvent(direction > 0 ? ImGuiKey_RightArrow : ImGuiKey_LeftArrow, false);
+        s.settle();
+        s.frames(15);
+        CHECK_FALSE(s.dock_visible());
+        CHECK_FALSE(s.shell.dock_keyboard_focus());
+    }
+    CHECK(s.viewer.filename() == "a.bmp");
+}

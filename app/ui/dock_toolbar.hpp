@@ -108,6 +108,7 @@ private:
     bool keyboard_focus(const DockLayout &) const;
     DockVisibility visibility_;
     bool tooltip_pending_ = false, focused_ = false, pressed_ = false;
+    bool keyboard_navigation_ = false; // Entered explicitly via Tab, not a default/mouse NavId.
 };
 } // namespace liltview
 #endif
