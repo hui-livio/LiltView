@@ -18,8 +18,9 @@ struct StatusBarContent
     bool busy = false, failed = false;
 };
 
-// Only basenames enter the presentation. Metadata describes the visible image,
-// not a pending replacement; no file access or image decoding is performed.
+// Only basenames enter the presentation. While opening an image, show the
+// requested identity without retained metadata. Detail loading keeps the visible
+// image's metadata; no file access or image decoding is performed.
 StatusBarContent status_bar_content(Language, Text status, const std::optional<ImageDetails> &visible,
                                     std::string_view requested_filename, const DirectoryNavigationSnapshot &);
 
