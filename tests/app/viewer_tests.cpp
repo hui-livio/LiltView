@@ -2119,3 +2119,90 @@ TEST_CASE("large cached image survives repeated wheel zoom near GPU budget", "[v
     viewer.shutdown();
     CHECK(renderer.textures.empty());
 }
+
+TEST_CASE("consecutive large image replacements and cancelled loads share a bounded compact cache", "[viewer][native][cancel][budget][regression]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    std::vector<std::filesystem::path> files;
+    for (unsigned index = 0; index < 4; ++index)
+    {
+        auto file = directory.path / ("large-" + std::to_string(index) + ".png");
+        liltview::test::checkerboard(file, 4097, 3073, 17 + index * 2);
+        files.push_back(std::move(file));
+    }
+    struct Reservation
+    {
+        std::uint64_t bytes = liltview::MemoryTileCache::budget - 16 * 1024 * 1024;
+        Reservation() { liltview::reserve_tile_cache(bytes); }
+        ~Reservation() { liltview::release_tile_cache(bytes); }
+    } reservation;
+    TestRenderer renderer;
+    renderer.image_budget = 32ULL * 1024 * 1024;
+    renderer.strict_image_budget = true;
+    liltview::Viewer viewer(renderer);
+    for (unsigned cycle = 0; cycle < 3; ++cycle)
+    {
+        for (unsigned index = 0; index < 2; ++index)
+        {
+            viewer.open(files[index]);
+            loop.settle(viewer);
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(viewer.has_visible_image());
+            CHECK(viewer.image_details()->path == files[index]);
+        }
+        viewer.open(files[2]);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do
+        {
+            viewer.pump(); // Cancel after preparation/upload started, not just before submit.
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            SDL_Delay(1);
+        } while (!viewer.static_load_stats().tiles);
+        REQUIRE(viewer.loading());
+        viewer.open(files[3]);
+        loop.settle(viewer);
+        REQUIRE_FALSE(viewer.failed());
+        CHECK(viewer.image_details()->path == files[3]);
+    }
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    // No displayed, pending or retired cache may remain charged after shutdown.
+    REQUIRE_NOTHROW(liltview::reserve_tile_cache(16 * 1024 * 1024));
+    liltview::release_tile_cache(16 * 1024 * 1024);
+}
+
+TEST_CASE("viewer recovers from genuine preparation budget exhaustion on the next open", "[viewer][native][budget][regression]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    const auto file = directory.path / "budget-retry.png";
+    liltview::test::checkerboard(file, 2048, 2048, 17);
+    struct Reservation
+    {
+        std::uint64_t bytes = liltview::MemoryTileCache::budget - 1;
+        Reservation() { liltview::reserve_tile_cache(bytes); }
+        void release() { liltview::release_tile_cache(bytes); bytes = 0; }
+        ~Reservation() { release(); }
+    } reservation;
+    TestRenderer renderer;
+    renderer.image_budget = 8ULL * 1024 * 1024;
+    renderer.strict_image_budget = true;
+    liltview::Viewer viewer(renderer);
+    viewer.open(file);
+    loop.settle(viewer);
+    REQUIRE(viewer.failed());
+    CHECK(viewer.error() == LV_ERROR_MEMORY_BUDGET);
+    reservation.release();
+    // Open immediately, while cancellation/retirement may still be in progress.
+    viewer.open(file);
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    CHECK(viewer.has_visible_image());
+    CHECK(viewer.image_details()->path == file);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    REQUIRE_NOTHROW(liltview::reserve_tile_cache(liltview::MemoryTileCache::budget));
+    liltview::release_tile_cache(liltview::MemoryTileCache::budget);
+}

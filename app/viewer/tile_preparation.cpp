@@ -99,6 +99,10 @@ void TilePreparation::submit(const lv_region_info &region)
     const auto stride = lv_pixels_get_view(region.pixels)->stride_bytes;
     {
         std::lock_guard lock(mutex_);
+        // The worker can fail between can_accept() and this Core event. Preserve
+        // the actual cause (notably shared cache exhaustion), not an admission error.
+        if (error_)
+            std::rethrow_exception(error_);
         if (cancelled_ || finishing_ || retained_ >= input_limit_)
             throw std::logic_error("Preparation input admission");
         inputs_.push_back({region.tile_id, region.rect, std::move(pixels), stride});

@@ -428,7 +428,7 @@ void Viewer::pump()
             }
         } catch (const std::exception &error)
         {
-            spdlog::error("Image upload: {}", error.what());
+            spdlog::error("Image upload generation={} elapsed_ms={:.3f} reason={}", generation_, load_elapsed_ms(), error.what());
             if (request_)
                 lv_core_cancel(core_, request_);
             const auto *io = dynamic_cast<const std::system_error *>(&error);

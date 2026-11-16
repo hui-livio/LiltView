@@ -2,6 +2,7 @@
 #include "renderer/renderer.hpp"
 #include <atomic>
 #include <stdexcept>
+#include <string>
 namespace liltview
 {
 namespace { std::atomic<std::uint64_t> all_cache_bytes{0}; }
@@ -11,7 +12,11 @@ void reserve_tile_cache(std::uint64_t bytes)
     do
     {
         if (bytes > MemoryTileCache::budget - used)
-            throw render::Error(render::ErrorCode::memory_budget, "Active/retiring memory tile caches exceed 2 GiB");
+        {
+            const auto message = "Active/retiring memory tile caches exceed 2 GiB: used_bytes=" + std::to_string(used) +
+                " request_bytes=" + std::to_string(bytes) + " budget_bytes=" + std::to_string(MemoryTileCache::budget);
+            throw render::Error(render::ErrorCode::memory_budget, message.c_str());
+        }
     } while (!all_cache_bytes.compare_exchange_weak(used, used + bytes));
 }
 void release_tile_cache(std::uint64_t bytes) noexcept { all_cache_bytes.fetch_sub(bytes); }

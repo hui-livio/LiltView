@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <chrono>
 #include <filesystem>
 #include <thread>
@@ -296,4 +297,46 @@ TEST_CASE("two preparation workers keep independent LZ4 levels and bounded share
         }
     }
     file.reset();
+}
+
+TEST_CASE("compressed cache retains compact allocations across scene replacements", "[preparation][lz4][budget][regression]")
+{
+    struct Reservation
+    {
+        std::uint64_t bytes = MemoryTileCache::budget - 128 * 1024;
+        Reservation() { reserve_tile_cache(bytes); }
+        ~Reservation() { release_tile_cache(bytes); }
+    } reservation;
+    CacheEncoder encoder;
+    std::vector<std::uint8_t> pixels(512 * 512 * 4, 123);
+    pixels[0] = 124; // Compressible, but not eligible for uniform tile deduplication.
+    std::shared_ptr<MemoryTileCache> displayed;
+    for (unsigned generation = 0; generation < 8; ++generation)
+    {
+        auto pending = std::make_shared<MemoryTileCache>();
+        auto block = encoder.encode(pixels);
+        REQUIRE(block.size() < 8192);
+        CHECK(block.capacity() < 16384);
+        CHECK(decode_cache(block, pixels.size()) == pixels);
+        REQUIRE_NOTHROW(pending->append(std::move(block)));
+        displayed = std::move(pending); // The old scene must coexist until replacement commits.
+    }
+}
+
+TEST_CASE("late preparation submission preserves the worker budget failure", "[preparation][error][budget][regression]")
+{
+    CoreTile source;
+    struct Reservation
+    {
+        Reservation() { reserve_tile_cache(MemoryTileCache::budget); }
+        ~Reservation() { release_tile_cache(MemoryTileCache::budget); }
+    } reservation;
+    TilePreparation preparation(2, TilePreparation::Mode::pipeline, nullptr, nullptr, 4, 2);
+    REQUIRE(preparation.can_accept());
+    preparation.submit(source.region);
+    until([&] { return preparation.done(); });
+    REQUIRE(preparation.error());
+    // A worker may fail after the UI checks can_accept(), before it submits the next Core event.
+    CHECK_THROWS_WITH(preparation.submit(source.region), Catch::Matchers::ContainsSubstring("2 GiB"));
+    CHECK(preparation.drained());
 }

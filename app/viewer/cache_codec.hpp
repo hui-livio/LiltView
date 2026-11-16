@@ -16,6 +16,7 @@ public:
     MemoryBlock encode(std::span<const std::uint8_t>);
 private:
     std::vector<std::max_align_t> state_;
+    std::vector<std::uint8_t> output_; // Reusable compression bound, never retained by the scene cache.
 };
 std::vector<std::uint8_t> decode_cache(std::span<const std::uint8_t>, std::size_t expected);
 } // namespace liltview

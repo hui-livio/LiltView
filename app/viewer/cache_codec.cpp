@@ -31,14 +31,16 @@ MemoryBlock CacheEncoder::encode(std::span<const std::uint8_t> data)
     if (data.empty() || data.size() > max_block)
         throw std::invalid_argument("Invalid LZ4 cache block size");
     const auto bound = LZ4_compressBound(static_cast<int>(data.size()));
-    std::vector<std::uint8_t> output_(header + static_cast<std::size_t>(bound));
+    output_.resize(header + static_cast<std::size_t>(bound));
     const auto bytes = LZ4_compress_fast_extState(state_.data(), reinterpret_cast<const char *>(data.data()),
         reinterpret_cast<char *>(output_.data() + header), static_cast<int>(data.size()), bound, 1);
     if (bytes <= 0) throw std::runtime_error("Cannot compress LZ4 cache block");
     store(output_.data(), magic);
     store(output_.data() + 4, XXH32(data.data(), data.size(), 0));
-    output_.resize(header + static_cast<std::size_t>(bytes));
-    return MemoryBlock(std::move(output_));
+    // resize() alone leaves compressBound capacity pinned in every cached LOD.
+    // Keep the large allocation as worker scratch and publish only compact bytes;
+    // shared current/pending/retiring admission charges actual retained capacity.
+    return MemoryBlock(std::vector<std::uint8_t>(output_.begin(), output_.begin() + header + bytes));
 }
 std::vector<std::uint8_t> decode_cache(std::span<const std::uint8_t> compressed, std::size_t expected)
 {
