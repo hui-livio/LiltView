@@ -46,6 +46,65 @@ void near(std::array<int, 3> actual, std::array<int, 3> expected, int tolerance 
             throw std::runtime_error("Unexpected rendered pixel");
         }
 }
+void verify_mip_discard(Renderer &renderer)
+{
+    const auto base = renderer.capabilities().image_bytes;
+    // Include odd tails and alpha: removing a base must preserve the exact
+    // lower-resolution pixels and original UV/LOD mapping, not resample again.
+    for (const auto size : {Size{16, 8}, Size{17, 9}})
+    {
+        std::vector<std::uint8_t> data(static_cast<std::size_t>(size.width) * size.height * 4);
+        for (std::size_t at = 0; at < data.size(); at += 4)
+        {
+            data[at]     = static_cast<std::uint8_t>(at * 17);
+            data[at + 1] = static_cast<std::uint8_t>(at * 31);
+            data[at + 2] = 180;
+            data[at + 3] = static_cast<std::uint8_t>(at * 7);
+        }
+        auto image      = renderer.create_uploaded_image({size, true}, {data.data(), data.size(), size.width * 4, size});
+        const auto draw = [&](ImDrawList *list)
+        {
+            renderer.add_image(list, image, {8, 8}, {8.0f + size.width / 4.0f, 8.0f + size.height / 4.0f});
+        };
+        const auto before = frame(renderer, draw);
+        renderer.present();
+        auto remaining = size;
+        for (unsigned level = 0; level < 2; ++level)
+        {
+            remaining = {std::max(1u, remaining.width / 2), std::max(1u, remaining.height / 2)};
+            check(renderer.discard_image_mips(image, 1), "Cannot discard unused native mip level");
+            check(renderer.capabilities().image_bytes == base + image_storage_bytes({remaining, true}), "Mip discard accounting");
+            const auto after = frame(renderer, draw);
+            check(after.rgb == before.rgb, "Mip discard changed retained pixels or UV mapping");
+            renderer.present();
+        }
+        const auto bytes = renderer.capabilities().image_bytes;
+        check(!renderer.discard_image_mips(image, 100), "Discard removed every mip level");
+        check(renderer.capabilities().image_bytes == bytes, "Failed discard mutated image accounting");
+        bool rejected = false;
+        try
+        {
+            renderer.update_image(image, {0, 0, size.width, size.height}, {data.data(), data.size(), size.width * 4, size});
+        } catch (const Error &error)
+        {
+            rejected = error.code == ErrorCode::invalid_argument;
+        }
+        check(rejected, "Mutable upload accepted after mip discard");
+        renderer.destroy_image(image);
+        check(renderer.capabilities().image_bytes == base, "Discarded mip chain leaked storage");
+        rejected = false;
+        try
+        {
+            renderer.discard_image_mips(image, 1);
+        } catch (const Error &error)
+        {
+            rejected = error.code == ErrorCode::invalid_handle;
+        }
+        check(rejected, "Discard accepted a stale image handle");
+    }
+    std::puts("PASS allocation-free mip discard, accounting, immutable handles and retained alpha/odd-tail pixels");
+}
+
 void exercise(Renderer &renderer, SDL_Window *window)
 {
     check(renderer.capabilities().backend == Backend::sdl_renderer && SDL_GetRenderer(window), "Wrong renderer backend");
@@ -308,6 +367,7 @@ int main()
         std::printf("SDL_Render driver: %s\n", SDL_GetRendererName(SDL_GetRenderer(window)));
         exercise(*renderer, window);
         verify_populated_creation(*renderer, window);
+        verify_mip_discard(*renderer);
         verify_sampling(*renderer, window);
         verify_density(*renderer);
         verify_window(*renderer, window);

@@ -60,6 +60,7 @@ public:
     bool allow_upload                 = true;
     bool strict_image_budget          = false;
     unsigned budget_rejections        = 0;
+    unsigned mip_discards             = 0;
     std::uint64_t rejected_live_bytes = 0, rejected_request_bytes = 0;
     Size frame_size{128, 96};
     std::optional<std::array<std::uint8_t, 4>> last_drawn_pixel;
@@ -126,6 +127,21 @@ public:
         ++uploads;
         if (upload_delay_ms)
             SDL_Delay(upload_delay_ms);
+    }
+    bool discard_image_mips(Image image, unsigned count) override
+    {
+        auto &texture = textures.at(image.slot);
+        auto size     = texture.size;
+        for (unsigned level = 0; level < count; ++level)
+        {
+            if (size.width == 1 && size.height == 1)
+                return false;
+            size = {std::max(1u, size.width / 2), std::max(1u, size.height / 2)};
+        }
+        texture.size   = size;
+        texture.bytes  = liltview::render::image_storage_bytes({size, true});
+        mip_discards  += count;
+        return true;
     }
     void destroy_image(Image image) noexcept override
     {
@@ -2037,4 +2053,69 @@ TEST_CASE("initial native first view stays hidden until current DPI viewport is 
         viewer.shutdown();
         CHECK(renderer.textures.empty());
     }
+}
+TEST_CASE("large cached image survives repeated wheel zoom near GPU budget", "[viewer][zoom_budget]")
+{
+    EventLoop loop;
+    InformationGui gui;
+    DetailsDirectory directory;
+    const auto path = directory.path / "zoom-budget.png";
+    liltview::test::checkerboard(path, 4096, 4096, 31);
+    TestRenderer renderer;
+    renderer.image_budget        = 16ULL * 1024 * 1024;
+    renderer.strict_image_budget = true;
+    renderer.record_draws        = true;
+    liltview::Viewer viewer(renderer);
+    viewer.set_viewport({0, 0}, {320, 240}, 2);
+    viewer.open(path);
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    const auto settle_camera = [&]
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        do
+        {
+            viewer.pump();
+            renderer.begin_frame();
+            gui.frame(viewer, 2);
+            renderer.render_frame(ImGui::GetDrawData());
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(renderer.capabilities().image_bytes <= renderer.image_budget);
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            SDL_Delay(1);
+        } while (viewer.detail_loading());
+    };
+    for (unsigned cycle = 0; cycle < 4; ++cycle)
+    {
+        viewer.actual_size();
+        settle_camera();
+        for (unsigned step = 0; step < 12; ++step)
+        {
+            CAPTURE(cycle, step, viewer.presented_view().scale(), renderer.capabilities().image_bytes);
+            viewer.zoom(-1, {step % 2 ? 80.0f : 240.0f, 120});
+            settle_camera();
+        }
+    }
+    viewer.actual_size();
+    settle_camera();
+    for (unsigned idle = 0; idle < 30; ++idle)
+        settle_camera();        // Allow the speculative native neighbor ring to become resident.
+    viewer.zoom(-8, {80, 120}); // A burst can cross several LODs before the old camera changes.
+    settle_camera();
+    renderer.allow_upload = false;
+    viewer.actual_size();
+    for (const auto wheel : {-1, -1, -1, 1, -4, 2})
+    {
+        viewer.zoom(wheel, {240, 120});
+        renderer.begin_frame();
+        gui.frame(viewer, 2);
+        renderer.render_frame(ImGui::GetDrawData());
+        REQUIRE_FALSE(viewer.failed());
+    }
+    renderer.allow_upload = true;
+    settle_camera();
+    CHECK(renderer.budget_rejections == 0);
+    CHECK(renderer.mip_discards > 0);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
 }

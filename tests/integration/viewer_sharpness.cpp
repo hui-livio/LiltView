@@ -13,6 +13,7 @@
 #include "platform/sdl_render_host.hpp"
 #include "renderer/renderer.hpp"
 #include "viewer/viewer.hpp"
+#include "../fixtures/file_io.hpp"
 
 namespace
 {
@@ -24,7 +25,7 @@ void check(bool ok, const char *message)
 }
 void fixture(const std::filesystem::path &path, bool transparent, unsigned width = 4097, unsigned height = 3073)
 {
-    FILE *file = std::fopen(path.c_str(), "wb");
+    FILE *file = liltview::test::fixture_file(path);
     check(file, "Cannot create PNG fixture");
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
     png_infop info  = png_create_info_struct(png);
@@ -51,7 +52,7 @@ void fixture(const std::filesystem::path &path, bool transparent, unsigned width
     png_destroy_write_struct(&png, &info);
     std::fclose(file);
 }
-render::Readback frame(Viewer &viewer, render::Renderer &renderer, float density)
+render::Readback frame(Viewer &viewer, render::Renderer &renderer, float density, float wheel = 0)
 {
     renderer.begin_frame();
     ImGui_ImplSDL3_NewFrame();
@@ -59,6 +60,11 @@ render::Readback frame(Viewer &viewer, render::Renderer &renderer, float density
     const auto size            = renderer.framebuffer_size();
     io.DisplaySize             = {static_cast<float>(size.width) / density, static_cast<float>(size.height) / density};
     io.DisplayFramebufferScale = {density, density};
+    if (wheel)
+    {
+        io.AddMousePosEvent(255.0f / density, 254.0f / density);
+        io.AddMouseWheelEvent(0, wheel);
+    }
     ImGui::NewFrame();
     ImGui::SetNextWindowPos({0, 0});
     ImGui::SetNextWindowSize(io.DisplaySize);
@@ -152,6 +158,10 @@ public:
         if (delay_ms)
             SDL_Delay(delay_ms);
         inner_.update_image(image, rect, pixels);
+    }
+    bool discard_image_mips(render::Image image, unsigned count) override
+    {
+        return inner_.discard_image_mips(image, count);
     }
     void destroy_image(render::Image image) noexcept override
     {
@@ -306,7 +316,7 @@ void preheat(Viewer &viewer, render::Renderer &renderer)
 }
 void motion_fixture(const std::filesystem::path &path, bool transparent)
 {
-    FILE *file = std::fopen(path.c_str(), "wb");
+    FILE *file = liltview::test::fixture_file(path);
     check(file, "Cannot create motion fixture");
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
     png_infop info  = png_create_info_struct(png);
@@ -473,6 +483,40 @@ void exercise_interaction(render::Renderer &renderer, const std::filesystem::pat
     check(renderer.capabilities().image_bytes == 0, "Interaction cache leaked GPU textures");
 }
 
+void exercise_zoom_budget(render::Renderer &renderer, const std::filesystem::path &folder)
+{
+    for (const bool transparent : {false, true})
+    {
+        ImGui::StyleColorsDark();
+        const auto path = folder / "zoom-budget.png";
+        fixture(path, transparent);
+        Viewer viewer(renderer);
+        viewer.set_viewport({0, 0}, {511, 509}, 1);
+        viewer.open(path);
+        settle(viewer, renderer, 1);
+        std::filesystem::remove(path); // Zooming back in must use the immutable cache.
+        for (unsigned cycle = 0; cycle < 3; ++cycle)
+        {
+            viewer.actual_size();
+            verify(settle(viewer, renderer, 1), transparent);
+            preheat(viewer, renderer);
+            for (unsigned step = 0; step < 8; ++step)
+            {
+                const auto before = viewer.presented_view().scale();
+                frame(viewer, renderer, 1, -1); // Exercise the actual ImGui wheel path.
+                settle(viewer, renderer, 1);
+                check(viewer.presented_view().scale() < before, "Wheel zoom did not advance");
+                const auto caps = renderer.capabilities();
+                check(caps.image_bytes <= caps.image_budget_bytes, "Wheel zoom exceeded GPU budget");
+            }
+        }
+        viewer.actual_size();
+        verify(settle(viewer, renderer, 1), transparent);
+        viewer.shutdown();
+        check(renderer.capabilities().image_bytes == 0, "Zoom budget test leaked textures");
+    }
+}
+
 void exercise(render::Renderer &renderer, const std::filesystem::path &folder)
 {
     for (bool transparent : {false, true})
@@ -545,11 +589,15 @@ int main(int argc, char **argv)
         check(window, SDL_GetError());
         ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
-        auto renderer              = render::create_renderer({render::SurfaceKind::sdl_window, window, 32 * 1024 * 1024, false});
-        platform                   = initialize_imgui_platform(window);
+        const bool zoom_budget     = argc > 1 && std::string(argv[1]) == "--zoom-budget";
+        auto renderer              = render::create_renderer(
+            {render::SurfaceKind::sdl_window, window, (zoom_budget ? 16ULL : 32ULL) * 1024 * 1024, false});
+        platform = initialize_imgui_platform(window);
         check(platform, "Cannot initialize ImGui platform");
         std::filesystem::create_directories(folder);
-        if (argc > 1 && std::string(argv[1]) == "--restore")
+        if (zoom_budget)
+            exercise_zoom_budget(*renderer, folder);
+        else if (argc > 1 && std::string(argv[1]) == "--restore")
             exercise_restore(*renderer, folder);
         else if (argc > 1 && std::string(argv[1]) == "--interaction")
             exercise_interaction(*renderer, folder);
@@ -563,7 +611,9 @@ int main(int argc, char **argv)
         SDL_DestroyWindow(window);
         SDL_Quit();
         std::filesystem::remove_all(folder);
-        if (argc > 1 && std::string(argv[1]) == "--interaction")
+        if (zoom_budget)
+            std::puts("PASS repeated wheel zoom under GPU pressure, transparent pixels and native cache restoration");
+        else if (argc > 1 && std::string(argv[1]) == "--interaction")
             std::puts("PASS bounded background cache, indexed interaction and zero warm reuploads");
         else if (argc > 1 && std::string(argv[1]) == "--motion")
             std::puts("PASS complete high-resolution camera motion while background restoration is pending");

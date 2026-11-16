@@ -149,6 +149,16 @@ public:
         return image;
     }
 
+    // Drop the highest-resolution levels of an immutable mipmapped image without
+    // allocating/uploading anything. Keep its handle, original UV coordinates and
+    // sampling at retained levels unchanged. False leaves the image untouched.
+    // As with destroy_image(), all earlier draws must already be submitted.
+    // update_image() is no longer allowed after a successful nonzero discard.
+    virtual bool discard_image_mips(Image, unsigned)
+    {
+        return false;
+    }
+
     // Call after the last draw using this image was submitted, or before NewFrame.
     virtual void destroy_image(Image) noexcept                                                                              = 0;
     virtual void add_image(ImDrawList *, Image, Point min, Point max, Point uv_min = {0, 0}, Point uv_max = {1, 1})         = 0;

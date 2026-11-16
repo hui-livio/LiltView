@@ -89,6 +89,7 @@ struct Texture
     ImageDesc desc;
     std::uint32_t generation = 1;
     std::uint64_t bytes      = 0;
+    unsigned first_level     = 0;
 };
 struct Sampling
 {
@@ -165,9 +166,31 @@ public:
     void update_image(Image image, Rect destination, Pixels source) override
     {
         auto &texture = get(image);
+        if (texture.first_level)
+            throw Error(ErrorCode::invalid_argument, "Cannot update an image after discarding mip levels");
         validate_upload(texture.desc.size, destination, source);
         upload(texture.levels.front().get(), destination, source);
         generate_mipmaps(texture);
+    }
+    bool discard_image_mips(Image image, unsigned count) override
+    {
+        auto &texture = get(image);
+        if (count >= texture.levels.size())
+            return false;
+        auto size = texture.desc.size;
+        for (unsigned level = 0; level < texture.first_level; ++level)
+            size = {std::max(1u, size.width / 2), std::max(1u, size.height / 2)};
+        std::uint64_t released = 0;
+        for (unsigned level = 0; level < count; ++level)
+        {
+            released += static_cast<std::uint64_t>(size.width) * size.height * 4;
+            size      = {std::max(1u, size.width / 2), std::max(1u, size.height / 2)};
+        }
+        texture.levels.erase(texture.levels.begin(), texture.levels.begin() + count);
+        texture.first_level += count;
+        texture.bytes       -= released;
+        used_               -= released;
+        return true;
     }
     void destroy_image(Image image) noexcept override
     {
@@ -201,8 +224,9 @@ public:
             if (pixels > 0)
                 ratio = std::max(ratio, texels / pixels);
         }
-        const auto lod   = ratio > 1 ? std::log2(ratio) : 0;
-        const auto level = static_cast<std::size_t>(std::min(lod, static_cast<float>(texture.levels.size() - 1)));
+        const auto lod          = ratio > 1 ? std::log2(ratio) : 0;
+        const auto retained_lod = std::max(0.0f, lod - static_cast<float>(texture.first_level));
+        const auto level        = static_cast<std::size_t>(std::min(retained_lod, static_cast<float>(texture.levels.size() - 1)));
         Sampling sampling{texture.levels[level].get(),
                           ratio <= 1 && texture.desc.magnification == ImageDesc::Magnification::nearest ? SDL_SCALEMODE_NEAREST :
                                                                                                           SDL_SCALEMODE_LINEAR};
@@ -339,11 +363,12 @@ private:
             }
         }
         generate_mipmaps(allocation);
-        auto &texture   = textures_[slot];
-        texture.levels  = std::move(allocation.levels);
-        texture.desc    = desc;
-        texture.bytes   = bytes;
-        used_          += bytes;
+        auto &texture        = textures_[slot];
+        texture.levels       = std::move(allocation.levels);
+        texture.desc         = desc;
+        texture.bytes        = bytes;
+        texture.first_level  = 0;
+        used_               += bytes;
         return {owner_, slot, texture.generation};
     }
     void upload(SDL_Texture *texture, Rect destination, Pixels source)

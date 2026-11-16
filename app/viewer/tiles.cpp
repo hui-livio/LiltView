@@ -492,6 +492,27 @@ bool Tiles::prepare(const Viewport &view, const Viewport *preserve, UploadBudget
     upload_pending_      = false;
     indexed_tiles_       = 0;
     const unsigned level = level_for(view);
+    if (cache_)
+    {
+        // Both cameras can use these existing mip levels. Keeping native bases
+        // pinned while zooming out otherwise makes a small screen-sized target
+        // exhaust the budget, even though its required resolution fits easily.
+        const auto retained_level = preserve ? std::min(level, level_for(*preserve)) : level;
+        if (retained_level >= overview_level_)
+            release_details(); // Both views are already covered by the overview atlases.
+        else
+            for (const auto index : resident_)
+            {
+                auto &tile      = tiles_[index];
+                const auto trim = [&](render::Image image, unsigned &base)
+                {
+                    if (image && base < retained_level && renderer_.discard_image_mips(image, retained_level - base))
+                        base = retained_level;
+                };
+                trim(tile.detail, tile.detail_level);
+                trim(tile.preserved, tile.preserved_level);
+            }
+    }
     if (cache_ && level >= overview_level_)
     {
         // Preheat the native center while FIT remains on screen. This is a

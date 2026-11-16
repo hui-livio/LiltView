@@ -117,6 +117,10 @@ if(LILTVIEW_BUILD_UI_RENDER_TESTS OR LILTVIEW_BUILD_DESKTOP_TESTS)
     target_link_libraries(liltview_navigation_render PRIVATE liltview_viewer liltview_sdl_platform
         liltview_jpeg png_static TIFF::tiff)
     liltview_configure_cxx_target(liltview_navigation_render)
+    add_executable(liltview_viewer_sharpness integration/viewer_sharpness.cpp)
+    target_link_libraries(liltview_viewer_sharpness PRIVATE liltview_viewer liltview_sdl_platform
+        liltview_jpeg png_static TIFF::tiff)
+    liltview_configure_cxx_target(liltview_viewer_sharpness)
 endif()
 if(LILTVIEW_BUILD_UI_RENDER_TESTS)
     if(NOT TARGET LiltView::ui)
@@ -130,6 +134,10 @@ if(LILTVIEW_BUILD_UI_RENDER_TESTS)
     set_tests_properties(ui.navigation_render PROPERTIES TIMEOUT 90 RUN_SERIAL TRUE)
     add_test(NAME ui.dock_render COMMAND liltview_dock_render)
     set_tests_properties(ui.dock_render PROPERTIES TIMEOUT 45 RUN_SERIAL TRUE)
+    add_test(NAME ui.zoom_budget COMMAND liltview_viewer_sharpness --zoom-budget)
+    add_test(NAME ui.zoom_budget.software COMMAND "${CMAKE_COMMAND}" -E env SDL_RENDER_DRIVER=software
+        $<TARGET_FILE:liltview_viewer_sharpness> --zoom-budget)
+    set_tests_properties(ui.zoom_budget ui.zoom_budget.software PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
     add_test(NAME render.contract COMMAND liltview_renderer_contract)
     add_test(NAME render.contract.software COMMAND "${CMAKE_COMMAND}" -E env SDL_RENDER_DRIVER=software
         $<TARGET_FILE:liltview_renderer_contract>)
@@ -153,10 +161,6 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_executable(liltview_viewer_benchmark integration/viewer_benchmark.cpp)
     target_link_libraries(liltview_viewer_benchmark PRIVATE liltview_viewer liltview_sdl_platform)
     liltview_configure_cxx_target(liltview_viewer_benchmark)
-    add_executable(liltview_viewer_sharpness integration/viewer_sharpness.cpp)
-    target_link_libraries(liltview_viewer_sharpness PRIVATE liltview_viewer liltview_sdl_platform
-        liltview_jpeg png_static TIFF::tiff)
-    liltview_configure_cxx_target(liltview_viewer_sharpness)
     add_test(NAME desktop.viewer_sharpness COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_viewer_sharpness>)
     set_tests_properties(desktop.viewer_sharpness PROPERTIES TIMEOUT 60)
@@ -169,6 +173,9 @@ if(LILTVIEW_BUILD_DESKTOP_TESTS)
     add_test(NAME desktop.covered_motion COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_viewer_sharpness> --motion)
     set_tests_properties(desktop.covered_motion PROPERTIES TIMEOUT 60)
+    add_test(NAME desktop.zoom_budget COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
+        $<TARGET_FILE:liltview_viewer_sharpness> --zoom-budget)
+    set_tests_properties(desktop.zoom_budget PROPERTIES TIMEOUT 60)
     add_test(NAME desktop.animation COMMAND "${CMAKE_COMMAND}" -E env SDL_VIDEODRIVER=offscreen
         $<TARGET_FILE:liltview_animation_render> "${PROJECT_SOURCE_DIR}/tests/fixtures/red-first-frame.gif")
     set_tests_properties(desktop.animation PROPERTIES TIMEOUT 15)
