@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional desktop integration tests: Linux D-Bus/SDL offscreen or Windows pixels.
 
-The chrome_pixels case also runs on Windows with its native OpenGL backend
+The chrome_pixels case also runs on Windows with its SDL_Render backend
 at 100% display scale (fractional scales are covered by the headless C++ tests).
 
 No real desktop settings, compositor configuration or launcher files are changed.
@@ -145,7 +145,7 @@ def test_dialog_failure(executable, folder):
 
 
 def test_navigation(executable, folder):
-    # Exercise exported actions all the way through Viewer and actual OpenGL display.
+    # Exercise exported actions all the way through Viewer and actual SDL_Render display.
     sample = Path(__file__).resolve().parents[1] / "fixtures/red.bmp"
     for name in ("image1.bmp", "image2.BMP", "image10.bmp"):
         shutil.copy2(sample, folder / name)
@@ -483,7 +483,7 @@ def test_chrome(executable, folder):
             windows = re.findall(r"Window created: system_titlebar=(true|false), transparent=(true|false), native_window_id=(\d+)", text)
             alpha = "false" if os.environ.get("SDL_VIDEODRIVER") == "x11" else "true"
             assert [(native, transparent) for native, transparent, _ in windows] == [("true", alpha)], text
-            reused = re.findall(r"native_window_id=(\d+), surface_reused=true, gl_context_reused=true", text)
+            reused = re.findall(r"native_window_id=(\d+), surface_reused=true, renderer_reused=true", text)
             assert reused == [windows[0][2]] * 3, text
             assert "Window handoff:" not in text and "Window placement:" not in text, text
             assert text.count("Window decoration applied:") == 3, text

@@ -133,6 +133,9 @@ private:
         update_visual_style();
         configure_hit_test();
         viewer_ = std::make_unique<Viewer>(*renderer_);
+        viewer_->set_static_upload_mode(settings_.static_upload_mode == StaticUploadMode::batch ?
+            Viewer::StaticUploadMode::batch : Viewer::StaticUploadMode::pipeline);
+        viewer_->set_static_cache_compression(settings_.static_cache_compression);
         if (!options.image_path.empty())
             viewer_->open(utf8_path(options.image_path));
         smoke_started_ = SDL_GetTicks();
@@ -142,11 +145,12 @@ private:
         if (!options.smoke_test)
             require(SDL_ShowWindow(window_), "SDL_ShowWindow");
         update_native_window_theme();
-        spdlog::info("LiltView {} started, app_id={}, video={}, renderer=OpenGL3, texture_limit={}", LILTVIEW_VERSION,
-                     LILTVIEW_APP_ID, SDL_GetCurrentVideoDriver(), renderer_->capabilities().max_texture_edge);
+        spdlog::info("LiltView {} started, app_id={}, video={}, renderer=SDL_Render/{}, texture_limit={}", LILTVIEW_VERSION,
+                     LILTVIEW_APP_ID, SDL_GetCurrentVideoDriver(), SDL_GetRendererName(SDL_GetRenderer(window_)),
+                     renderer_->capabilities().max_texture_edge);
     }
 
-    // 窗口和 GL 上下文准备完成后才创建纹理；任一阶段失败都由析构函数回收已完成部分。
+    // SDL 窗口和 renderer 准备完成后才创建纹理；任一阶段失败都由析构函数回收已完成部分。
     SDL_Window *make_window(int width, int height, bool system_titlebar)
     {
         const auto render_flags = prepare_render_window();
@@ -196,7 +200,7 @@ private:
         shell.dismiss_transient_menus();
         const auto flags            = SDL_GetWindowFlags(window_);
         const auto original_window  = SDL_GetWindowID(window_);
-        const auto original_context = SDL_GL_GetCurrentContext();
+        const auto *original_renderer = SDL_GetRenderer(window_);
         int width = settings_.width, height = settings_.height;
         const bool normal = (flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN)) == 0;
         if (normal)
@@ -234,9 +238,9 @@ private:
         settings_.height = placement.height;
         close_inputs_    = {};
         spdlog::debug(
-            "Window decoration applied: system_titlebar={}, transparent={}, native_window_id={}, surface_reused={}, gl_context_reused={}",
+            "Window decoration applied: system_titlebar={}, transparent={}, native_window_id={}, surface_reused={}, renderer_reused={}",
             settings_.system_titlebar, (SDL_GetWindowFlags(window_) & SDL_WINDOW_TRANSPARENT) != 0, SDL_GetWindowID(window_),
-            original_window == SDL_GetWindowID(window_), original_context == SDL_GL_GetCurrentContext());
+            original_window == SDL_GetWindowID(window_), original_renderer == SDL_GetRenderer(window_));
         return true;
     }
 
@@ -804,9 +808,11 @@ private:
         const auto border = window_border_color();
         renderer_->set_opaque_background({border.x, border.y, border.z});
         renderer_->render_frame(ImGui::GetDrawData());
+        viewer_->note_frame_submitted();
         if (capture)
             capture_smoke_frame(options);
         renderer_->present();
+        viewer_->note_frame_presented();
     }
 
     // 测试动作通过真实 SDL 事件路径执行，避免另写一套退出和弹窗处理逻辑。

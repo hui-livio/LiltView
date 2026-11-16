@@ -1,0 +1,18 @@
+{
+  "name": "dav1d reference-count lifetime subset",
+  "url": "https://github.com/videolan/dav1d",
+  "commit": "39834d7f71c85a9c555f2ddd7a7add6d671750de",
+  "license": "BSD-2-Clause",
+  "upstream": {
+    "src/ref.h": "c03e37fba41510c3c24a5b0158f5597378e05493ba7068e1d8d9c5eca1d36f18",
+    "src/ref.c": "daf137a54bd095205db3a7616e743a0e8ce3506aac5ab78f211f5e3c7a5aeaaf"
+  },
+  "files": {
+    "ref.h": "d643b9e1adc13dd2adec235f9957c361c2dfb6c69baeb83bf2255f555aec7200"
+  },
+  "changes": [
+    "Extracted dav1d_ref_init/inc/dec and Dav1dRef layout only",
+    "Omitted decoder/pool/aligned allocator dependencies",
+    "Uses standard C11 atomics; no FFmpeg/dav1d runtime dependency"
+  ]
+}

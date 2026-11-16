@@ -1,0 +1,259 @@
+{
+  "cache_condition": "fresh process, warmed OS input cache; fresh anonymous tile cache",
+  "runs_per_mode": 10,
+  "input": {
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13400",
+    "file": "checker-random-8192.png",
+    "sha256": "abbc629bcd2ea056858ce54e30f34c09e4a2e68888efd2f25f8b783cf52f1fa8",
+    "width": 8192,
+    "height": 8192,
+    "block": 16,
+    "seed": 20261113,
+    "pillow": "13.0.0",
+    "python": "3.15.0 (tags/v3.15.0:d220409, Oct  9 2026, 11:55:56) [MSC v.1951 64 bit (AMD64)]",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "file_bytes": 1517605,
+    "rgba_bytes": 268435456,
+    "note": "Alternating luminance, independently random RGB per 16px cell; not uniform Core tiles"
+  },
+  "modes": {
+    "pipeline": {
+      "ready_ms": {
+        "median": 1721.4,
+        "min": 1602.04,
+        "max": 2129.79,
+        "p95": 2129.79
+      },
+      "presented_ms": {
+        "median": 1721.8,
+        "min": 1603.67,
+        "max": 2130.24,
+        "p95": 2130.24
+      },
+      "core_ms": {
+        "median": 1640.705,
+        "min": 1538.69,
+        "max": 2071.9,
+        "p95": 2071.9
+      },
+      "decode_done_ms": {
+        "median": 1710.3649999999998,
+        "min": 1587.1,
+        "max": 2115.91,
+        "p95": 2115.91
+      },
+      "prepare_done_ms": {
+        "median": 1720.825,
+        "min": 1601.21,
+        "max": 2129.42,
+        "p95": 2129.42
+      },
+      "first_upload_ms": {
+        "median": 32.7419,
+        "min": 27.1712,
+        "max": 110.541,
+        "p95": 110.541
+      },
+      "last_upload_ms": {
+        "median": 1721.165,
+        "min": 1601.38,
+        "max": 2129.55,
+        "p95": 2129.55
+      },
+      "upload_cpu_ms": {
+        "median": 57.1721,
+        "min": 52.3952,
+        "max": 62.104,
+        "p95": 62.104
+      },
+      "max_upload_slice_ms": {
+        "median": 12.131599999999999,
+        "min": 9.9357,
+        "max": 13.9326,
+        "p95": 13.9326
+      },
+      "pump_max_ms": {
+        "median": 12.1538,
+        "min": 9.9543,
+        "max": 13.9444,
+        "p95": 13.9444
+      },
+      "work_p95_ms": {
+        "median": 0.7276,
+        "min": 0.6943,
+        "max": 1.0175,
+        "p95": 1.0175
+      },
+      "work_max_ms": {
+        "median": 17.0958,
+        "min": 10.3107,
+        "max": 26.8246,
+        "p95": 26.8246
+      },
+      "event_p95_ms": {
+        "median": 1.2014,
+        "min": 0.7921,
+        "max": 7.2693,
+        "p95": 7.2693
+      },
+      "event_max_ms": {
+        "median": 17.1878,
+        "min": 9.9806,
+        "max": 26.6762,
+        "p95": 26.6762
+      },
+      "output_peak": {
+        "median": 131888,
+        "min": 65944,
+        "max": 197832,
+        "p95": 197832
+      },
+      "cache_bytes": {
+        "median": 11650927,
+        "min": 11650927,
+        "max": 11650927,
+        "p95": 11650927
+      },
+      "peak_rss_bytes": {
+        "median": 92413952,
+        "min": 86835200,
+        "max": 97046528,
+        "p95": 97046528
+      },
+      "process_cpu_ms": {
+        "median": 4234.375,
+        "min": 3921.88,
+        "max": 4562.5,
+        "p95": 4562.5
+      },
+      "driver": "direct3d11",
+      "vsync": 0,
+      "pixel_hash": "211789602916202268",
+      "loading_presented_ms": {
+        "median": 4.3705,
+        "min": 3.994,
+        "max": 7.376,
+        "p95": 7.376
+      }
+    },
+    "batch": {
+      "ready_ms": {
+        "median": 1679.105,
+        "min": 1542.57,
+        "max": 1820.77,
+        "p95": 1820.77
+      },
+      "presented_ms": {
+        "median": 1679.5700000000002,
+        "min": 1542.99,
+        "max": 1821.22,
+        "p95": 1821.22
+      },
+      "core_ms": {
+        "median": 1539.4,
+        "min": 1400.74,
+        "max": 1676.11,
+        "p95": 1676.11
+      },
+      "decode_done_ms": {
+        "median": 1569.345,
+        "min": 1433.47,
+        "max": 1708.44,
+        "p95": 1708.44
+      },
+      "prepare_done_ms": {
+        "median": 1578.775,
+        "min": 1442.11,
+        "max": 1717.98,
+        "p95": 1717.98
+      },
+      "first_upload_ms": {
+        "median": 1579.1100000000001,
+        "min": 1442.25,
+        "max": 1718.13,
+        "p95": 1718.13
+      },
+      "last_upload_ms": {
+        "median": 1678.8249999999998,
+        "min": 1542.26,
+        "max": 1820.57,
+        "p95": 1820.57
+      },
+      "upload_cpu_ms": {
+        "median": 100.8135,
+        "min": 96.0485,
+        "max": 107.631,
+        "p95": 107.631
+      },
+      "max_upload_slice_ms": {
+        "median": 100.8135,
+        "min": 96.0485,
+        "max": 107.631,
+        "p95": 107.631
+      },
+      "pump_max_ms": {
+        "median": 100.848,
+        "min": 96.0829,
+        "max": 107.661,
+        "p95": 107.661
+      },
+      "work_p95_ms": {
+        "median": 0.69695,
+        "min": 0.6496,
+        "max": 0.9218,
+        "p95": 0.9218
+      },
+      "work_max_ms": {
+        "median": 101.709,
+        "min": 96.5346,
+        "max": 108.404,
+        "p95": 108.404
+      },
+      "event_p95_ms": {
+        "median": 2.55205,
+        "min": 0.7449,
+        "max": 12.6312,
+        "p95": 12.6312
+      },
+      "event_max_ms": {
+        "median": 102.166,
+        "min": 97.2872,
+        "max": 111.114,
+        "p95": 111.114
+      },
+      "output_peak": {
+        "median": 16881664,
+        "min": 16881664,
+        "max": 16881664,
+        "p95": 16881664
+      },
+      "cache_bytes": {
+        "median": 11650927,
+        "min": 11650927,
+        "max": 11650927,
+        "p95": 11650927
+      },
+      "peak_rss_bytes": {
+        "median": 122259456,
+        "min": 120242176,
+        "max": 128499712,
+        "p95": 128499712
+      },
+      "process_cpu_ms": {
+        "median": 4078.125,
+        "min": 3625,
+        "max": 4343.75,
+        "p95": 4343.75
+      },
+      "driver": "direct3d11",
+      "vsync": 0,
+      "pixel_hash": "211789602916202268",
+      "loading_presented_ms": {
+        "median": 4.281499999999999,
+        "min": 3.443,
+        "max": 5.522,
+        "p95": 5.522
+      }
+    }
+  }
+}

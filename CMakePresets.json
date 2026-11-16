@@ -13,6 +13,7 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "LILTVIEW_RENDERER_BACKEND": "SDL_RENDER",
                 "BUILD_TESTING": true,
                 "LILTVIEW_CXX_STANDARD": "23",
                 "LILTVIEW_BUILD_APP_COMPONENTS": false,

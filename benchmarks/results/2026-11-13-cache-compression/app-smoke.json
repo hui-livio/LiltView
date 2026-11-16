@@ -1,0 +1,65 @@
+{
+  "note": "Full application smoke, one per configuration; different window/UI from 1600x1000 benchmark. Not included in medians.",
+  "results": [
+    {
+      "resolution": "4k",
+      "cache_compression": true,
+      "exit_code": 0,
+      "ready_ms": 815.581,
+      "compress_ms": 0,
+      "cache_bytes": 0,
+      "codec": "none/direct-rgba",
+      "clean_shutdown": true
+    },
+    {
+      "resolution": "8k",
+      "cache_compression": true,
+      "exit_code": 0,
+      "ready_ms": 996.767,
+      "compress_ms": 418.039,
+      "cache_bytes": 123962267,
+      "codec": "lz4",
+      "clean_shutdown": true
+    },
+    {
+      "resolution": "16k",
+      "cache_compression": true,
+      "exit_code": 0,
+      "ready_ms": 3942.285,
+      "compress_ms": 1562.085,
+      "cache_bytes": 501106167,
+      "codec": "lz4",
+      "clean_shutdown": true
+    },
+    {
+      "resolution": "4k",
+      "cache_compression": false,
+      "exit_code": 0,
+      "ready_ms": 798.043,
+      "compress_ms": 0,
+      "cache_bytes": 0,
+      "codec": "none/direct-rgba",
+      "clean_shutdown": true
+    },
+    {
+      "resolution": "8k",
+      "cache_compression": false,
+      "exit_code": 0,
+      "ready_ms": 1082.496,
+      "compress_ms": 0,
+      "cache_bytes": 176947380,
+      "codec": "raw-rgba",
+      "clean_shutdown": true
+    },
+    {
+      "resolution": "16k",
+      "cache_compression": false,
+      "exit_code": 0,
+      "ready_ms": 4016.166,
+      "compress_ms": 0,
+      "cache_bytes": 707788440,
+      "codec": "raw-rgba",
+      "clean_shutdown": true
+    }
+  ]
+}

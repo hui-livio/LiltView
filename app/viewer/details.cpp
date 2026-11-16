@@ -3,9 +3,9 @@ namespace liltview
 {
 std::optional<ImageDetails> Viewer::image_details() const
 {
-    if (closing_ || !has_visible_image())
+    if (closing_ || !has_image())
         return std::nullopt;
-    const bool reveal = work_ == Work::static_image && loading_ && !pending_scene_.empty();
+    const bool reveal = false;
     ImageDetails details;
     details.path                = reveal ? selected_path_ : displayed_path_;
     details.image               = reveal ? pending_info_ : info_;
@@ -52,8 +52,10 @@ void Viewer::rotate(int quarter_turns)
 }
 void Viewer::set_viewport(render::Point min, render::Point max, float density)
 {
-    const auto &image = loading_ && !pending_scene_.empty() ? pending_info_ : info_;
+    canvas_min_ = min; canvas_max_ = max; canvas_density_ = density;
+    const auto &image = loading_ && work_ == Work::static_image ? pending_info_ : info_;
     viewport_.update(min, max, density, image.source_size, image.orientation);
+    commit_static_if_ready();
 }
 void Viewer::pan(double x, double y)
 {

@@ -31,3 +31,6 @@
 [submodule "libtiff"]
 	path = third_party/libtiff
 	url = https://gitlab.com/libtiff/libtiff.git
+[submodule "lz4"]
+	path = third_party/lz4
+	url = https://github.com/lz4/lz4.git

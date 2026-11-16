@@ -7,12 +7,13 @@
 #include <unordered_set>
 #include <vector>
 #include "tile_reader.hpp"
+#include "tile_preparation.hpp"
 #include "viewport.hpp"
 
 namespace liltview
 {
 // One immutable native-resolution scene. Small scenes stay on the GPU; large
-// scenes keep compressed native tiles/mip levels in an anonymous local cache.
+// scenes keep raw or LZ4 native tiles/mip levels in a bounded memory cache.
 // Camera changes never submit a decode or resample image contents.
 class Tiles
 {
@@ -29,9 +30,13 @@ public:
     }
     Tiles(const Tiles &)            = delete;
     Tiles &operator=(const Tiles &) = delete;
-    void begin(const lv_image_info &);
+    void begin(const lv_image_info &, bool defer_cache = false);
+    unsigned overview_level() const { return overview_level_; }
+    void install(PreparedTile);
+    void adopt_cache(std::shared_ptr<MemoryTileCache> cache, std::uint64_t bytes) { cache_ = std::move(cache); cache_bytes_ = bytes; }
     void upload(const lv_region_info &);
     void clear() noexcept;
+    bool retire_ready() noexcept;
     void release_details() noexcept;
     void retry_reads()
     {
@@ -41,8 +46,16 @@ public:
     void commit_restore() noexcept;
     void cancel_restore() noexcept;
     void swap(Tiles &);
+    struct UploadBudget
+    {
+        std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+        std::uint64_t bytes = 0;
+        unsigned tiles = 0;
+        bool unlimited = false;
+        bool available() const { return unlimited || !tiles || (tiles < 4 && bytes < 4ULL*1024*1024 && std::chrono::steady_clock::now() < deadline); }
+    };
     bool prepare(const Viewport &,
-                 const Viewport *preserve = nullptr); // Upload cached visible textures before building draw commands.
+                 const Viewport *preserve = nullptr, UploadBudget *shared = nullptr); // Upload cached visible textures before building draw commands.
     void draw(const Viewport &, ImDrawList *, bool preserving = false) const;
     bool covered(const Viewport &) const; // GPU-only readiness: no cache I/O or upload.
     struct Stats
@@ -74,12 +87,7 @@ public:
     }
 
 private:
-    struct Level
-    {
-        render::Size size{};
-        std::uint64_t offset = 0;
-        std::uint32_t bytes  = 0;
-    };
+    using Level = PreparedLevel;
     struct Tile
     {
         lv_rect_u32 rect{};
@@ -112,7 +120,7 @@ private:
     void *userdata_;
     std::unique_ptr<TileReader> reader_;
     std::unordered_set<std::size_t> resident_, preserved_;
-    bool cache_dirty_ = false, upload_pending_ = false;
+    bool upload_pending_ = false;
     std::uint64_t gpu_restores_ = 0;
     std::size_t indexed_tiles_  = 0;
     lv_image_info info_{};
@@ -120,7 +128,7 @@ private:
     std::vector<Atlas> atlases_;
     std::map<std::tuple<std::uint32_t, unsigned, unsigned>, std::vector<Level>> uniform_levels_;
     unsigned atlas_edge_ = 0, atlas_columns_ = 0;
-    std::FILE *cache_          = nullptr;
+    std::shared_ptr<MemoryTileCache> cache_;
     std::uint64_t cache_bytes_ = 0, clock_ = 0;
     std::size_t ready_       = 0;
     unsigned overview_level_ = 0;

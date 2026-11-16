@@ -14,8 +14,7 @@ namespace liltview::render
 {
 enum class Backend
 {
-    opengl3,
-    d3d11
+    sdl_renderer
 };
 enum class SurfaceKind
 {
@@ -82,7 +81,7 @@ struct ImageDesc
 };
 struct Capabilities
 {
-    Backend backend                  = Backend::opengl3;
+    Backend backend                  = Backend::sdl_renderer;
     std::uint32_t max_texture_edge   = 0;
     std::uint64_t image_budget_bytes = 0, image_bytes = 0;
 };
@@ -92,7 +91,6 @@ struct Config
     void *surface                    = nullptr; // Borrowed native window, must outlive Renderer.
     std::uint64_t image_budget_bytes = 128ULL * 1024 * 1024;
     bool vsync                       = true;
-    bool staged_uploads              = true; // Bounded PBO transfers; false is a diagnostic direct-upload baseline.
 };
 struct UploadStats
 {
@@ -149,6 +147,16 @@ public:
             throw;
         }
         return image;
+    }
+
+    // Drop the highest-resolution levels of an immutable mipmapped image without
+    // allocating/uploading anything. Keep its handle, original UV coordinates and
+    // sampling at retained levels unchanged. False leaves the image untouched.
+    // As with destroy_image(), all earlier draws must already be submitted.
+    // update_image() is no longer allowed after a successful nonzero discard.
+    virtual bool discard_image_mips(Image, unsigned)
+    {
+        return false;
     }
 
     // Call after the last draw using this image was submitted, or before NewFrame.

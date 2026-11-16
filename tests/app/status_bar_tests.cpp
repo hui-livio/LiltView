@@ -127,9 +127,41 @@ TEST_CASE("status bar failures show the requested basename without stale image p
             CHECK(retained.status_hint.find("secret") == std::string::npos);
             CHECK(retained.identity.find("private") == std::string::npos);
         }
-    const auto loading = status_bar_content(Language::english, Text::loading, details, "failed.webp", navigation);
-    CHECK(loading.identity.ends_with("Previous image"));
-    CHECK(loading.metadata == "PNG  ·  1100 × 654  ·  85.6%");
+}
+
+TEST_CASE("status bar replacement loading shows the requested image without retained metadata", "[status_bar][loading]")
+{
+    auto details                = image();
+    details.loading_replacement = true;
+    DirectoryNavigationSnapshot navigation;
+    navigation.selected_path = "/secret/new.webp";
+    navigation.current       = 23;
+    navigation.total         = 57;
+    for (const auto language : {Language::english, Language::chinese})
+        for (const auto status : {Text::loading, Text::loading_native})
+            for (const bool same_path : {false, true})
+            {
+                CAPTURE(language, status, same_path);
+                if (same_path)
+                    details.path = navigation.selected_path; // Reloads must also hide old parameters.
+                const auto loading = status_bar_content(language, status, details, "/secret/new.webp", navigation);
+                CHECK(loading.busy);
+                CHECK_FALSE(loading.failed);
+                CHECK(loading.identity == "new.webp  ·  23 / 57");
+                CHECK(loading.metadata.empty());
+                CHECK(loading.status_hint == std::string("new.webp\n") + translate(language, status));
+                details.path = image().path;
+            }
+    navigation.selected_path    = details.path;
+    details.loading_replacement = false;
+    const auto detail           = status_bar_content(Language::english, Text::loading_detail, details, "", navigation);
+    CHECK(detail.busy);
+    CHECK(detail.identity == "图像-100%.wrong  ·  23 / 57");
+    CHECK(detail.metadata == "PNG  ·  1100 × 654  ·  85.6%");
+    const auto ready = status_bar_content(Language::english, Text::ready, details, "", navigation);
+    CHECK_FALSE(ready.busy);
+    CHECK(ready.identity == detail.identity);
+    CHECK(ready.metadata == detail.metadata);
 }
 
 TEST_CASE("status bar marks unknown values explicitly and keeps directory feedback", "[status_bar]")
@@ -170,7 +202,7 @@ TEST_CASE("status bar groups never overlap across narrow widths UI scales themes
                         ImGui::Begin("status_test", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
                         auto details       = image();
                         details.path       = std::u8string(300, u8'x') + u8"-中文-%s.png";
-                        const auto content = status_bar_content(language, Text::loading,
+                        const auto content = status_bar_content(language, Text::loading_detail,
                                                                 populated ? std::optional{details} : std::nullopt, "", {});
                         const auto layout  = status_bar_layout(18, 18 + width, ImGui::CalcTextSize(content.status.c_str()).x,
                                                                ImGui::CalcTextSize(content.metadata.c_str()).x, scale);

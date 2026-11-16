@@ -586,3 +586,31 @@ TEST_CASE("Dock keyboard focus consumes only unmodified image navigation and Esc
         CHECK(menu_action_for_input(menu, {"Control", "Up"}, false, context) == MenuAction::none);
     }
 }
+
+TEST_CASE("static upload strategy is a persistent config-only setting", "[settings]")
+{
+    CHECK(Settings{}.static_upload_mode == StaticUploadMode::pipeline);
+    CHECK(parse_settings("static_upload_mode: batch\n").static_upload_mode == StaticUploadMode::batch);
+    CHECK(parse_settings("static_upload_mode: unknown\n").static_upload_mode == StaticUploadMode::pipeline);
+    Settings settings;
+    settings.static_upload_mode = StaticUploadMode::batch;
+    CHECK(parse_settings(serialize_settings(settings)).static_upload_mode == StaticUploadMode::batch);
+}
+
+TEST_CASE("static cache compression defaults on and round trips without UI", "[settings]")
+{
+    CHECK(Settings{}.static_cache_compression);
+    CHECK(parse_settings("").static_cache_compression);
+    CHECK(parse_settings("static_cache_compression: true\n").static_cache_compression);
+    CHECK_FALSE(parse_settings("static_cache_compression: false\n").static_cache_compression);
+    CHECK(parse_settings("static_cache_compression: invalid\n").static_cache_compression);
+    for (bool enabled : {true, false})
+    {
+        Settings settings;
+        settings.static_cache_compression = enabled;
+        settings.static_upload_mode = StaticUploadMode::batch;
+        const auto restored = parse_settings(serialize_settings(settings));
+        CHECK(restored.static_cache_compression == enabled);
+        CHECK(restored.static_upload_mode == StaticUploadMode::batch);
+    }
+}

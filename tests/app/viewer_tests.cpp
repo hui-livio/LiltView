@@ -60,6 +60,7 @@ public:
     bool allow_upload                 = true;
     bool strict_image_budget          = false;
     unsigned budget_rejections        = 0;
+    unsigned mip_discards             = 0;
     std::uint64_t rejected_live_bytes = 0, rejected_request_bytes = 0;
     Size frame_size{128, 96};
     std::optional<std::array<std::uint8_t, 4>> last_drawn_pixel;
@@ -82,7 +83,7 @@ public:
             (void)id;
             bytes += texture.bytes;
         }
-        return {liltview::render::Backend::opengl3, max_edge, image_budget, bytes};
+        return {liltview::render::Backend::sdl_renderer, max_edge, image_budget, bytes};
     }
     Size framebuffer_size() const override
     {
@@ -126,6 +127,21 @@ public:
         ++uploads;
         if (upload_delay_ms)
             SDL_Delay(upload_delay_ms);
+    }
+    bool discard_image_mips(Image image, unsigned count) override
+    {
+        auto &texture = textures.at(image.slot);
+        auto size     = texture.size;
+        for (unsigned level = 0; level < count; ++level)
+        {
+            if (size.width == 1 && size.height == 1)
+                return false;
+            size = {std::max(1u, size.width / 2), std::max(1u, size.height / 2)};
+        }
+        texture.size   = size;
+        texture.bytes  = liltview::render::image_storage_bytes({size, true});
+        mip_discards  += count;
+        return true;
     }
     void destroy_image(Image image) noexcept override
     {
@@ -181,7 +197,7 @@ struct EventLoop
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         do
         {
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             if (viewer.settled())
                 return;
             if (std::chrono::steady_clock::now() >= deadline)
@@ -196,7 +212,7 @@ struct EventLoop
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         do
         {
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             if (!viewer.navigation().scanning && !viewer.prefetch_pending())
                 return;
             if (std::chrono::steady_clock::now() >= deadline)
@@ -235,7 +251,7 @@ TEST_CASE("viewer prefetches both neighbors without GPU uploads and navigation r
     CHECK(viewer.content_cache_bytes() > 0);
     CHECK(viewer.content_cache_bytes() <= 64 * 1024 * 1024);
     for (unsigned i = 0; i < 10; ++i)
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
     CHECK(viewer.prefetch_stats().submitted == 2);
     viewer.navigate(1);
     loop.settle(viewer);
@@ -268,7 +284,7 @@ TEST_CASE("viewer can shut down accepted neighbor prefetch without polling its t
     while (!viewer.prefetch_stats().active)
     {
         REQUIRE(std::chrono::steady_clock::now() < deadline);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         SDL_Delay(1);
     }
     viewer.begin_shutdown();
@@ -300,13 +316,13 @@ TEST_CASE("cross directory generation churn isolates retired neighbor results fr
     while (!viewer.prefetch_stats().active)
     {
         REQUIRE(std::chrono::steady_clock::now() < deadline);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         SDL_Delay(1);
     }
     const auto old_submitted = viewer.prefetch_stats().submitted;
     REQUIRE(old_submitted > 0);
     viewer.open(folder / "B" / "1.png");
-    viewer.pump();
+    (viewer.pump(), viewer.prepare_loading_view());
     viewer.open(folder / "C" / "1.png");
     loop.settle_prefetch(viewer);
     CHECK_FALSE(viewer.failed());
@@ -378,7 +394,7 @@ TEST_CASE("viewer neighbor boundaries and failed background reads preserve the c
     REQUIRE(viewer.image_details());
     CHECK(viewer.image_details()->path == folder / "1.png");
     for (unsigned i = 0; i < 10; ++i)
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
     CHECK(viewer.prefetch_stats().submitted == 1);
     CHECK(viewer.prefetch_stats().failed == 1);
     viewer.shutdown();
@@ -440,7 +456,7 @@ TEST_CASE("background neighbor events never replace GIF frame identity or foregr
     while (!later_frame || !viewer.prefetch_stats().failed)
     {
         REQUIRE(std::chrono::steady_clock::now() < deadline);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         later_frame = later_frame || viewer.displayed_frame_index() == 1;
         CHECK_FALSE(viewer.failed());
         REQUIRE(viewer.image_details());
@@ -473,7 +489,7 @@ TEST_CASE("viewer browses a naturally sorted directory and can leave a deleted o
     while (viewer.navigation().scanning)
     {
         REQUIRE(std::chrono::steady_clock::now() < deadline);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         SDL_Delay(1);
     }
     REQUIRE(viewer.navigation().total == 3);
@@ -610,7 +626,7 @@ TEST_CASE("viewer replaces in-flight requests and releases every renderer image"
     TestRenderer renderer;
     liltview::Viewer viewer(renderer);
     viewer.open(sample);
-    viewer.pump();
+    (viewer.pump(), viewer.prepare_loading_view());
     viewer.open(sample.parent_path() / "testimgint.jpg");
     loop.settle(viewer);
     REQUIRE(viewer.has_image());
@@ -634,7 +650,7 @@ TEST_CASE("viewer shutdown joins idle and in-flight workers with a bounded wait"
         if (open_image)
         {
             viewer.open(sample);
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
         }
         viewer.begin_shutdown();
         viewer.begin_shutdown();
@@ -684,7 +700,7 @@ TEST_CASE("viewer automatically displays later GIF frames and reuses two texture
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (viewer.displayed_frame_index() != 1)
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         REQUIRE_FALSE(viewer.failed());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         SDL_Event event;
@@ -694,7 +710,7 @@ TEST_CASE("viewer automatically displays later GIF frames and reuses two texture
     {
         while (viewer.displayed_frame_index() != index)
         {
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             REQUIRE_FALSE(viewer.failed());
             REQUIRE(std::chrono::steady_clock::now() < deadline);
             SDL_Event event;
@@ -722,7 +738,7 @@ TEST_CASE("viewer freezes valid GIF display on upload failure and can open anoth
     const auto deadline  = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!viewer.failed())
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         SDL_Event event;
         SDL_WaitEventTimeout(&event, 10);
@@ -746,7 +762,7 @@ TEST_CASE("animation GPU budget failure keeps the last complete texture", "[view
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!viewer.failed())
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         SDL_Event event;
         SDL_WaitEventTimeout(&event, 10);
@@ -868,7 +884,7 @@ TEST_CASE("a native-size preview uses pixel-preserving magnification", "[viewer]
     std::filesystem::remove_all(folder);
 }
 
-TEST_CASE("native row bands are visible before the complete image finishes decoding", "[viewer][native][stream]")
+TEST_CASE("native uploads overlap decoding but the first visible image is complete", "[viewer][native][stream]")
 {
     EventLoop loop;
     TestRenderer renderer;
@@ -881,20 +897,23 @@ TEST_CASE("native row bands are visible before the complete image finishes decod
     liltview::Viewer viewer(renderer);
     viewer.open(path);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!viewer.has_visible_image())
+    while (viewer.static_load_stats().tiles == 0)
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         REQUIRE_FALSE(viewer.failed());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         SDL_Delay(1);
     }
     CHECK(viewer.loading());
+    CHECK_FALSE(viewer.has_visible_image());
     CHECK_FALSE(viewer.settled());
     CHECK(viewer.source_size().width == 1024);
     CHECK(viewer.source_size().height == 4096);
     renderer.upload_delay_ms = 0;
     loop.settle(viewer);
     CHECK(viewer.detail_ready());
+    CHECK(viewer.has_visible_image());
+    CHECK(viewer.static_load_stats().first_upload_ms < viewer.static_load_stats().decode_done_ms);
     viewer.shutdown();
     std::filesystem::remove_all(folder);
 }
@@ -983,12 +1002,13 @@ struct ProgressiveNavigation
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         for (;;)
         {
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             REQUIRE_FALSE(viewer.failed());
-            const auto details = viewer.image_details();
-            if (details && details->partial)
+            if (viewer.loading() && viewer.static_load_stats().tiles > 0)
             {
-                REQUIRE(details->path == middle);
+                REQUIRE_FALSE(viewer.has_visible_image());
+                renderer.upload_delay_ms = 0;
+                loop.settle(viewer);
                 break;
             }
             REQUIRE(std::chrono::steady_clock::now() < deadline);
@@ -1000,7 +1020,8 @@ struct ProgressiveNavigation
     {
         renderer.begin_frame();
         gui.begin_frame(viewer, 1);
-        REQUIRE_FALSE(renderer.frame_images.empty());
+        if (!viewer.has_visible_image()) CHECK(renderer.frame_images.empty());
+        else REQUIRE_FALSE(renderer.frame_images.empty());
         return renderer.frame_images;
     }
     void submit()
@@ -1051,8 +1072,8 @@ TEST_CASE("canvas navigation retains progressive textures until frame submission
                 test.submit(); // The backend must still resolve every queued texture.
                 test.check_images(images, true);
                 test.renderer.upload_delay_ms = 0;
-                test.viewer.pump();
-                test.check_images(images, false);
+                (test.viewer.pump(), test.viewer.prepare_loading_view());
+                test.check_images(images, true); // Old completed image is retained until replacement commits.
                 test.finish();
             }
 }
@@ -1070,8 +1091,8 @@ TEST_CASE("keyboard navigation releases retired progressive textures before the 
                 // SDL keyboard events navigate between frames, before the next pump.
                 test.viewer.navigate(direction);
                 test.renderer.upload_delay_ms = 0;
-                test.viewer.pump();
-                test.check_images(images, false);
+                (test.viewer.pump(), test.viewer.prepare_loading_view());
+                test.check_images(images, true);
                 test.draw();
                 test.submit();
                 test.finish();
@@ -1116,7 +1137,7 @@ TEST_CASE("rapid bidirectional navigation survives cancelled loads and neighbor 
         const int direction    = (i / 11) % 2 == 0 ? 1 : -1;
         REQUIRE((direction == 1 ? navigation.can_next : navigation.can_previous));
         viewer.navigate(direction);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         gui.frame(viewer, 1);
         if (i % 3 == 0)
             SDL_Delay(1);
@@ -1130,7 +1151,7 @@ TEST_CASE("rapid bidirectional navigation survives cancelled loads and neighbor 
     std::filesystem::remove_all(folder);
 }
 
-TEST_CASE("image details follow visible row bands and retain the prior source after replacement failure",
+TEST_CASE("image details switch with complete first view and retain prior source after replacement failure",
           "[viewer][image_details]")
 {
     EventLoop loop;
@@ -1162,20 +1183,21 @@ TEST_CASE("image details follow visible row bands and retain the prior source af
     CHECK(details->path == first);
     CHECK(details->loading_replacement);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!viewer.image_details()->partial)
+    while (viewer.static_load_stats().tiles == 0)
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         REQUIRE_FALSE(viewer.failed());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         SDL_Delay(1);
     }
     details = viewer.image_details();
     REQUIRE(details);
-    CHECK(details->path == second);
-    CHECK(details->image.source_size.width == 1024);
-    CHECK(details->image.source_size.height == 4096);
+    CHECK(details->path == first); // Metadata switches atomically with the first complete image.
+    CHECK(details->image.source_size.width == 17);
+    CHECK(details->image.source_size.height == 13);
     CHECK(details->pixel_format == LV_PIXEL_RGBA8);
-    CHECK(details->partial);
+    CHECK_FALSE(details->partial);
+    CHECK_FALSE(viewer.has_visible_image());
     renderer.fail_upload = true;
     loop.settle(viewer);
     REQUIRE(viewer.failed());
@@ -1194,7 +1216,7 @@ TEST_CASE("image details follow visible row bands and retain the prior source af
     CHECK(details->path == second);
     CHECK_FALSE(details->partial);
     viewer.open(first);
-    viewer.pump();
+    (viewer.pump(), viewer.prepare_loading_view());
     viewer.open(second);
     viewer.open(third);
     loop.settle(viewer);
@@ -1288,6 +1310,7 @@ TEST_CASE("image details report physical displayed zoom while a cold target is s
     const auto file       = directory.path / "large.png";
     liltview::test::checkerboard(file, 2048, 2048, 31);
     liltview::Viewer viewer(renderer);
+    viewer.set_viewport({0,0}, {320,240}, 2); // Supply the actual initial canvas before first-view preparation.
     viewer.open(file);
     loop.settle(viewer);
     InformationGui gui;
@@ -1296,7 +1319,7 @@ TEST_CASE("image details report physical displayed zoom while a cold target is s
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     do
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         gui.frame(viewer, 2);
         REQUIRE_FALSE(viewer.failed());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
@@ -1347,7 +1370,7 @@ TEST_CASE("image details preserve final GIF counts and the displayed frame after
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (viewer.animating())
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         REQUIRE_FALSE(viewer.failed());
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         SDL_Delay(1);
@@ -1453,7 +1476,7 @@ void warm_until(liltview::Viewer &viewer, Predicate done, bool allow_failure = f
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!done())
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         check_background_quota(viewer);
         if (!allow_failure)
             REQUIRE_FALSE(viewer.failed());
@@ -1544,7 +1567,7 @@ TEST_CASE("GIF neighbor warms by content without GPU work and presents genuine f
     viewer.suspend_animation(true);
     for (unsigned i = 0; i < 100; ++i)
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         CHECK(viewer.animation_frames_presented() == 1);
         CHECK(viewer.warmed_first_frames_presented() == 1);
     }
@@ -1951,7 +1974,7 @@ TEST_CASE("a prior static cold restore failure cannot suppress a new GIF's neigh
     const auto deadline   = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     while (!viewer.failed())
     {
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         gui.draw(viewer, renderer);
         check_background_quota(viewer);
         REQUIRE(std::chrono::steady_clock::now() < deadline);
@@ -1980,4 +2003,206 @@ TEST_CASE("a prior static cold restore failure cannot suppress a new GIF's neigh
     CHECK(viewer.last_source_bytes_read() == 0); // New GIF's C neighbor was genuinely prefetched.
     viewer.shutdown();
     CHECK(renderer.textures.empty());
+}
+
+TEST_CASE("initial native first view stays hidden until current DPI viewport is covered in both upload modes", "[viewer][native][first_view]")
+{
+    EventLoop loop;
+    InformationGui gui;
+    DetailsDirectory directory;
+    const auto file = directory.path / "first-native.png";
+    liltview::test::checkerboard(file, 2048, 2048, 31);
+    for (const auto mode : {liltview::Viewer::StaticUploadMode::pipeline, liltview::Viewer::StaticUploadMode::batch})
+    {
+        CAPTURE(mode == liltview::Viewer::StaticUploadMode::batch);
+        TestRenderer renderer;
+        renderer.image_budget = 8ULL*1024*1024;
+        renderer.strict_image_budget = true;
+        liltview::Viewer viewer(renderer);
+        viewer.set_static_upload_mode(mode);
+        viewer.open(file);
+        const auto deadline = std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        while (!viewer.static_load_stats().tiles)
+        {
+            viewer.pump(); // Deliberately do not commit the old/default layout.
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(std::chrono::steady_clock::now()<deadline);
+            SDL_Delay(1);
+        }
+        REQUIRE(viewer.loading());
+        REQUIRE_FALSE(viewer.has_visible_image());
+        viewer.actual_size();
+        do
+        {
+            viewer.pump();
+            viewer.set_viewport({0,0},{320,240},2);
+            if (viewer.loading()) CHECK_FALSE(viewer.has_visible_image());
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(std::chrono::steady_clock::now()<deadline);
+            SDL_Delay(1);
+        } while (!viewer.settled());
+        REQUIRE(viewer.has_visible_image());
+        CHECK(viewer.cache_stats().gpu_restores>0);
+        CHECK(viewer.static_load_stats().ready_ms>=viewer.static_load_stats().last_upload_ms);
+        CHECK(viewer.static_load_stats().ready_ms>=viewer.static_load_stats().prepare_done_ms);
+        if (mode==liltview::Viewer::StaticUploadMode::batch)
+            CHECK(viewer.static_load_stats().first_upload_ms>=viewer.static_load_stats().prepare_done_ms);
+        gui.frame(viewer,2);
+        CHECK(viewer.presented_view().scale()==Catch::Approx(1));
+        CHECK_FALSE(viewer.detail_loading());
+        viewer.shutdown();
+        CHECK(renderer.textures.empty());
+    }
+}
+TEST_CASE("large cached image survives repeated wheel zoom near GPU budget", "[viewer][zoom_budget]")
+{
+    EventLoop loop;
+    InformationGui gui;
+    DetailsDirectory directory;
+    const auto path = directory.path / "zoom-budget.png";
+    liltview::test::checkerboard(path, 4096, 4096, 31);
+    TestRenderer renderer;
+    renderer.image_budget        = 16ULL * 1024 * 1024;
+    renderer.strict_image_budget = true;
+    renderer.record_draws        = true;
+    liltview::Viewer viewer(renderer);
+    viewer.set_viewport({0, 0}, {320, 240}, 2);
+    viewer.open(path);
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    const auto settle_camera = [&]
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        do
+        {
+            viewer.pump();
+            renderer.begin_frame();
+            gui.frame(viewer, 2);
+            renderer.render_frame(ImGui::GetDrawData());
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(renderer.capabilities().image_bytes <= renderer.image_budget);
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            SDL_Delay(1);
+        } while (viewer.detail_loading());
+    };
+    for (unsigned cycle = 0; cycle < 4; ++cycle)
+    {
+        viewer.actual_size();
+        settle_camera();
+        for (unsigned step = 0; step < 12; ++step)
+        {
+            CAPTURE(cycle, step, viewer.presented_view().scale(), renderer.capabilities().image_bytes);
+            viewer.zoom(-1, {step % 2 ? 80.0f : 240.0f, 120});
+            settle_camera();
+        }
+    }
+    viewer.actual_size();
+    settle_camera();
+    for (unsigned idle = 0; idle < 30; ++idle)
+        settle_camera();        // Allow the speculative native neighbor ring to become resident.
+    viewer.zoom(-8, {80, 120}); // A burst can cross several LODs before the old camera changes.
+    settle_camera();
+    renderer.allow_upload = false;
+    viewer.actual_size();
+    for (const auto wheel : {-1, -1, -1, 1, -4, 2})
+    {
+        viewer.zoom(wheel, {240, 120});
+        renderer.begin_frame();
+        gui.frame(viewer, 2);
+        renderer.render_frame(ImGui::GetDrawData());
+        REQUIRE_FALSE(viewer.failed());
+    }
+    renderer.allow_upload = true;
+    settle_camera();
+    CHECK(renderer.budget_rejections == 0);
+    CHECK(renderer.mip_discards > 0);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+}
+
+TEST_CASE("consecutive large image replacements and cancelled loads share a bounded compact cache", "[viewer][native][cancel][budget][regression]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    std::vector<std::filesystem::path> files;
+    for (unsigned index = 0; index < 4; ++index)
+    {
+        auto file = directory.path / ("large-" + std::to_string(index) + ".png");
+        liltview::test::checkerboard(file, 4097, 3073, 17 + index * 2);
+        files.push_back(std::move(file));
+    }
+    struct Reservation
+    {
+        std::uint64_t bytes = liltview::MemoryTileCache::budget - 16 * 1024 * 1024;
+        Reservation() { liltview::reserve_tile_cache(bytes); }
+        ~Reservation() { liltview::release_tile_cache(bytes); }
+    } reservation;
+    TestRenderer renderer;
+    renderer.image_budget = 32ULL * 1024 * 1024;
+    renderer.strict_image_budget = true;
+    liltview::Viewer viewer(renderer);
+    for (unsigned cycle = 0; cycle < 3; ++cycle)
+    {
+        for (unsigned index = 0; index < 2; ++index)
+        {
+            viewer.open(files[index]);
+            loop.settle(viewer);
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(viewer.has_visible_image());
+            CHECK(viewer.image_details()->path == files[index]);
+        }
+        viewer.open(files[2]);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do
+        {
+            viewer.pump(); // Cancel after preparation/upload started, not just before submit.
+            REQUIRE_FALSE(viewer.failed());
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            SDL_Delay(1);
+        } while (!viewer.static_load_stats().tiles);
+        REQUIRE(viewer.loading());
+        viewer.open(files[3]);
+        loop.settle(viewer);
+        REQUIRE_FALSE(viewer.failed());
+        CHECK(viewer.image_details()->path == files[3]);
+    }
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    // No displayed, pending or retired cache may remain charged after shutdown.
+    REQUIRE_NOTHROW(liltview::reserve_tile_cache(16 * 1024 * 1024));
+    liltview::release_tile_cache(16 * 1024 * 1024);
+}
+
+TEST_CASE("viewer recovers from genuine preparation budget exhaustion on the next open", "[viewer][native][budget][regression]")
+{
+    EventLoop loop;
+    DetailsDirectory directory;
+    const auto file = directory.path / "budget-retry.png";
+    liltview::test::checkerboard(file, 2048, 2048, 17);
+    struct Reservation
+    {
+        std::uint64_t bytes = liltview::MemoryTileCache::budget - 1;
+        Reservation() { liltview::reserve_tile_cache(bytes); }
+        void release() { liltview::release_tile_cache(bytes); bytes = 0; }
+        ~Reservation() { release(); }
+    } reservation;
+    TestRenderer renderer;
+    renderer.image_budget = 8ULL * 1024 * 1024;
+    renderer.strict_image_budget = true;
+    liltview::Viewer viewer(renderer);
+    viewer.open(file);
+    loop.settle(viewer);
+    REQUIRE(viewer.failed());
+    CHECK(viewer.error() == LV_ERROR_MEMORY_BUDGET);
+    reservation.release();
+    // Open immediately, while cancellation/retirement may still be in progress.
+    viewer.open(file);
+    loop.settle(viewer);
+    REQUIRE_FALSE(viewer.failed());
+    CHECK(viewer.has_visible_image());
+    CHECK(viewer.image_details()->path == file);
+    viewer.shutdown();
+    CHECK(renderer.textures.empty());
+    REQUIRE_NOTHROW(liltview::reserve_tile_cache(liltview::MemoryTileCache::budget));
+    liltview::release_tile_cache(liltview::MemoryTileCache::budget);
 }

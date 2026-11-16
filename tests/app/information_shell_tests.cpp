@@ -24,9 +24,11 @@ class LayoutRenderer final : public liltview::render::Renderer
 public:
     unsigned image_calls = 0, upload_delay_ms = 0;
     bool fail_upload = false;
+    liltview::render::Image last_image{};
+    ImVec2 image_min{}, image_max{};
     liltview::render::Capabilities capabilities() const override
     {
-        return {liltview::render::Backend::opengl3, 4096, 128 * 1024 * 1024, 0};
+        return {liltview::render::Backend::sdl_renderer, 4096, 128 * 1024 * 1024, 0};
     }
     liltview::render::Size framebuffer_size() const override
     {
@@ -49,11 +51,16 @@ public:
     void destroy_image(liltview::render::Image) noexcept override
     {
     }
-    void add_image(ImDrawList *, liltview::render::Image image, liltview::render::Point, liltview::render::Point,
+    void add_image(ImDrawList *, liltview::render::Image image, liltview::render::Point min, liltview::render::Point max,
                    liltview::render::Point, liltview::render::Point) override
     {
         if (image)
+        {
             ++image_calls;
+            last_image = image;
+            image_min  = {min.x, min.y};
+            image_max  = {max.x, max.y};
+        }
     }
     void add_image_quad(ImDrawList *, liltview::render::Image image, const std::array<liltview::render::Point, 4> &,
                         const std::array<liltview::render::Point, 4> &) override
@@ -217,7 +224,7 @@ TEST_CASE("full information shell keeps the image navigation panel and footer di
     while (!viewer.settled())
     {
         REQUIRE(std::chrono::steady_clock::now() < deadline);
-        viewer.pump();
+        (viewer.pump(), viewer.prepare_loading_view());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     REQUIRE_FALSE(viewer.failed());
@@ -285,6 +292,74 @@ TEST_CASE("full information shell keeps the image navigation panel and footer di
                     REQUIRE(viewer.image_details());
                     CHECK(viewer.image_details()->path == source.path);
                 }
+}
+
+TEST_CASE("loading shell centers the application icon above its text", "[shell][loading][dpi]")
+{
+    using namespace liltview;
+    Source source;
+    Gui gui;
+    LayoutRenderer renderer;
+    Viewer viewer(renderer);
+    viewer.open(source.path);
+    REQUIRE(viewer.loading());
+    REQUIRE_FALSE(viewer.has_visible_image());
+    const render::Image icon{99, 1, 1};
+    for (const auto language : {Language::english, Language::chinese})
+        for (const bool dark : {false, true})
+            for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
+                for (const bool panel : {false, true})
+                    for (const bool native : {false, true})
+                        for (const auto size : {ImVec2{320, 300}, ImVec2{1120, 760}})
+                        {
+                            CAPTURE(language, dark, scale, panel, native, size.x, size.y);
+                            Shell shell;
+                            if (panel)
+                                shell.toggle_image_info();
+                            apply_style(dark, scale);
+                            auto &io                   = ImGui::GetIO();
+                            io.DisplaySize             = size;
+                            io.DisplayFramebufferScale = {1.25f, 1.25f};
+                            ImGui::NewFrame();
+                            WindowChromeState chrome;
+                            chrome.system_titlebar = native;
+                            chrome.dark            = dark;
+                            chrome.scale           = scale;
+                            chrome.line_height     = ImGui::GetTextLineHeight();
+                            const auto menu = build_menu(Settings{}, language, true, false, true, true, false, false, true, true);
+                            renderer.image_calls = 0;
+                            ImGui::LogToBuffer();
+                            ImGui::GetCurrentContext()->LogWindow = nullptr;
+                            shell.draw(language, menu, false, renderer, icon, viewer, chrome);
+                            const std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+                            ImGui::LogFinish();
+                            REQUIRE(renderer.image_calls == (native ? 1u : 2u));
+                            CHECK(renderer.last_image.owner == icon.owner);
+                            CHECK(text.find(translate(language, Text::loading)) != std::string::npos);
+                            ImGuiWindow *canvas = nullptr;
+                            for (auto *window : ImGui::GetCurrentContext()->Windows)
+                                if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
+                                    canvas = window;
+                            REQUIRE(canvas);
+                            const auto min = canvas->DC.CursorStartPos;
+                            const auto max = canvas->WorkRect.Max;
+                            CHECK(std::abs((renderer.image_min.x + renderer.image_max.x) * 0.5f - (min.x + max.x) * 0.5f) < 1);
+                            CHECK(renderer.image_min.y >= min.y - 1);
+                            CHECK(renderer.image_max.y > renderer.image_min.y);
+                            ImRect text_bounds{{FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX}};
+                            const auto text_color = ImGui::GetColorU32(current_ui_palette().secondary);
+                            for (const auto &vertex : canvas->DrawList->VtxBuffer)
+                                if (vertex.col == text_color)
+                                    text_bounds.Add(vertex.pos);
+                            REQUIRE(text_bounds.Min.y < text_bounds.Max.y);
+                            CHECK(text_bounds.Min.y > renderer.image_max.y);
+                            CHECK(std::abs((renderer.image_min.y + text_bounds.Max.y) * 0.5f - (min.y + max.y) * 0.5f) <
+                                  ImGui::GetTextLineHeight() * 0.5f + 1);
+                            CHECK(text_bounds.Max.y <= max.y + 1);
+                            CHECK(std::abs(text_bounds.GetCenter().x - (min.x + max.x) * 0.5f) < 3 * scale);
+                            CHECK_FALSE(canvas->ScrollbarY);
+                            ImGui::Render();
+                        }
 }
 
 TEST_CASE("rounded shell corners have only border-colored antialiasing without background halos", "[chrome][rounding][shell]")
@@ -476,7 +551,7 @@ TEST_CASE("failed replacement shows a failure illustration and its reason below 
         while (!viewer.settled())
         {
             REQUIRE(std::chrono::steady_clock::now() < deadline);
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     };
@@ -574,7 +649,7 @@ struct CanvasMenuContext
         while (!viewer.settled() || viewer.navigation().scanning)
         {
             REQUIRE(std::chrono::steady_clock::now() < deadline);
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
@@ -722,7 +797,7 @@ TEST_CASE("canvas menu rejects empty queued loading and failed images and closes
     // previous scene remains visible. No shortcut can move that cached scene.
     context.viewer.open(context.source.directory / "a.bmp");
     REQUIRE_FALSE(context.viewer.settled());
-    REQUIRE(context.viewer.has_visible_image());
+    REQUIRE_FALSE(context.viewer.has_visible_image());
     context.frame();
     CHECK_FALSE(context.popup());
     context.right_click(context.center());
@@ -812,11 +887,11 @@ TEST_CASE("progressive decode and upload failures clear pending pixels and resto
             context.renderer.upload_delay_ms = 5; // One upload crosses the pump budget: presentation precedes the terminal.
             context.viewer.open(path);
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
-            while (!(context.viewer.loading() && context.viewer.has_visible_image() && context.viewer.detail_loading()))
+            while (!(context.viewer.loading() && context.viewer.static_load_stats().tiles > 0))
             {
                 REQUIRE(std::chrono::steady_clock::now() < deadline);
                 REQUIRE_FALSE(context.viewer.failed());
-                context.viewer.pump();
+                (context.viewer.pump(), context.viewer.prepare_loading_view());
                 context.frame();
                 SDL_Delay(1);
             }
@@ -827,7 +902,7 @@ TEST_CASE("progressive decode and upload failures clear pending pixels and resto
             while (!context.viewer.failed())
             {
                 REQUIRE(std::chrono::steady_clock::now() < deadline);
-                context.viewer.pump();
+                (context.viewer.pump(), context.viewer.prepare_loading_view());
                 context.frame();
                 SDL_Delay(1);
             }
@@ -972,7 +1047,7 @@ struct DockShellScenario
     {
         using namespace liltview;
         if (pump)
-            viewer.pump();
+            (viewer.pump(), viewer.prepare_loading_view());
         ImGui::NewFrame();
         chrome.line_height = ImGui::GetTextLineHeight();
         const auto menu    = build_menu(Settings{}, Language::english, true, chrome.fullscreen, viewer.has_image(),
@@ -1117,7 +1192,7 @@ TEST_CASE("full shell loading replacement failure and no-image cannot reveal or 
     REQUIRE(s.dock_visible());
     s.viewer.open(s.source.directory / "missing.bmp");
     REQUIRE_FALSE(s.viewer.interaction_ready());
-    REQUIRE(s.viewer.has_visible_image()); // Previous image does not enable new gestures, but the Dock remains drawn.
+    REQUIRE_FALSE(s.viewer.has_visible_image()); // The canvas is hidden but the already shown Dock remains drawn.
     s.frame(false);
     CHECK(s.dock_visible());
     CHECK(s.double_click({300, 200}) == MenuAction::none);
@@ -1192,9 +1267,10 @@ TEST_CASE("dock dwell and double-click remain unavailable throughout progressive
         REQUIRE(std::chrono::steady_clock::now() < deadline);
         REQUIRE_FALSE(s.viewer.failed());
         s.frame();
-        if (s.viewer.native_loading() && s.viewer.has_visible_image())
+        if (s.viewer.native_loading())
         {
             saw_native = true;
+            CHECK_FALSE(s.viewer.has_visible_image());
             CHECK_FALSE(s.viewer.interaction_ready());
             CHECK_FALSE(s.dock_visible());
         }

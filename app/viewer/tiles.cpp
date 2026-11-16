@@ -1,91 +1,56 @@
 #include "tiles.hpp"
+#include "tile_pixels.hpp"
 #include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
-#include "platform/file_io.hpp"
-#include <zlib.h>
+#include "cache_codec.hpp"
 
 namespace liltview
 {
 namespace
 {
-constexpr std::uint64_t max_cache_bytes = 16ULL * 1024 * 1024 * 1024;
-void cache_error(const char *message)
-{
-    throw std::system_error(errno ? errno : EIO, std::generic_category(), message);
-}
-std::optional<std::uint32_t> uniform_color(const std::vector<std::uint8_t> &data)
-{
-    std::uint32_t first;
-    std::memcpy(&first, data.data(), 4);
-    for (std::size_t at = 4; at < data.size(); at += 4)
-    {
-        std::uint32_t pixel;
-        std::memcpy(&pixel, data.data() + at, 4);
-        if (pixel != first)
-            return {};
-    }
-    return first;
-}
-std::vector<std::uint8_t> solid(render::Size size, std::uint32_t color)
-{
-    std::vector<std::uint8_t> data(static_cast<std::size_t>(size.width) * size.height * 4);
-    std::memcpy(data.data(), &color, 4);
-    for (std::size_t at = 4; at < data.size();)
-    {
-        const auto count = std::min(at, data.size() - at);
-        std::memcpy(data.data() + at, data.data(), count);
-        at += count;
-    }
-    return data;
-}
-
-// Built once during native decode, not on zoom. Alpha-correct box filtering
-// supplies texture LODs without keeping a separate full-image thumbnail.
-std::vector<std::uint8_t> reduce(const std::vector<std::uint8_t> &in, render::Size size)
-{
-    const render::Size next{(size.width + 1) / 2, (size.height + 1) / 2};
-    std::vector<std::uint8_t> out(static_cast<std::size_t>(next.width) * next.height * 4);
-    for (unsigned y = 0; y < next.height; ++y)
-        for (unsigned x = 0; x < next.width; ++x)
-        {
-            unsigned alpha = 0, color[3]{}, count = 0;
-            for (unsigned dy = 0; dy < 2 && y * 2 + dy < size.height; ++dy)
-                for (unsigned dx = 0; dx < 2 && x * 2 + dx < size.width; ++dx)
-                {
-                    const auto at  = (static_cast<std::size_t>(y * 2 + dy) * size.width + x * 2 + dx) * 4;
-                    alpha         += in[at + 3];
-                    for (unsigned c = 0; c < 3; ++c)
-                        color[c] += static_cast<unsigned>(in[at + c]) * in[at + 3];
-                    ++count;
-                }
-            const auto at = (static_cast<std::size_t>(y) * next.width + x) * 4;
-            for (unsigned c = 0; c < 3; ++c)
-                out[at + c] = static_cast<std::uint8_t>(alpha ? (color[c] + alpha / 2) / alpha : 0);
-            out[at + 3] = static_cast<std::uint8_t>((alpha + count / 2) / count);
-        }
-    return out;
-}
+using tile_pixels::uniform_color;
+using tile_pixels::solid;
+using tile_pixels::reduce;
 } // namespace
-void Tiles::begin(const lv_image_info &info)
+void Tiles::begin(const lv_image_info &info, bool defer_cache)
 {
     clear();
     info_              = info;
     const auto columns = (static_cast<std::uint64_t>(info.canvas.width) + info.tile_edge - 1) / info.tile_edge;
     const auto rows    = (static_cast<std::uint64_t>(info.canvas.height) + info.tile_edge - 1) / info.tile_edge;
-    if (columns * rows > 128ULL * 1024 * 1024 / sizeof(Tile))
+    const auto index_cost = sizeof(Tile) + std::bit_ceil(static_cast<unsigned>(std::bit_width(info.tile_edge))) * sizeof(Level);
+    if (columns * rows > 128ULL * 1024 * 1024 / index_cost)
         throw render::Error(render::ErrorCode::memory_budget, "Native scene tile index exceeds budget");
     tiles_.resize(static_cast<std::size_t>(columns * rows));
-    const auto budget    = std::max<std::uint64_t>(1, renderer_.capabilities().image_budget_bytes / 4);
-    long double estimate = static_cast<long double>(info.canvas.width) * info.canvas.height * 4 * 4 / 3;
+    const auto caps = renderer_.capabilities();
+    auto budget = std::max<std::uint64_t>(1, caps.image_budget_bytes / 4);
+    // Admit the whole native scene only when its real tiled mip allocation fits.
+    // This skips CPU cache compression/restoration for budget-friendly images,
+    // including 4K on the default 128 MiB budget, without evicting the old scene.
+    const auto edge = info.tile_edge;
+    const auto full_columns = info.canvas.width / edge, full_rows = info.canvas.height / edge;
+    const auto tail_width = info.canvas.width % edge, tail_height = info.canvas.height % edge;
+    const auto cost = [](unsigned w, unsigned h) -> std::uint64_t {
+        return w && h ? render::image_storage_bytes({{w, h}, true}) : 0;
+    };
+    const auto full_cost = static_cast<std::uint64_t>(full_columns) * full_rows * cost(edge, edge) +
+        static_cast<std::uint64_t>(full_rows) * cost(tail_width, edge) +
+        static_cast<std::uint64_t>(full_columns) * cost(edge, tail_height) + cost(tail_width, tail_height);
+    const auto available = caps.image_bytes < caps.image_budget_bytes ? caps.image_budget_bytes - caps.image_bytes : 0;
+    const auto raw = static_cast<std::uint64_t>(info.canvas.width) * info.canvas.height * 4;
+    const bool direct = raw <= 64ULL * 1024 * 1024 && full_cost <= available &&
+        full_cost <= caps.image_budget_bytes - caps.image_budget_bytes / 4;
+    if (direct) budget = std::max(budget, full_cost);
+    long double estimate = direct ? static_cast<long double>(full_cost) :
+        static_cast<long double>(info.canvas.width) * info.canvas.height * 4 * 4 / 3;
     while (estimate > budget && (info.tile_edge >> overview_level_) > 1)
     {
         ++overview_level_;
@@ -95,7 +60,7 @@ void Tiles::begin(const lv_image_info &info)
         throw render::Error(render::ErrorCode::memory_budget, "Native scene texture index exceeds GPU budget");
     if (overview_level_)
     {
-        open_cache();
+        if (!defer_cache) open_cache();
         const unsigned factor = 1u << overview_level_;
         const unsigned width  = (info.canvas.width - 1) / factor + 1;
         const unsigned height = (info.canvas.height - 1) / factor + 1;
@@ -108,16 +73,7 @@ void Tiles::begin(const lv_image_info &info)
 }
 void Tiles::open_cache()
 {
-    std::filesystem::path directory;
-    if (const auto *xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
-        directory = xdg;
-    else if (const auto *home = std::getenv("HOME"); home && *home)
-        directory = std::filesystem::path(home) / ".cache";
-    else
-        directory = std::filesystem::temp_directory_path();
-    directory /= "liltview";
-    std::filesystem::create_directories(directory);
-    cache_ = platform::temporary_file(directory);
+    cache_ = std::make_shared<MemoryTileCache>();
 }
 void Tiles::commit_restore() noexcept
 {
@@ -143,6 +99,28 @@ void Tiles::cancel_restore() noexcept
     }
     preserved_.clear();
 }
+bool Tiles::retire_ready() noexcept
+{
+    if (cache_)
+    {
+        if (!reader_)
+        {
+            try { reader_ = std::make_unique<TileReader>(cache_, wake_, userdata_); }
+            catch (...)
+            {
+                // Shutdown/destructors must remain safe if a cleanup thread cannot
+                // be allocated. Rare fallback frees on the caller instead of leaking
+                // or allowing an exception to escape a destructor.
+                cache_.reset();
+                return true;
+            }
+        }
+        cache_.reset(); // Reader worker owns the final memory-cache reference.
+    }
+    if (!reader_) return true;
+    reader_->cancel();
+    return reader_->done();
+}
 void Tiles::release_details() noexcept
 {
     commit_restore();
@@ -155,10 +133,10 @@ void Tiles::release_details() noexcept
 }
 void Tiles::clear() noexcept
 {
-    // Join the CPU-only reader before closing its backing file or dropping metadata.
+    // Join the CPU-only reader before dropping its memory cache and metadata.
     reader_.reset();
     release_details();
-    if (!cache_)
+    if (!overview_level_)
         for (const auto &tile : tiles_)
             renderer_.destroy_image(tile.overview);
     tiles_.clear();
@@ -167,15 +145,13 @@ void Tiles::clear() noexcept
     atlases_.clear();
     uniform_levels_.clear();
     atlas_edge_ = atlas_columns_ = 0;
-    if (cache_)
-        std::fclose(cache_);
-    cache_       = nullptr;
+    cache_.reset();
     info_        = {};
     ready_       = 0;
     cache_bytes_ = clock_ = gpu_restores_ = 0;
     overview_level_                       = 0;
     indexed_tiles_                        = 0;
-    cache_dirty_ = upload_pending_ = false;
+    upload_pending_ = false;
 }
 void Tiles::swap(Tiles &other)
 {
@@ -185,7 +161,6 @@ void Tiles::swap(Tiles &other)
     preserved_.swap(other.preserved_);
     std::swap(wake_, other.wake_);
     std::swap(userdata_, other.userdata_);
-    std::swap(cache_dirty_, other.cache_dirty_);
     std::swap(upload_pending_, other.upload_pending_);
     std::swap(gpu_restores_, other.gpu_restores_);
     std::swap(indexed_tiles_, other.indexed_tiles_);
@@ -259,6 +234,24 @@ void Tiles::upload_overview(Tile &tile, render::Size size, unsigned level, const
     tile.overview_uv    = {{{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}}};
 }
 
+void Tiles::install(PreparedTile prepared)
+{
+    if (prepared.id >= tiles_.size())
+        throw render::Error(render::ErrorCode::invalid_argument, "Invalid prepared tile ID");
+    auto &tile = tiles_[static_cast<std::size_t>(prepared.id)];
+    if (tile.overview) throw render::Error(render::ErrorCode::invalid_argument, "Duplicate prepared tile");
+    tile.rect = prepared.rect;
+    tile.levels = std::move(prepared.levels);
+    if (overview_level_)
+        upload_overview(tile, prepared.size, prepared.level, prepared.pixels.data());
+    else
+    {
+        tile.overview = upload_texture(prepared.size, 0, prepared.pixels.data(), prepared.stride_bytes, prepared.pixels.size());
+        tile.overview_uv = {{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+    }
+    ++ready_;
+}
+
 void Tiles::upload(const lv_region_info &region)
 {
     if (region.tile_id >= tiles_.size())
@@ -291,28 +284,22 @@ void Tiles::upload(const lv_region_info &region)
             {
                 tile.levels       = found->second;
                 const auto index  = std::min(overview_level_, static_cast<unsigned>(tile.levels.size() - 1));
-                const auto pixels = solid(tile.levels[index].size, *color);
-                upload_overview(tile, tile.levels[index].size, index, pixels.data());
+                const auto solid_pixels = solid(tile.levels[index].size, *color);
+                upload_overview(tile, tile.levels[index].size, index, solid_pixels.data());
                 ++ready_;
                 return;
             }
         }
         // Native pixels and all LODs are generated/stored once. Subsequent view
         // changes only upload these immutable cached bytes, never reopen source.
+        CacheEncoder encoder;
         for (;; ++level)
         {
-            std::vector<std::uint8_t> compressed(compressBound(static_cast<uLong>(data.size())));
-            uLongf bytes = compressed.size();
-            if (compress2(compressed.data(), &bytes, data.data(), static_cast<uLong>(data.size()), Z_BEST_SPEED) != Z_OK)
-                throw std::runtime_error("Cannot compress native tile cache");
-            if (cache_bytes_ + bytes > max_cache_bytes)
-                throw render::Error(render::ErrorCode::memory_budget, "Native tile disk cache exceeds 16 GiB limit");
-            platform::seek_file(cache_, cache_bytes_);
-            if (std::fwrite(compressed.data(), 1, bytes, cache_) != bytes)
-                cache_error("Cannot write native tile cache");
-            tile.levels.push_back({size, cache_bytes_, static_cast<std::uint32_t>(bytes)});
+            const auto &compressed = encoder.encode(data);
+            const auto bytes = compressed.size();
+            const auto offset = cache_->append(compressed);
             cache_bytes_ += bytes;
-            cache_dirty_  = true;
+            tile.levels.push_back({size, offset, static_cast<std::uint32_t>(bytes)});
             if (level == overview_level_ || (size.width == 1 && size.height == 1 && !tile.overview))
             {
                 upload_overview(tile, size, level, data.data());
@@ -406,16 +393,8 @@ void Tiles::request_reads(const std::vector<TileReader::Request> &jobs)
 {
     if (jobs.empty() && !reader_)
         return;
-    if (cache_dirty_)
-    {
-        // Only the first loading/append phase can write. The worker uses pread
-        // on a duplicate fd, never this FILE's shared seek position.
-        if (std::fflush(cache_) != 0)
-            cache_error("Cannot flush native tile cache");
-        cache_dirty_ = false;
-    }
     if (!reader_)
-        reader_ = std::make_unique<TileReader>(platform::file_descriptor(cache_), wake_, userdata_);
+        reader_ = std::make_unique<TileReader>(cache_, wake_, userdata_);
     reader_->request(jobs);
 }
 bool Tiles::restore(std::size_t index, unsigned level, const Viewport *preserve)
@@ -505,7 +484,7 @@ void Tiles::warm(const std::vector<std::size_t> &order, unsigned level)
         }
     }
 }
-bool Tiles::prepare(const Viewport &view, const Viewport *preserve)
+bool Tiles::prepare(const Viewport &view, const Viewport *preserve, UploadBudget *shared)
 {
     if (!preserve)
         cancel_restore();
@@ -513,6 +492,27 @@ bool Tiles::prepare(const Viewport &view, const Viewport *preserve)
     upload_pending_      = false;
     indexed_tiles_       = 0;
     const unsigned level = level_for(view);
+    if (cache_)
+    {
+        // Both cameras can use these existing mip levels. Keeping native bases
+        // pinned while zooming out otherwise makes a small screen-sized target
+        // exhaust the budget, even though its required resolution fits easily.
+        const auto retained_level = preserve ? std::min(level, level_for(*preserve)) : level;
+        if (retained_level >= overview_level_)
+            release_details(); // Both views are already covered by the overview atlases.
+        else
+            for (const auto index : resident_)
+            {
+                auto &tile      = tiles_[index];
+                const auto trim = [&](render::Image image, unsigned &base)
+                {
+                    if (image && base < retained_level && renderer_.discard_image_mips(image, retained_level - base))
+                        base = retained_level;
+                };
+                trim(tile.detail, tile.detail_level);
+                trim(tile.preserved, tile.preserved_level);
+            }
+    }
     if (cache_ && level >= overview_level_)
     {
         // Preheat the native center while FIT remains on screen. This is a
@@ -560,16 +560,15 @@ bool Tiles::prepare(const Viewport &view, const Viewport *preserve)
             jobs.push_back(job);
     if (cache_)
         request_reads(jobs);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
-    bool ready          = decoded(view);
-    bool uploaded       = false;
-    std::uint64_t bytes = 0;
+    UploadBudget local;
+    auto &budget = shared ? *shared : local;
+    bool ready = decoded(view);
     for (const auto index : visible)
     {
         const auto &tile = tiles_[index];
         if (!tile.overview || texture(tile, level))
             continue;
-        if (uploaded && (bytes >= 4ULL * 1024 * 1024 || std::chrono::steady_clock::now() >= deadline))
+        if (!budget.available())
         {
             ready = false;
             if (reader_ && reader_->find({index, level}))
@@ -581,10 +580,10 @@ bool Tiles::prepare(const Viewport &view, const Viewport *preserve)
             ready = false;
             continue;
         }
-        uploaded  = true;
-        bytes    += static_cast<std::uint64_t>(tile.levels.at(level).size.width) * tile.levels.at(level).size.height * 4;
+        ++budget.tiles;
+        budget.bytes += render::image_storage_bytes({tile.levels.at(level).size, true});
     }
-    if (ready && !preserve && cache_)
+    if (ready && !preserve && cache_ && !shared)
         warm(near, level);
     return ready;
 }

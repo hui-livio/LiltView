@@ -11,12 +11,12 @@ url='https://github.com/hui-livio/LiltView'
 license=('Apache-2.0' 'MIT' 'Zlib' 'Libpng-2.0' 'BSD-3-Clause' 'IJG'
          'BSL-1.0' 'FTL' 'libtiff' 'LicenseRef-HarmonyOS-Sans')
 depends=(
-  'glibc' 'gcc-libs' 'fontconfig' 'glib2' 'libglvnd' 'wayland' 'libxkbcommon'
+  'glibc' 'gcc-libs' 'fontconfig' 'glib2' 'wayland' 'libxkbcommon'
   'libx11' 'libxcursor' 'libxext' 'libxfixes' 'libxi' 'libxrandr' 'libxss' 'libxtst'
   'libdecor' 'dbus' 'desktop-file-utils' 'hicolor-icon-theme'
 )
 makedepends=('cmake>=3.30' 'ninja' 'pkgconf' 'gcc>=15' 'nasm')
-optdepends=('opengl-driver: OpenGL implementation for your graphics hardware')
+optdepends=('opengl-driver: accelerated SDL_Render driver; software rendering works without it')
 options=('!debug')
 source=("liltview-${pkgver}.tar.gz")
 sha256sums=('@SHA256@')

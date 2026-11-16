@@ -31,19 +31,19 @@ StatusBarContent status_bar_content(Language language, Text status, const std::o
                                                                    status);
     // Also strip directories from caller-supplied names defensively. A tooltip
     // must never reintroduce the full path omitted from the status bar.
-    result.identity = visible && !result.failed ? platform::path_bytes(visible->path.filename()) : requested;
+    const bool replacing    = status == Text::loading || status == Text::loading_native;
+    const bool show_details = visible && !result.failed && !replacing;
+    result.identity         = show_details ? platform::path_bytes(visible->path.filename()) : requested;
     if (result.identity.empty())
         result.identity = translate(language, Text::no_image);
-    const bool selected_visible = result.failed || !visible || visible->path == navigation.selected_path;
-    if (visible && !selected_visible && result.busy)
-        result.identity += std::string("  ·  ") + translate(language, Text::status_previous_image);
+    const bool selected_visible = !show_details || visible->path == navigation.selected_path;
     if (selected_visible && navigation.total && navigation.current)
         result.identity += "  ·  " + std::to_string(navigation.current) + " / " + std::to_string(navigation.total);
     if (navigation.scanning)
         result.identity += std::string("  ·  ") + translate(language, Text::scanning_directory);
     else if (navigation.error)
         result.identity += std::string("  ·  ") + translate(language, Text::directory_error);
-    if (!visible || result.failed)
+    if (!show_details)
         return result;
     const auto unknown  = translate(language, Text::info_unknown);
     const auto *format  = image_format_name(visible->image.format);

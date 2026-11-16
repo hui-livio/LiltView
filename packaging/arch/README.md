@@ -11,7 +11,7 @@ sudo pacman -S --needed base-devel git python
 git submodule update --init --recursive
 ```
 
-构建还需要 CMake 3.30+、Ninja、pkgconf、支持 C23 的 GCC、NASM、系统 OpenGL / Fontconfig / GIO 及 X11 / Wayland 库。完整构建、运行及检查依赖由生成的 PKGBUILD 声明；`--syncdeps` 或 paru 可以交给 pacman 安装缺失依赖，保留正常交互确认。
+构建还需要 CMake 3.30+、Ninja、pkgconf、支持 C23 的 GCC、NASM、Fontconfig / GIO、SDL 可用的图形驱动 及 X11 / Wayland 库。完整构建、运行及检查依赖由生成的 PKGBUILD 声明；`--syncdeps` 或 paru 可以交给 pacman 安装缺失依赖，保留正常交互确认。
 
 主程序使用 C23 / C++23、Release / NDEBUG 和 makepkg 的优化及加固标志，禁用额外 debug 子包。x86_64 把 NASM 列为构建依赖，供 libjpeg-turbo 启用 SIMD。SDL、图片 codec、ImGui、spdlog 静态链接；窗口系统和图形驱动仍由系统提供。普通安装无需系统 SDL3，也不覆盖系统库。
 

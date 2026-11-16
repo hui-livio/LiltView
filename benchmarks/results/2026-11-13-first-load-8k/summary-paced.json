@@ -1,0 +1,259 @@
+{
+  "cache_condition": "fresh process, warmed OS input cache; fresh anonymous tile cache",
+  "runs_per_mode": 30,
+  "input": {
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13400",
+    "file": "checker-random-8192.png",
+    "sha256": "abbc629bcd2ea056858ce54e30f34c09e4a2e68888efd2f25f8b783cf52f1fa8",
+    "width": 8192,
+    "height": 8192,
+    "block": 16,
+    "seed": 20261113,
+    "pillow": "13.0.0",
+    "python": "3.15.0 (tags/v3.15.0:d220409, Oct  9 2026, 11:55:56) [MSC v.1951 64 bit (AMD64)]",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "file_bytes": 1517605,
+    "rgba_bytes": 268435456,
+    "note": "Alternating luminance, independently random RGB per 16px cell; not uniform Core tiles"
+  },
+  "modes": {
+    "pipeline": {
+      "ready_ms": {
+        "median": 2319.915,
+        "min": 2312.86,
+        "max": 2363.81,
+        "p95": 2357.35
+      },
+      "presented_ms": {
+        "median": 2321.06,
+        "min": 2313.39,
+        "max": 2366.11,
+        "p95": 2358.75
+      },
+      "core_ms": {
+        "median": 2247.79,
+        "min": 2241.27,
+        "max": 2292.46,
+        "p95": 2285.53
+      },
+      "decode_done_ms": {
+        "median": 2319.58,
+        "min": 2300.36,
+        "max": 2356.92,
+        "p95": 2345.57
+      },
+      "prepare_done_ms": {
+        "median": 2319.605,
+        "min": 2304.37,
+        "max": 2356.95,
+        "p95": 2350.06
+      },
+      "first_upload_ms": {
+        "median": 53.9961,
+        "min": 52.6225,
+        "max": 72.3776,
+        "p95": 71.7685
+      },
+      "last_upload_ms": {
+        "median": 2319.66,
+        "min": 2312.57,
+        "max": 2363.62,
+        "p95": 2357.05
+      },
+      "upload_cpu_ms": {
+        "median": 33.2624,
+        "min": 19.4734,
+        "max": 53.253,
+        "p95": 40.348
+      },
+      "max_upload_slice_ms": {
+        "median": 15.75865,
+        "min": 3.8357,
+        "max": 28.2904,
+        "p95": 23.7808
+      },
+      "pump_max_ms": {
+        "median": 15.78545,
+        "min": 3.8559,
+        "max": 28.3125,
+        "p95": 23.8046
+      },
+      "work_p95_ms": {
+        "median": 1.1896,
+        "min": 1.0213,
+        "max": 2.5903,
+        "p95": 2.153
+      },
+      "work_max_ms": {
+        "median": 16.34495,
+        "min": 4.1117,
+        "max": 28.6887,
+        "p95": 24.1254
+      },
+      "event_p95_ms": {
+        "median": 18.0026,
+        "min": 17.9052,
+        "max": 18.06,
+        "p95": 18.046
+      },
+      "event_max_ms": {
+        "median": 18.639049999999997,
+        "min": 18.2792,
+        "max": 28.7,
+        "p95": 27.9836
+      },
+      "output_peak": {
+        "median": 197832,
+        "min": 131888,
+        "max": 197832,
+        "p95": 197832
+      },
+      "cache_bytes": {
+        "median": 11650927,
+        "min": 11650927,
+        "max": 11650927,
+        "p95": 11650927
+      },
+      "peak_rss_bytes": {
+        "median": 94560256,
+        "min": 90525696,
+        "max": 99991552,
+        "p95": 98201600
+      },
+      "process_cpu_ms": {
+        "median": 1539.065,
+        "min": 1343.75,
+        "max": 1859.38,
+        "p95": 1828.12
+      },
+      "driver": "direct3d11",
+      "vsync": 1,
+      "pixel_hash": "211789602916202268",
+      "loading_presented_ms": {
+        "median": 3.772,
+        "min": 3.357,
+        "max": 6.471,
+        "p95": 5.998
+      }
+    },
+    "batch": {
+      "ready_ms": {
+        "median": 2437.98,
+        "min": 2409.25,
+        "max": 2455.53,
+        "p95": 2455.15
+      },
+      "presented_ms": {
+        "median": 2438.32,
+        "min": 2409.91,
+        "max": 2456.85,
+        "p95": 2455.85
+      },
+      "core_ms": {
+        "median": 2248.29,
+        "min": 2235.97,
+        "max": 2263.97,
+        "p95": 2255.69
+      },
+      "decode_done_ms": {
+        "median": 2319.295,
+        "min": 2288.31,
+        "max": 2337.75,
+        "p95": 2327.86
+      },
+      "prepare_done_ms": {
+        "median": 2319.325,
+        "min": 2295.08,
+        "max": 2343.43,
+        "p95": 2327.93
+      },
+      "first_upload_ms": {
+        "median": 2336.975,
+        "min": 2305.86,
+        "max": 2355.73,
+        "p95": 2345.47
+      },
+      "last_upload_ms": {
+        "median": 2437.755,
+        "min": 2408.95,
+        "max": 2455.36,
+        "p95": 2454.96
+      },
+      "upload_cpu_ms": {
+        "median": 101.699,
+        "min": 85.1717,
+        "max": 117.203,
+        "p95": 114.377
+      },
+      "max_upload_slice_ms": {
+        "median": 101.699,
+        "min": 85.1717,
+        "max": 117.203,
+        "p95": 114.377
+      },
+      "pump_max_ms": {
+        "median": 101.7205,
+        "min": 85.1955,
+        "max": 117.226,
+        "p95": 114.41
+      },
+      "work_p95_ms": {
+        "median": 0.71245,
+        "min": 0.5161,
+        "max": 2.4109,
+        "p95": 1.2571
+      },
+      "work_max_ms": {
+        "median": 102.2045,
+        "min": 85.7062,
+        "max": 117.716,
+        "p95": 116.54
+      },
+      "event_p95_ms": {
+        "median": 18.010849999999998,
+        "min": 17.9868,
+        "max": 18.0543,
+        "p95": 18.0487
+      },
+      "event_max_ms": {
+        "median": 102.212,
+        "min": 83.6819,
+        "max": 116.458,
+        "p95": 115.936
+      },
+      "output_peak": {
+        "median": 16881664,
+        "min": 16881664,
+        "max": 16881664,
+        "p95": 16881664
+      },
+      "cache_bytes": {
+        "median": 11650927,
+        "min": 11650927,
+        "max": 11650927,
+        "p95": 11650927
+      },
+      "peak_rss_bytes": {
+        "median": 122392576,
+        "min": 118562816,
+        "max": 126533632,
+        "p95": 126410752
+      },
+      "process_cpu_ms": {
+        "median": 1578.12,
+        "min": 1421.88,
+        "max": 2187.5,
+        "p95": 1828.12
+      },
+      "driver": "direct3d11",
+      "vsync": 1,
+      "pixel_hash": "211789602916202268",
+      "loading_presented_ms": {
+        "median": 3.557,
+        "min": 1.965,
+        "max": 8.673,
+        "p95": 4.34
+      }
+    }
+  }
+}

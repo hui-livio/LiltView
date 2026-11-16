@@ -12,7 +12,7 @@ if(NOT LILTVIEW_CXX_STANDARD MATCHES "^(20|23)$")
     message(FATAL_ERROR "LILTVIEW_CXX_STANDARD must be 23 or 20; C++17 fallback is not supported")
 endif()
 
-option(LILTVIEW_BUILD_APP_COMPONENTS "Build the SDL3/OpenGL application and spdlog adapter" OFF)
+option(LILTVIEW_BUILD_APP_COMPONENTS "Build the SDL3/SDL_Render application and spdlog adapter" OFF)
 option(LILTVIEW_BUILD_UNIT_TESTS "Build Catch2 unit tests in addition to dependency-free contract checks" OFF)
 option(LILTVIEW_WARNINGS_AS_ERRORS "Treat warnings in LiltView targets as errors" OFF)
 
