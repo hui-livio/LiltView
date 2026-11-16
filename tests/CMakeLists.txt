@@ -138,6 +138,10 @@ if(LILTVIEW_BUILD_UI_RENDER_TESTS)
     add_test(NAME ui.zoom_budget.software COMMAND "${CMAKE_COMMAND}" -E env SDL_RENDER_DRIVER=software
         $<TARGET_FILE:liltview_viewer_sharpness> --zoom-budget)
     set_tests_properties(ui.zoom_budget ui.zoom_budget.software PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+    add_test(NAME ui.covered_motion COMMAND liltview_viewer_sharpness --motion)
+    add_test(NAME ui.covered_motion.software COMMAND "${CMAKE_COMMAND}" -E env SDL_RENDER_DRIVER=software
+        $<TARGET_FILE:liltview_viewer_sharpness> --motion)
+    set_tests_properties(ui.covered_motion ui.covered_motion.software PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
     add_test(NAME render.contract COMMAND liltview_renderer_contract)
     add_test(NAME render.contract.software COMMAND "${CMAKE_COMMAND}" -E env SDL_RENDER_DRIVER=software
         $<TARGET_FILE:liltview_renderer_contract>)

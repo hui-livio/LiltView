@@ -275,8 +275,11 @@ public:
             check(SDL_SetRenderDrawColorFloat(renderer_, 0.055f, 0.063f, 0.075f, 1));
         check(SDL_RenderClear(renderer_));
         ImGui_ImplSDLRenderer3_RenderDrawData(data, renderer_);
-        // Submit now so rendering errors cannot remain hidden in the command queue.
-        check(SDL_FlushRenderer(renderer_));
+        // Switching targets submits frame draws before their textures can be
+        // reclaimed. Avoid SDL_FlushRenderer(): its cache invalidation in the
+        // bundled D3D11 backend can leave alpha blending enabled for later
+        // SDL_BLENDMODE_NONE mip copies. SDL owns the device state throughout.
+        check(SDL_SetRenderTarget(renderer_, nullptr));
     }
     void present() override
     {

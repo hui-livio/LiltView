@@ -20,7 +20,7 @@ void check(bool value, const char *message)
     if (!value)
         throw std::runtime_error(message);
 }
-Readback frame(Renderer &renderer, const std::function<void(ImDrawList *)> &draw)
+void submit_frame(Renderer &renderer, const std::function<void(ImDrawList *)> &draw)
 {
     renderer.begin_frame();
     ImGui_ImplSDL3_NewFrame();
@@ -28,6 +28,10 @@ Readback frame(Renderer &renderer, const std::function<void(ImDrawList *)> &draw
     draw(ImGui::GetForegroundDrawList());
     ImGui::Render();
     renderer.render_frame(ImGui::GetDrawData());
+}
+Readback frame(Renderer &renderer, const std::function<void(ImDrawList *)> &draw)
+{
+    submit_frame(renderer, draw);
     return renderer.readback();
 }
 std::array<int, 3> pixel(const Readback &frame, unsigned x, unsigned y)
@@ -284,6 +288,56 @@ void verify_sampling(Renderer &renderer, SDL_Window *window)
     renderer.destroy_image(image);
     std::puts("PASS per-draw driver sampling, rotated UVs and generated minification levels");
 }
+void verify_alpha_mips_after_frame(Renderer &renderer)
+{
+    const auto base       = renderer.capabilities().image_bytes;
+    const auto background = pixel(frame(renderer, [](ImDrawList *) {}), 0, 0);
+    renderer.present();
+    constexpr unsigned side = 32;
+    const Size size{side, side};
+    std::vector<std::uint8_t> data(side * side * 4, 0);
+    Image image;
+    for (const unsigned alpha : {128u, 64u})
+    {
+        for (std::size_t at = 0; at < data.size(); at += 4)
+        {
+            data[at]     = 255;
+            data[at + 3] = static_cast<std::uint8_t>(alpha);
+        }
+        // Leave an alpha-blended draw as the last submitted GPU command. Do not
+        // read back or present before generating mips: neither is required by
+        // the render_frame() contract, and either can hide a stale blend state.
+        submit_frame(renderer, [](ImDrawList *list) { list->AddRectFilled({0, 0}, {128, 128}, IM_COL32(255, 255, 255, 128)); });
+        if (!image)
+            image = renderer.create_uploaded_image({size, true}, {data.data(), data.size(), side * 4, size});
+        else
+            renderer.update_image(image, {0, 0, side, side}, {data.data(), data.size(), side * 4, size});
+        const auto result = frame(renderer,
+                                  [&](ImDrawList *list)
+                                  {
+                                      float x = 4;
+                                      for (unsigned edge = side; edge; edge /= 2)
+                                      {
+                                          renderer.add_image(list, image, {x, 8}, {x + edge, 8.0f + edge});
+                                          x += edge + 4;
+                                      }
+                                  });
+        std::array<int, 3> expected{};
+        for (unsigned channel = 0; channel < 3; ++channel)
+            expected[channel] =
+                static_cast<int>(std::lround(((channel == 0 ? 255u : 0u) * alpha + background[channel] * (255 - alpha)) / 255.0));
+        unsigned x = 4;
+        for (unsigned edge = side; edge; edge /= 2)
+        {
+            near(pixel(result, x + edge / 2, 8 + edge / 2), expected, 2);
+            x += edge + 4;
+        }
+        renderer.present();
+    }
+    renderer.destroy_image(image);
+    check(renderer.capabilities().image_bytes == base, "Alpha mip regression leaked image storage");
+    std::puts("PASS straight alpha at every mip after frame submission, populated creation and updates");
+}
 void verify_density(Renderer &renderer)
 {
     const std::array<std::uint8_t, 4> red{230, 30, 40, 255};
@@ -369,6 +423,7 @@ int main()
         verify_populated_creation(*renderer, window);
         verify_mip_discard(*renderer);
         verify_sampling(*renderer, window);
+        verify_alpha_mips_after_frame(*renderer);
         verify_density(*renderer);
         verify_window(*renderer, window);
         renderer.reset();
