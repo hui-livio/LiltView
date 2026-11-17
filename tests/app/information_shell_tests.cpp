@@ -1672,3 +1672,70 @@ TEST_CASE("both edge navigation buttons remain clickable with information open",
         CHECK(context.shell.image_info_open());
     }
 }
+
+TEST_CASE("information arrow keys never focus full width layout containers", "[image_details][shell][keyboard][regression]")
+{
+    using namespace liltview;
+    for (const bool native : {false, true})
+        for (const bool dark : {false, true})
+        {
+            CAPTURE(native, dark);
+            DockShellScenario s;
+            s.chrome.system_titlebar = native;
+            s.chrome.dark = dark;
+            apply_style(dark, 1);
+            auto &io = ImGui::GetIO();
+            io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+            s.shell.toggle_image_info();
+            s.frames(3);
+            for (const bool control : {false, true})
+                for (const auto key : {ImGuiKey_UpArrow, ImGuiKey_DownArrow})
+                    for (int press = 0; press < 4; ++press)
+                    {
+                        CAPTURE(control, key, press);
+                        io.AddKeyEvent(ImGuiMod_Ctrl, control);
+                        io.AddKeyEvent(key, true);
+                        s.frames(3);
+                        const auto &g = *ImGui::GetCurrentContext();
+                        int containers = 0;
+                        for (const auto *window : g.Windows)
+                            if (window->Active && window->ParentWindow && window->ParentWindow->ParentWindow == nullptr)
+                            {
+                                INFO(window->Name);
+                                ++containers;
+                                CHECK_FALSE((g.NavCursorVisible && g.NavId == window->ChildId));
+                            }
+                        REQUIRE(containers == (native ? 1 : 2));
+                        io.AddKeyEvent(key, false);
+                        io.AddKeyEvent(ImGuiMod_Ctrl, false);
+                        s.frames(2);
+                    }
+        }
+}
+
+TEST_CASE("flattened canvas retains explicit Dock keyboard navigation with information open", "[dock][image_details][shell][keyboard]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    auto &io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    s.shell.toggle_image_info();
+    s.frames(3);
+    s.reveal();
+    for (int tab = 0; tab < 12 && !s.shell.dock_keyboard_focus(); ++tab)
+    {
+        io.AddKeyEvent(ImGuiKey_Tab, true);
+        s.frames(2);
+        io.AddKeyEvent(ImGuiKey_Tab, false);
+        s.frames(2);
+    }
+    REQUIRE(s.shell.dock_keyboard_focus());
+    const auto first = ImGui::GetCurrentContext()->NavId;
+    io.AddKeyEvent(ImGuiKey_RightArrow, true);
+    s.frames(2);
+    io.AddKeyEvent(ImGuiKey_RightArrow, false);
+    s.frames(2);
+    CHECK(s.shell.dock_keyboard_focus());
+    CHECK(ImGui::GetCurrentContext()->NavId != first);
+    CHECK(s.shell.image_info_open());
+}

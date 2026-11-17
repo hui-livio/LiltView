@@ -284,7 +284,7 @@ MenuAction Shell::draw(Language language, const MenuItem &menu, bool system_menu
         if (!system_menu)
         {
             const float menu_height = ImGui::GetFrameHeight();
-            ImGui::BeginChild("window_menu", {metrics.width - 2 * metrics.border, menu_height}, ImGuiChildFlags_None,
+            ImGui::BeginChild("window_menu", {metrics.width - 2 * metrics.border, menu_height}, ImGuiChildFlags_NavFlattened,
                               ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             const auto selected = draw_window_menu(menu);
             if (selected != MenuAction::none)
@@ -336,7 +336,8 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
     const auto scale          = ImGui::GetStyle().FontScaleDpi;
     const auto body_min       = ImGui::GetCursorScreenPos();
     const ImVec2 body_max{body_min.x + std::max(1.0f, chrome.width - 2 * chrome.border), body_min.y + canvas_height};
-    ImGui::BeginChild("canvas", {std::max(1.0f, body_max.x - body_min.x), canvas_height}, ImGuiChildFlags_None,
+    // Layout containers are not keyboard targets; navigate their actual controls instead.
+    ImGui::BeginChild("canvas", {std::max(1.0f, body_max.x - body_min.x), canvas_height}, ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     const auto available = ImGui::GetContentRegionAvail();
     const auto position  = ImGui::GetCursorScreenPos();

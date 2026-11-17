@@ -164,7 +164,8 @@ bool information_button(const char *id, ImVec2 position, float scale, bool copy)
     const bool pressed = ImGui::InvisibleButton(id, {28 * scale, 28 * scale}, ImGuiButtonFlags_EnableNav);
     const auto &p      = current_ui_palette();
     auto *draw         = ImGui::GetWindowDrawList();
-    if (ImGui::IsItemHovered() || ImGui::IsItemFocused())
+    // IsItemHovered also handles visible keyboard navigation; mouse focus alone must not pin feedback.
+    if (ImGui::IsItemHovered())
         draw->AddRectFilled(position, {position.x + 28 * scale, position.y + 28 * scale},
                             ImGui::GetColorU32(ImGui::IsItemActive() ? p.pressed : p.hover), 5 * scale);
     const auto color = ImGui::GetColorU32(p.information_secondary);
@@ -182,7 +183,7 @@ bool information_button(const char *id, ImVec2 position, float scale, bool copy)
         draw->AddLine(point(10, 10), point(18, 18), color, 1.4f * scale);
         draw->AddLine(point(18, 10), point(10, 18), color, 1.4f * scale);
     }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) || ImGui::IsItemFocused())
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
     {
         const auto label = std::string_view(id).substr(0, std::string_view(id).find("##"));
         ImGui::SetTooltip("%.*s", static_cast<int>(label.size()), label.data());

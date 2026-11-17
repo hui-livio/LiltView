@@ -321,3 +321,79 @@ TEST_CASE("information copy action uses the complete literal UTF-8 path", "[imag
     CHECK(std::string(ImGui::GetClipboardText()) == platform::path_bytes(details.path));
     CHECK_FALSE(context.closed);
 }
+
+TEST_CASE("information copy tooltip disappears after a mouse click leaves the button", "[image_details][ui][tooltip][regression]")
+{
+    for (const auto language : {Language::english, Language::chinese})
+    {
+        Context context;
+        const auto details = example();
+        auto &io = ImGui::GetIO();
+        std::string clipboard = "unchanged";
+        auto &platform_io = ImGui::GetPlatformIO();
+        platform_io.Platform_ClipboardUserData = &clipboard;
+        platform_io.Platform_SetClipboardTextFn = [](ImGuiContext *ctx, const char *text)
+        {
+            *static_cast<std::string *>(ctx->PlatformIO.Platform_ClipboardUserData) = text;
+        };
+        const auto frame = [&] { context.frame(details, language); };
+        const auto tooltip_visible = []
+        {
+            for (const auto *window : ImGui::GetCurrentContext()->Windows)
+                if (window->Active && !window->Hidden && (window->Flags & ImGuiWindowFlags_Tooltip))
+                    return true;
+            return false;
+        };
+        frame();
+        frame();
+        const auto copy_id = context.body->GetID("###copy_image_path");
+        bool found = false;
+        for (float y = context.body->InnerRect.Min.y + 14; y < context.body->InnerRect.Max.y; y += 7)
+        {
+            io.AddMousePosEvent(context.body->WorkRect.Max.x - 14, y);
+            frame();
+            frame();
+            if (ImGui::GetCurrentContext()->HoveredId == copy_id)
+            {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(found);
+        for (int i = 0; i < 45; ++i)
+            frame();
+        REQUIRE(tooltip_visible());
+
+        io.AddMouseButtonEvent(0, true);
+        frame();
+        io.AddMouseButtonEvent(0, false);
+        frame();
+        REQUIRE(clipboard == platform::path_bytes(details.path));
+        REQUIRE(ImGui::GetCurrentContext()->NavId == copy_id);
+        io.AddMousePosEvent(context.panel->Pos.x + 45, context.panel->Pos.y + 22);
+        for (int i = 0; i < 4; ++i)
+            frame();
+        CHECK_FALSE(tooltip_visible());
+        CHECK(ImGui::GetCurrentContext()->NavId == copy_id); // Mouse focus may remain, but cannot pin a tooltip.
+        CHECK_FALSE(context.closed);
+        // Keyboard focus still receives a tooltip through ImGui's navigation-aware hover handling.
+        for (int tab = 0; tab < 12 && !(ImGui::GetCurrentContext()->NavId == copy_id &&
+                                       ImGui::GetCurrentContext()->NavCursorVisible); ++tab)
+        {
+            io.AddKeyEvent(ImGuiKey_Tab, true);
+            frame();
+            io.AddKeyEvent(ImGuiKey_Tab, false);
+            frame();
+            frame();
+        }
+        REQUIRE(ImGui::GetCurrentContext()->NavId == copy_id);
+        REQUIRE(ImGui::GetCurrentContext()->NavCursorVisible);
+        for (int i = 0; i < 45; ++i)
+            frame();
+        CHECK(tooltip_visible());
+        io.AddMousePosEvent(10, 10);
+        for (int i = 0; i < 4; ++i)
+            frame();
+        CHECK_FALSE(tooltip_visible());
+    }
+}
