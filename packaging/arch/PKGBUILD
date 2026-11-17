@@ -49,12 +49,10 @@ build() {
   export CFLAGS="${CFLAGS} -ffile-prefix-map=\"${srcdir}\"=."
   export CXXFLAGS="${CXXFLAGS} -ffile-prefix-map=\"${srcdir}\"=."
   cmake -S "${_source_root}" -B "${srcdir}/build" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=MinSizeRel \
     -DLILTVIEW_VERSION_SUFFIX="${_version_suffix}" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=lib \
-    -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG \
-    -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG \
     -DLILTVIEW_CXX_STANDARD=23 \
     -DLILTVIEW_BUILD_APP_COMPONENTS=ON \
     -DLILTVIEW_ENABLE_GLOBAL_MENU=ON \
@@ -67,7 +65,7 @@ build() {
 
 check() {
   if [[ ${_build_tests} == ON ]]; then
-    ctest --test-dir "${srcdir}/build" --build-config Release --output-on-failure --no-tests=error
+    ctest --test-dir "${srcdir}/build" --build-config MinSizeRel --output-on-failure --no-tests=error
   fi
   "${srcdir}/build/app/liltview" --version
   desktop-file-validate "${_source_root}/packaging/linux/io.github.hui_livio.LiltView.desktop"

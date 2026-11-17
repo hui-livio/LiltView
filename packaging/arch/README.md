@@ -28,7 +28,7 @@ sudo pacman -U ./liltview-1.0.0rc.1-1-x86_64.pkg.tar.zst
 依赖、工具链要求、桌面验证由 PKGBUILD 声明。普通安装默认设置
 `BUILD_TESTING=OFF` 和 `LILTVIEW_BUILD_UNIT_TESTS=OFF`，**既不编译也不运行 UT**。
 `check()` 仅检查应用版本与 desktop 文件，不运行 CTest。主程序及核心按
-**Release / NDEBUG** 编译；makepkg 执行 strip，不产生 debug 子包，不安装 UT。SDL 和图片 codec 静态链接，窗口库、Fontconfig、GIO
+**MinSizeRel / NDEBUG** 编译；makepkg 执行 strip，不产生 debug 子包，不安装 UT。SDL 和图片 codec 静态链接，窗口库、Fontconfig、GIO
 和图形驱动由系统提供，不要求系统安装 SDL3。许可证直接安装到
 `/usr/share/licenses/liltview`，不执行仅大小写不同的目录重命名，兼容 WSL Windows 挂载盘。
 
@@ -38,7 +38,7 @@ sudo pacman -U ./liltview-1.0.0rc.1-1-x86_64.pkg.tar.zst
 LILTVIEW_RUN_TESTS=1 makepkg --check -sf
 ```
 
-这会开启 `BUILD_TESTING` 与 `LILTVIEW_BUILD_UNIT_TESTS`，构建并运行完整 **Release UT**；
+这会开启 `BUILD_TESTING` 与 `LILTVIEW_BUILD_UNIT_TESTS`，构建并运行完整 **MinSizeRel UT**；
 测试失败仍会中止打包，不忽略失败。`--check` 确保即使本机 makepkg 配置禁用了检查也会执行。
 不设置该环境变量（或设为 `0`）就是普通安装模式；复用旧构建目录时也会重新明确关闭 UT。
 Python 入口对应参数是 `--tests`。
@@ -76,5 +76,5 @@ python3 scripts/package_arch.py prepare
 
 [Release workflow](../RELEASE.md) 从完整无 Git 源码包解压后，在原生 Arch 容器中以普通
 用户运行 **同一份 PKGBUILD**。它通过 `LILTVIEW_RUN_TESTS=1 makepkg --check`
-显式开启完整 Release UT，测试通过后上传标准
+显式开启完整 MinSizeRel UT，测试通过后上传标准
 `.pkg.tar.zst`，并检查最终包内主程序没有调试段。

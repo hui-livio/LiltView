@@ -35,20 +35,22 @@ class BuildTests(unittest.TestCase):
         configure, build, test = [call.args[0] for call in run.call_args_list]
         self.assertEqual(configure[:3], ["cmake", "--preset", "release-ci"])
         self.assertEqual(build[0:2], ["cmake", "--build"])
-        self.assertIn("Release", build)
+        self.assertIn("MinSizeRel", build)
         self.assertEqual(build[-2:], ["--parallel", "3"])
         self.assertEqual(test[0], "ctest")
-        self.assertIn("Release", test)
+        self.assertIn("MinSizeRel", test)
         self.assertIn("--no-tests=error", test)
         self.assertEqual(test[test.index("--parallel") + 1], "1" if os.name == "nt" else "2")
         self.assertEqual(configure[4], build[2])
         self.assertEqual(build[2], test[2])
 
     def test_application_only_build_does_not_run_ut(self):
-        with patch.object(builder, "run") as run:
-            builder.main(["build", "--preset", "app-release"])
-        self.assertEqual(run.call_count, 2)
-        self.assertIn("app-release", run.call_args_list[0].args[0])
+        for preset in ("app-release", "app-minirel"):
+            with self.subTest(preset=preset), patch.object(builder, "run") as run:
+                builder.main(["build", "--preset", preset])
+                self.assertEqual(run.call_count, 2)
+                self.assertIn(preset, run.call_args_list[0].args[0])
+                self.assertIn("MinSizeRel", run.call_args_list[1].args[0])
 
     def test_version_and_cache_values_remain_single_arguments(self):
         with patch.dict(os.environ, VERSION_SUFFIX="-rc.2"), patch.object(builder, "run") as run:
@@ -93,6 +95,7 @@ class BuildTests(unittest.TestCase):
     def test_invalid_arguments_fail_before_invoking_tools(self):
         for arguments in (["--parallel", "0"], ["--test-parallel", "-1"], ["-DBROKEN"],
                           ["-D=value"], ["test", "--preset", "app-release"],
+                          ["test", "--preset", "app-minirel"],
                           ["arch", "--build-dir", "custom"]):
             with self.subTest(arguments=arguments), patch.object(builder, "run") as run:
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
@@ -144,14 +147,34 @@ class CompilerSelectionTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("cmake") and shutil.which("ninja"), "requires CMake and Ninja")
 class OfflineBuilderTests(unittest.TestCase):
+    def test_all_release_presets_select_minsizerel_and_ci_keeps_full_ut(self):
+        with tempfile.TemporaryDirectory(prefix="liltview presets ") as directory:
+            root = Path(directory)
+            presets = json.loads((ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
+            # No compiler is used: exercise Windows preset inheritance on any host.
+            for preset in presets["configurePresets"]:
+                if preset["name"] == "msvc-base":
+                    preset["condition"] = {"type": "const", "value": True}
+            (root / "CMakePresets.json").write_text(json.dumps(presets), encoding="utf-8")
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 3.30)\nproject(Presets LANGUAGES NONE)\n', encoding="utf-8")
+            for preset in ("release", "app-release", "app-minirel", "msvc-release", "release-ci"):
+                with self.subTest(preset=preset):
+                    result = subprocess.run(["cmake", "--preset", preset], cwd=root,
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    cache = (root / "build" / preset / "CMakeCache.txt").read_text(encoding="utf-8")
+                    self.assertRegex(cache, r"(?m)^CMAKE_BUILD_TYPE:[A-Z]+=MinSizeRel$")
+                    if preset == "release-ci":
+                        for name in ("BUILD_TESTING", "LILTVIEW_BUILD_UNIT_TESTS", "LILTVIEW_RELEASE_PACKAGING"):
+                            self.assertRegex(cache, rf"(?m)^{name}:BOOL=(TRUE|ON)$")
+
     def test_real_configure_build_and_test_from_git_free_source_with_spaces(self):
         with tempfile.TemporaryDirectory(prefix="liltview source ") as directory:
             root = Path(directory)
             shutil.copyfile(ROOT / "build.py", root / "build.py")
-            (root / "CMakePresets.json").write_text(json.dumps({
-                "version": 6, "configurePresets": [{"name": "release-ci", "generator": "Ninja",
-                "binaryDir": "${sourceDir}/build/release-ci", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}}]
-            }), encoding="utf-8")
+            # Exercise actual preset inheritance together with the Python entry point.
+            shutil.copyfile(ROOT / "CMakePresets.json", root / "CMakePresets.json")
             environment = dict(os.environ, VERSION_SUFFIX="-rc.1")
             for succeeds in (True, False):
                 with self.subTest(succeeds=succeeds):
@@ -164,7 +187,7 @@ class OfflineBuilderTests(unittest.TestCase):
                         env=environment, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60)
                     self.assertEqual(result.returncode, 0 if succeeds else 8, result.stdout + result.stderr)
                     cache = (root / "build/release-ci/CMakeCache.txt").read_text(encoding="utf-8")
-                    self.assertRegex(cache, r"(?m)^CMAKE_BUILD_TYPE:[A-Z]+=Release$")
+                    self.assertRegex(cache, r"(?m)^CMAKE_BUILD_TYPE:[A-Z]+=MinSizeRel$")
                     self.assertIn("LILTVIEW_VERSION_SUFFIX:UNINITIALIZED=-rc.1", cache)
                     self.assertTrue((root / "results.xml").is_file())
 

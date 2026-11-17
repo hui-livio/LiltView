@@ -182,7 +182,7 @@ class ReleaseTests(unittest.TestCase):
     def test_arch_recipe_is_directly_usable_not_a_generated_template(self):
         recipe = (release.ROOT / "packaging/arch/PKGBUILD").read_text(encoding="utf-8")
         self.assertNotRegex(recipe, r"@[A-Z_]+@")
-        self.assertIn("-DCMAKE_BUILD_TYPE=Release", recipe)
+        self.assertIn("-DCMAKE_BUILD_TYPE=MinSizeRel", recipe)
         self.assertIn('-DLILTVIEW_BUILD_UNIT_TESTS="${_build_tests}"', recipe)
         self.assertIn('-DBUILD_TESTING="${_build_tests}"', recipe)
         self.assertIn("ctest --test-dir", recipe)

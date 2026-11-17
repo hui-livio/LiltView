@@ -83,7 +83,7 @@ if(LILTVIEW_BUILD_UNIT_TESTS)
             target_include_directories(liltview_app_tests PRIVATE "${PROJECT_BINARY_DIR}/app/generated")
             target_compile_definitions(liltview_app_tests PRIVATE
                 LILTVIEW_TEST_APP_PATH="$<TARGET_FILE:liltview>"
-                LILTVIEW_TEST_GUI=$<IF:$<CONFIG:Release>,1,0>
+                LILTVIEW_TEST_GUI=$<IF:$<CONFIG:Release,MinSizeRel>,1,0>
                 LILTVIEW_TEST_DEBUG=$<IF:$<CONFIG:Debug>,1,0>)
             target_link_libraries(liltview_app_tests PRIVATE version dwmapi comctl32)
             add_dependencies(liltview_app_tests liltview)

@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=ROOT / "build/arch")
     parser.add_argument("--jobs", type=positive_integer)
     parser.add_argument("--syncdeps", action="store_true")
-    parser.add_argument("--tests", action="store_true", help="build and run Release UT (disabled by default)")
+    parser.add_argument("--tests", action="store_true", help="build and run MinSizeRel UT (disabled by default)")
     args = parser.parse_args()
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         parser.error("run on Arch Linux as a normal user; makepkg requests privilege only for pacman")

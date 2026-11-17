@@ -60,6 +60,7 @@ class WindowsWorkflowTests(unittest.TestCase):
                     self.assertIn("-DCMAKE_CXX_COMPILER=cl.exe", configure)
                     self.assertIn(f"-DLILTVIEW_VERSION_SUFFIX={suffix}", configure)
                     self.assertNotIn(".exe", configure)
+                    self.assertIn("MinSizeRel", build)
                     self.assertEqual(build[-2:], ["--parallel", "4"])
 
 

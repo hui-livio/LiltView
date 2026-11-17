@@ -1,7 +1,7 @@
 # LiltView 1.0.0 release
 
 The GitHub Actions **Release** workflow builds native packages on Windows, macOS,
-Ubuntu, Fedora and Arch. All configurations use **Release**, including the full
+Ubuntu, Fedora and Arch. All configurations use **MinSizeRel**, including the full
 Catch2 UT and C ABI/ownership contracts. Test failures block artifact creation.
 Tests and debug files are never installed or published.
 
@@ -27,7 +27,7 @@ Manual/PR runs build and test everything without creating a GitHub Release.
 A successful workflow, plus manual launch/open-image checks on each desktop,
 is required before claiming a platform has been validated.
 
-For a local Release build with UT:
+For a local MinSizeRel build with UT:
 
 ```sh
 cmake --preset release-ci
@@ -38,7 +38,7 @@ ctest --preset release-ci
 On Windows run this from an x64 MSVC Developer Shell and add
 `-DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe` to configure.
 CI passes the platform-specific compilers and dependency settings explicitly.
-The release packaging option rejects non-Release configurations.
+The release packaging option requires a single-config MinSizeRel build.
 
 ## Pre-release first, then stable
 
@@ -85,7 +85,7 @@ native Python 3 package alongside CMake and the compilers.
 From a checkout with initialized dependencies, or an extracted complete source archive:
 
 ```sh
-# Configure, compile, and run Release UT (default).
+# Configure, compile, and run MinSizeRel UT (default).
 python3 build.py --parallel 4
 
 # CI keeps compilation and tests as separate steps for readable logs/reports.
@@ -95,7 +95,7 @@ python3 build.py test --test-parallel 2 --junit build/test-results.xml
 # Application only, without compiling or running UT.
 python3 build.py build --preset app-release --parallel 4
 
-# Arch CI, as a normal user: Release build + UT + native pkg.tar.zst.
+# Arch CI, as a normal user: MinSizeRel build + UT + native pkg.tar.zst.
 python3 build.py arch --parallel 3
 ```
 
@@ -105,7 +105,7 @@ UT run serially by default because native window tests share the desktop. On
 macOS the script selects Homebrew LLVM 20 for C, and Xcode Clang for C++ and
 Objective-C. Linux uses the distribution compiler.
 
-The script uses the existing `release-ci` and `app-release` CMake presets. Extra
+The script uses the `release-ci`, `app-release` and `app-minirel` CMake presets (all MinSizeRel). Extra
 cache settings use repeatable `-DNAME=VALUE` arguments; quote the whole argument
 when its value contains spaces. `--build-dir` overrides the default
 `build/<preset>` directory for CMake builds. `VERSION_SUFFIX` or
@@ -173,7 +173,7 @@ a full checkout or source archive; it is not generated from a template. Normal
 Arch installs do not build or run UT (`BUILD_TESTING=OFF` and
 `LILTVIEW_BUILD_UNIT_TESTS=OFF`); only version/desktop validation remains. Release CI
 explicitly uses `LILTVIEW_RUN_TESTS=1 makepkg --check`: `check()` runs the full
-Release UT before `package()`, and test failures block packaging.
+MinSizeRel UT before `package()`, and test failures block packaging.
 
 Install packages using the matching platform package manager:
 
