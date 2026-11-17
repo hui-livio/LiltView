@@ -82,3 +82,17 @@ TEST_CASE("CLI11 rejects unknown missing duplicate and conflicting arguments", "
         CHECK_FALSE(parsed.error.empty());
     }
 }
+
+TEST_CASE("embedded redistribution notices are available without launching graphics", "[cli][resources]")
+{
+    const auto parsed = parse({"liltview", "--licenses"});
+    REQUIRE(parsed.command.exit_code);
+    CHECK(*parsed.command.exit_code == 0);
+    CHECK(parsed.error.empty());
+    for (const auto *component : {"Apache License", "HarmonyOS", "libjpeg-turbo", "FreeType", "SDL", "PlutoVG",
+                                 "third_party/plasma-wayland-protocols/LICENSE.MIT"})
+    {
+        CAPTURE(component);
+        CHECK(parsed.output.find(component) != std::string::npos);
+    }
+}

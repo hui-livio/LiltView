@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+<key>CFBundleName</key><string>LiltView</string>
+<key>CFBundleIdentifier</key><string>io.github.hui-livio.LiltView</string>
+<key>CFBundleIconFile</key><string>LiltView.icns</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>${PROJECT_VERSION}</string>
+<key>CFBundleVersion</key><string>${PROJECT_VERSION}</string>
+<key>CFBundleGetInfoString</key><string>LiltView ${LILTVIEW_VERSION}</string>
+<key>LSMinimumSystemVersion</key><string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSHumanReadableCopyright</key><string>Copyright 2026 LiltView contributors. Apache-2.0.</string>
+<key>CFBundleDocumentTypes</key><array><dict>
+<key>CFBundleTypeName</key><string>Image</string>
+<key>CFBundleTypeRole</key><string>Viewer</string>
+<key>LSHandlerRank</key><string>Alternate</string>
+<key>CFBundleTypeExtensions</key><array>
+<string>jpg</string><string>jpeg</string><string>png</string><string>svg</string>
+<string>webp</string><string>bmp</string><string>gif</string><string>tif</string><string>tiff</string>
+</array></dict></array>
+</dict></plist>

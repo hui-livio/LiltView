@@ -131,3 +131,9 @@ Copyright 2026 LiltView contributors. 项目采用 [Apache License 2.0](LICENSE)
 JPEG 使用 libjpeg-turbo。This software is based in part on the work of the Independent JPEG Group.
 
 随包 HarmonyOS Sans SC 字体版权归 Huawei Device Co., Ltd.，适用[字体原始许可](assets/fonts/LICENSE.HarmonyOS-Sans.txt)。
+
+## 正式发布
+
+1.0.0 [发布流水线](packaging/RELEASE.md) 使用 GitHub Actions 编译 Windows x64 单 EXE、macOS Apple Silicon / Intel 的 DMG / ZIP、Ubuntu DEB、Fedora RPM 和 Arch `.pkg.tar.zst`。主程序与 UT 全部使用 **Release**，测试通过后才打包，产物不包含调试信息或测试程序。独立上传的 `.zip` / `.tar.gz` 完整源码包包含所有第三方依赖源码并去除 Git 元数据；不要使用 GitHub 自动生成的 Source code 附件。
+
+使用 `python3 build.py --parallel 4` 统一配置、编译并运行 Release UT；Windows 在 x64 MSVC 开发者终端使用 `python build.py --parallel 4`。需要 Python 3.11+，CI 也调用同一[编译入口](packaging/RELEASE.md#unified-python-build-entry-point)。

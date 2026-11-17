@@ -4,6 +4,12 @@ liltview_require_sdl3()
 liltview_require_app_headers()
 liltview_require_lz4()
 include(GNUInstallDirs)
+# Linux package names are lowercase. Install directly to that spelling rather
+# than case-only renaming a staged directory (not supported on WSL NTFS mounts).
+set(liltview_license_subdir "LiltView")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(liltview_license_subdir "liltview")
+endif()
 liltview_dependency_source(imgui backends/imgui_impl_sdl3.cpp imgui_source)
 add_subdirectory(renderer)
 
@@ -22,6 +28,8 @@ target_include_directories(liltview_app_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR
 liltview_configure_cxx_target(liltview_app_model)
 target_link_libraries(liltview_app_model PRIVATE LiltView::iguana)
 target_compile_definitions(liltview_app_model PRIVATE THROW_UNKNOWN_KEY)
+
+include("${PROJECT_SOURCE_DIR}/cmake/LiltViewNotices.cmake")
 
 configure_file(version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp" @ONLY)
 
@@ -64,11 +72,12 @@ if(WIN32)
     if(LILTVIEW_VERSION_TWEAK STREQUAL "")
         set(LILTVIEW_VERSION_TWEAK 0)
     endif()
+    set(LILTVIEW_WINDOWS_FONT "${PROJECT_SOURCE_DIR}/assets/fonts/HarmonyOS_Sans_SC_Regular.ttf")
     set(LILTVIEW_WINDOWS_ICON "${PROJECT_SOURCE_DIR}/assets/icons/liltview-color.ico")
     configure_file(resources/liltview.rc.in "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc" @ONLY)
     target_sources(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc")
     set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc" APPEND PROPERTY
-        OBJECT_DEPENDS "${LILTVIEW_WINDOWS_ICON}")
+        OBJECT_DEPENDS "${LILTVIEW_WINDOWS_ICON};${LILTVIEW_WINDOWS_FONT}")
     target_compile_definitions(liltview PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:RC>>:_DEBUG>")
     # Keep Debug's console, but launch Release as a GUI application (also multi-config).
     set_property(TARGET liltview PROPERTY WIN32_EXECUTABLE "$<CONFIG:Release>")
@@ -103,7 +112,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         install(FILES "${PROJECT_SOURCE_DIR}/third_party/plasma-wayland-protocols/LICENSE.MIT"
             "${PROJECT_SOURCE_DIR}/third_party/plasma-wayland-protocols/appmenu.xml"
             "${PROJECT_SOURCE_DIR}/third_party/plasma-wayland-protocols/source.json"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/plasma-wayland-protocols")
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/plasma-wayland-protocols")
     else()
         target_sources(liltview PRIVATE platform/global_menu_stub.cpp)
     endif()
@@ -115,57 +124,87 @@ liltview_configure_cxx_target(liltview)
 # Build-tree resources stay beside the executable. Installed architecture-neutral
 # resources live in share/liltview; both paths resolve relative to the executable.
 set(font_dir "${PROJECT_SOURCE_DIR}/assets/fonts")
+set(liltview_build_font_dir "$<TARGET_FILE_DIR:liltview>/assets/fonts")
+if(APPLE)
+    set(liltview_build_font_dir "$<TARGET_BUNDLE_CONTENT_DIR:liltview>/Resources/share/liltview/fonts")
+endif()
 add_custom_command(TARGET liltview POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:liltview>/assets/fonts"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${liltview_build_font_dir}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf"
         "${font_dir}/LICENSE.HarmonyOS-Sans.txt"
         "${font_dir}/source.json"
-        "$<TARGET_FILE_DIR:liltview>/assets/fonts"
+        "${liltview_build_font_dir}"
     VERBATIM)
 set_property(TARGET liltview APPEND PROPERTY LINK_DEPENDS
     "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf" "${font_dir}/LICENSE.HarmonyOS-Sans.txt" "${font_dir}/source.json")
 
-install(TARGETS liltview RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(APPLE)
+    set_target_properties(liltview PROPERTIES MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "LiltView"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.hui-livio.LiltView"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+        OUTPUT_NAME "LiltView")
+    find_program(LILTVIEW_ICONUTIL iconutil REQUIRED)
+    set(iconset "${CMAKE_CURRENT_BINARY_DIR}/LiltView.iconset")
+    file(MAKE_DIRECTORY "${iconset}")
+    foreach(size 16 32 128 256 512)
+        configure_file("${PROJECT_SOURCE_DIR}/assets/icons/png/liltview-color-${size}.png"
+            "${iconset}/icon_${size}x${size}.png" COPYONLY)
+    endforeach()
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/LiltView.icns"
+        COMMAND "${LILTVIEW_ICONUTIL}" -c icns "${iconset}" -o "${CMAKE_CURRENT_BINARY_DIR}/LiltView.icns"
+        DEPENDS "${iconset}/icon_512x512.png" VERBATIM)
+    target_sources(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/LiltView.icns")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/LiltView.icns" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(liltview PROPERTIES MACOSX_BUNDLE_ICON_FILE "LiltView.icns")
+    # SDL_GetBasePath() resolves to Contents/Resources inside an application bundle.
+    set(CMAKE_INSTALL_DATADIR "LiltView.app/Contents/Resources/share")
+    install(TARGETS liltview BUNDLE DESTINATION .)
+else()
+    install(TARGETS liltview RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 install(FILES "${font_dir}/HarmonyOS_Sans_SC_Regular.ttf" "${font_dir}/LICENSE.HarmonyOS-Sans.txt" "${font_dir}/source.json"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/liltview/fonts")
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/NOTICE"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/SDL/LICENSE.txt"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/SDL")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/SDL")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/imgui/LICENSE.txt"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/imgui")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/imgui")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/spdlog/LICENSE"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/spdlog")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/spdlog")
 foreach(header_library CLI11 iguana)
     install(FILES "${PROJECT_SOURCE_DIR}/third_party/${header_library}/LICENSE"
         "${PROJECT_SOURCE_DIR}/third_party/${header_library}/source.json"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/${header_library}")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/${header_library}")
 endforeach()
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/iguana/LICENSE-Boost"
     "${PROJECT_SOURCE_DIR}/third_party/iguana/THIRD_PARTY_NOTICES.txt"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/iguana")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/iguana")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/LICENSE.md"
     "${PROJECT_SOURCE_DIR}/third_party/libjpeg-turbo/README.ijg"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libjpeg-turbo")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/libjpeg-turbo")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/dav1d-ref/LICENSE" "${PROJECT_SOURCE_DIR}/third_party/dav1d-ref/source.json"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/dav1d-ref")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/dav1d-ref")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/lz4/lib/LICENSE"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/lz4")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/lz4")
 foreach(codec libpng zlib plutosvg)
     install(FILES "${PROJECT_SOURCE_DIR}/third_party/${codec}/LICENSE"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/${codec}")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/${codec}")
 endforeach()
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libwebp/COPYING" "${PROJECT_SOURCE_DIR}/third_party/libwebp/PATENTS"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/libwebp")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/libwebp")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/giflib/COPYING"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/giflib")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/giflib")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libtiff/LICENSE.md"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/LibTIFF")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/LibTIFF")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/LICENSE"
     "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/source/FTL.TXT"
     "${PROJECT_SOURCE_DIR}/third_party/PlutoVG-NOTICES.txt"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/LiltView/PlutoVG")
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/PlutoVG")
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(app_id "io.github.hui_livio.LiltView")

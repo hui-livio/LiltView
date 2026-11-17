@@ -1,0 +1,81 @@
+# Build from a complete local checkout or the full release source archive.
+# Usage: cd packaging/arch && makepkg -si
+# Maintainer: hui-livio <yuanfeng1897@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+# No network fetches here: the caller provides the complete source tree,
+# including recursive third_party dependencies. This also works without Git.
+_source_root="${LILTVIEW_SOURCE_DIR:-${startdir}/../..}"
+_source_root=$(realpath "${_source_root}")
+_base_version=$(sed -nE 's/^project\(LiltView VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "${_source_root}/CMakeLists.txt")
+_release_version="${LILTVIEW_RELEASE_VERSION:-${_base_version}-rc.1}"
+if [[ -z ${LILTVIEW_RELEASE_VERSION:-} && -f ${_source_root}/RELEASE_VERSION ]]; then
+  _release_version=$(<"${_source_root}/RELEASE_VERSION")
+fi
+_version_suffix="${_release_version#"${_base_version}"}"
+if [[ -z ${_base_version} || ( -n ${_version_suffix} && ! ${_version_suffix} =~ ^-rc\.[1-9][0-9]*$ ) ]]; then
+  printf 'Invalid LiltView release version: %s\n' "${_release_version}" >&2
+  return 1
+fi
+
+# Normal local installs do not build or run UT. Release CI opts in explicitly.
+case "${LILTVIEW_RUN_TESTS:-0}" in
+  0) _build_tests=OFF ;;
+  1) _build_tests=ON ;;
+  *) printf 'LILTVIEW_RUN_TESTS must be 0 or 1\n' >&2; return 1 ;;
+esac
+
+pkgname=liltview
+pkgver="${_release_version/-rc./rc.}"
+pkgrel=1
+pkgdesc='A lightweight image viewer with a C23 core and ImGui interface'
+arch=('x86_64')
+url='https://github.com/hui-livio/LiltView'
+license=('Apache-2.0' 'MIT' 'Zlib' 'Libpng-2.0' 'BSD-3-Clause' 'IJG'
+         'BSL-1.0' 'FTL' 'libtiff' 'LicenseRef-HarmonyOS-Sans')
+depends=(
+  'glibc' 'gcc-libs' 'fontconfig' 'glib2' 'wayland' 'libxkbcommon'
+  'libx11' 'libxcursor' 'libxext' 'libxfixes' 'libxi' 'libxrandr' 'libxss' 'libxtst'
+  'libdecor' 'dbus' 'desktop-file-utils' 'hicolor-icon-theme'
+)
+makedepends=('cmake>=3.30' 'ninja' 'pkgconf' 'gcc>=15' 'nasm')
+optdepends=('opengl-driver: accelerated SDL_Render driver; software rendering works without it')
+options=('!debug')
+source=()
+sha256sums=()
+
+build() {
+  # Keep __FILE__ diagnostics useful without embedding the builder's local path.
+  export CFLAGS="${CFLAGS} -ffile-prefix-map=\"${srcdir}\"=."
+  export CXXFLAGS="${CXXFLAGS} -ffile-prefix-map=\"${srcdir}\"=."
+  cmake -S "${_source_root}" -B "${srcdir}/build" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLILTVIEW_VERSION_SUFFIX="${_version_suffix}" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG \
+    -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG \
+    -DLILTVIEW_CXX_STANDARD=23 \
+    -DLILTVIEW_BUILD_APP_COMPONENTS=ON \
+    -DLILTVIEW_ENABLE_GLOBAL_MENU=ON \
+    -DLILTVIEW_BUILD_UNIT_TESTS="${_build_tests}" \
+    -DLILTVIEW_RELEASE_PACKAGING=ON \
+    -DBUILD_TESTING="${_build_tests}" \
+    -DSDL_X11=ON -DSDL_WAYLAND=ON -DSDL_KMSDRM=OFF -DSDL_LIBUDEV=OFF -DSDL_IBUS=OFF
+  cmake --build "${srcdir}/build"
+}
+
+check() {
+  if [[ ${_build_tests} == ON ]]; then
+    ctest --test-dir "${srcdir}/build" --build-config Release --output-on-failure --no-tests=error
+  fi
+  "${srcdir}/build/app/liltview" --version
+  desktop-file-validate "${_source_root}/packaging/linux/io.github.hui_livio.LiltView.desktop"
+}
+
+package() {
+  DESTDIR="${pkgdir}" cmake --install "${srcdir}/build"
+  # CMake installs licenses directly under the lowercase package name.
+  install -Dm644 "${_source_root}/assets/fonts/LICENSE.HarmonyOS-Sans.txt" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/HarmonyOS-Sans/LICENSE.txt"
+}

@@ -15,6 +15,10 @@ function(liltview_configure_c_target target)
             "/FI${PROJECT_SOURCE_DIR}/cmake/compat/msvc_c.h")
         target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     endif()
+    if(APPLE)
+        # Darwin has pthreads but no C11 <threads.h>. Private to our C targets.
+        target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/cmake/compat/apple")
+    endif()
     liltview_target_warnings(${target})
 endfunction()
 

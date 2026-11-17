@@ -1,110 +1,80 @@
-# Arch Linux 打包与部署
+# Arch Linux 编译、打包与部署
 
-提供本地源码包、PKGBUILD 和 `.SRCINFO` 生成脚本。支持 makepkg / pacman，以及 paru 的本地 PKGBUILD 模式；当前没有发布 AUR 包，不使用 `paru -S liltview` 作为安装入口。
+`PKGBUILD` 是可直接交给 makepkg 的原生脚本，**不是模板，不需要先运行 Python 生成**。
+它从当前完整项目源码编译，适用于 Git checkout 和解压后的完整 Release 源码包，不要求 `.git`。
+仅拿走一个 PKGBUILD 文件、没有项目源码时不能构建；这不是从网络获取源码的 AUR 配方。
 
-## 1. 准备环境
+## 直接使用 makepkg / pacman
 
-在 Arch Linux x86_64 上，以普通用户执行。首次准备基础工具：
+在 Arch Linux x86_64 上以普通用户运行：
 
 ```sh
-sudo pacman -S --needed base-devel git python
+sudo pacman -S --needed base-devel git
+# Git checkout 需要初始化完整第三方依赖；Release 完整源码包无需此步。
 git submodule update --init --recursive
+cd packaging/arch
+makepkg -s       # 安装缺失构建依赖，不编译/运行 UT，生成 .pkg.tar.zst
+# 或者一次完成编译并安装：
+makepkg -si
 ```
 
-构建还需要 CMake 3.30+、Ninja、pkgconf、支持 C23 的 GCC、NASM、Fontconfig / GIO、SDL 可用的图形驱动 及 X11 / Wayland 库。完整构建、运行及检查依赖由生成的 PKGBUILD 声明；`--syncdeps` 或 paru 可以交给 pacman 安装缺失依赖，保留正常交互确认。
-
-主程序使用 C23 / C++23、Release / NDEBUG 和 makepkg 的优化及加固标志，禁用额外 debug 子包。x86_64 把 NASM 列为构建依赖，供 libjpeg-turbo 启用 SIMD。SDL、图片 codec、ImGui、spdlog 静态链接；窗口系统和图形驱动仍由系统提供。普通安装无需系统 SDL3，也不覆盖系统库。
-
-## 2. pacman 路径
-
-在仓库根目录运行：
+makepkg 负责从源码编译，pacman 负责安装及解析系统依赖。不要用 sudo 运行 makepkg。
+安装已构建的包：
 
 ```sh
-# 只构建 .pkg.tar.zst；--syncdeps 允许安装缺失构建依赖。
+sudo pacman -U ./liltview-1.0.0rc.1-1-x86_64.pkg.tar.zst
+```
+
+依赖、工具链要求、桌面验证由 PKGBUILD 声明。普通安装默认设置
+`BUILD_TESTING=OFF` 和 `LILTVIEW_BUILD_UNIT_TESTS=OFF`，**既不编译也不运行 UT**。
+`check()` 仅检查应用版本与 desktop 文件，不运行 CTest。主程序及核心按
+**Release / NDEBUG** 编译；makepkg 执行 strip，不产生 debug 子包，不安装 UT。SDL 和图片 codec 静态链接，窗口库、Fontconfig、GIO
+和图形驱动由系统提供，不要求系统安装 SDL3。许可证直接安装到
+`/usr/share/licenses/liltview`，不执行仅大小写不同的目录重命名，兼容 WSL Windows 挂载盘。
+
+## 显式运行 UT（开发 / CI）
+
+```sh
+LILTVIEW_RUN_TESTS=1 makepkg --check -sf
+```
+
+这会开启 `BUILD_TESTING` 与 `LILTVIEW_BUILD_UNIT_TESTS`，构建并运行完整 **Release UT**；
+测试失败仍会中止打包，不忽略失败。`--check` 确保即使本机 makepkg 配置禁用了检查也会执行。
+不设置该环境变量（或设为 `0`）就是普通安装模式；复用旧构建目录时也会重新明确关闭 UT。
+Python 入口对应参数是 `--tests`。
+
+## 预发布与正式版本
+
+源码 checkout 默认打包 `1.0.0rc.1`。完整发布源码包带有 `RELEASE_VERSION`，自动选择
+对应 RC / 正式版本。CI 也可通过 `LILTVIEW_RELEASE_VERSION` 明确选择：
+
+```sh
+LILTVIEW_RELEASE_VERSION=1.0.0-rc.2 makepkg -sf
+# RC 验收完成后：
+LILTVIEW_RELEASE_VERSION=1.0.0 makepkg -sf
+```
+
+Arch pkgver 使用 `1.0.0rc.1`，应用显示 `1.0.0-rc.1`；正式包 `1.0.0` 的版本排序更高，
+可正常升级。环境变量与 CMake 基础版本不符时会拒绝构建。
+
+## 可选 Python / paru 入口
+
+保留便捷脚本，但它不再制作模板或源码快照。与直接 makepkg 使用同一份 PKGBUILD：
+
+```sh
 python3 scripts/package_arch.py build --syncdeps --jobs 4
-
-# 或构建后直接安装，由 makepkg 调用 pacman。
 python3 scripts/package_arch.py install --manager pacman --syncdeps --jobs 4
-```
-
-构建结束打印准确的软件包路径；也可手动执行：
-
-```sh
-sudo pacman -U /absolute/path/to/liltview-VERSION-1-x86_64.pkg.tar.zst
-```
-
-`build` 默认不修改已安装软件；指定 `--syncdeps` 才允许 makepkg 安装缺失依赖。`install` 明确请求安装应用包，升级已安装本地版本也使用同一命令。不要用 `sudo` 执行整个脚本或 makepkg。
-
-## 3. paru 路径
-
-已有 paru 时，直接从当前工作区构建并安装：
-
-```sh
 python3 scripts/package_arch.py install --manager paru --jobs 4
-```
-
-脚本实际调用 `paru --build --install <生成目录>`（即 `paru -Bi <目录>`），依赖解析和安装由 paru / pacman 处理。仅构建使用 `build --manager paru`。paru 不需要额外传 `--syncdeps`。
-
-也可以先准备素材，再直接调用 paru：
-
-```sh
+# 仅检查原生配方并输出 .SRCINFO 到 build/arch：
 python3 scripts/package_arch.py prepare
-# 使用上一步输出的准确目录：
-paru -Bi /absolute/path/to/generated-package-directory
 ```
 
-以上是本地 PKGBUILD 工作流，不能因此通过 `paru -Syu` 自动发现 GitHub 新提交。后续发布 AUR / 自建仓库时另加发布流程。
+脚本默认将构建缓存、软件包放入 `build/arch`，可用 `--output-dir` 指定。
+不发布 AUR，不使用 `paru -S liltview` 作为当前入口。
 
-## 4. 产物与源码追踪
+## CI
 
-默认输出到 `build/arch/<版本>-<pkgrel>-<源码校验前缀>/`，包含：
-
-- `PKGBUILD`、`.SRCINFO`：可以独立审阅、复制到另一台 Arch 机器构建。
-- `liltview-<版本>.tar.gz`：包含当前源码、字体、许可证及递归 submodule 的实际源码，构建时不再联网下载第三方库。
-- `liltview-<版本>-<pkgrel>-x86_64.pkg.tar.zst`：构建成功后可交给 pacman 安装；包压缩后缀遵循本机 makepkg.conf。
-- `src/`、`pkg/`：makepkg 的源码和安装暂存目录。
-
-版本为 `0.1.0.r<提交数>.g<提交哈希>`；未提交改动时追加 `.dirty`。应用内版本仍为 CMake 的基础版本。源码归档附 `LILTVIEW_SOURCE.json` 记录主仓库与 submodule 提交；PKGBUILD 使用真实 SHA-256，不跳过完整性校验。
-
-归档包含 Git 跟踪文件的当前内容及未被忽略的新文件，不包含 `.git`、Git 忽略的本地文件或输出目录。缺失 submodule 或 checkout 与 gitlink 不符时先报错，不在打包过程中重置依赖。请在源码工作区稳定时打包；发布前提交源码可得到可追溯的干净版本。
-
-`--output-dir PATH` 可改变产物根目录，`--pkgrel N` 可增加同版本打包修订。脚本生成目录中的 PKGBUILD 是产物，修改模板使用 `packaging/arch/PKGBUILD.in`；模板含占位符，不能直接作为 PKGBUILD 执行。
-
-## 5. 安装内容与卸载
-
-| 路径 | 内容 |
-| --- | --- |
-| `/usr/bin/liltview` | 主程序 |
-| `/usr/share/liltview/fonts/` | 原始鸿蒙字体、字体许可证和来源记录 |
-| `/usr/share/applications/io.github.hui_livio.LiltView.desktop` | 桌面入口及图片 MIME 声明 |
-| `/usr/share/icons/hicolor/` | 彩色 SVG / 多尺寸 PNG 图标 |
-| `/usr/share/licenses/liltview/` | Apache 许可证、NOTICE 和全部随包依赖的许可 |
-
-图标和桌面缓存由系统现有 pacman hooks 处理；不另外写 post_install 脚本，不改默认图片关联、不注册指向开发目录的用户启动器。正式安装不需要运行 `scripts/register_desktop.py`。如果以前手动注册过开发启动器，用户级同名入口可能优先于系统入口，需根据自己的使用方式调整。
-
-启动和卸载：
-
-```sh
-liltview
-liltview /path/to/photo.jpg
-sudo pacman -Rns liltview
-# 或：paru -Rns liltview
-```
-
-用户配置仍按原有 SDL 用户目录保存，不随卸载删除。顶栏菜单依赖桌面已有全局菜单组件；没有时应用使用窗口内菜单。
-
-## 6. 检查
-
-```sh
-python3 scripts/package_arch.py prepare
-# 在输出目录中：
-makepkg --printsrcinfo
-makepkg --verifysource
-makepkg --syncdeps
-pacman -Qip ./liltview-*.pkg.tar.zst
-pacman -Qlp ./liltview-*.pkg.tar.zst
-```
-
-PKGBUILD 的 `check()` 验证实际可执行文件版本和 desktop 文件语法；不要求桌面会话。发布前还应在干净 Arch 构建环境检查依赖，在有桌面的机器验证 X11 / Wayland 和图形驱动。安装需要管理权限，打包、归档与离屏冒烟测试不需要安装应用到系统。
-
-操作语义以本机 `makepkg(8)`、`PKGBUILD(5)`、`pacman(8)` 和 `paru(8)` 为准。性能待办见[开发计划](../../docs/开发计划与未实现设计.md)，打包能力不代表加载速度问题已解决。
+[Release workflow](../RELEASE.md) 从完整无 Git 源码包解压后，在原生 Arch 容器中以普通
+用户运行 **同一份 PKGBUILD**。它通过 `LILTVIEW_RUN_TESTS=1 makepkg --check`
+显式开启完整 Release UT，测试通过后上传标准
+`.pkg.tar.zst`，并检查最终包内主程序没有调试段。

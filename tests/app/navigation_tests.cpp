@@ -21,12 +21,17 @@ using namespace std::chrono_literals;
 
 namespace
 {
+std::filesystem::path utf8_path(const std::string &name)
+{
+    return std::filesystem::path(std::u8string(name.begin(), name.end()));
+}
+
 struct Directory
 {
-    Directory()
+    explicit Directory(const std::filesystem::path &root = std::filesystem::current_path())
     {
         static std::atomic<unsigned> next{0};
-        path = std::filesystem::current_path() /
+        path = root /
             ("liltview-navigation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
              std::to_string(next.fetch_add(1)));
         std::filesystem::create_directories(path);
@@ -38,7 +43,7 @@ struct Directory
     }
     std::filesystem::path file(const std::string &name)
     {
-        const auto result = path / name;
+        const auto result = path / utf8_path(name);
         std::ofstream(result) << "navigation fixture";
         return result;
     }
@@ -80,10 +85,18 @@ TEST_CASE("directory navigation sorts numeric runs naturally with deterministic 
                                             "image1000000000000000000000.png",
                                             "图 2.png",
                                             "图 10.png"};
-    for (auto iterator = expected.rbegin(); iterator != expected.rend(); ++iterator)
-        directory.file(*iterator);
-    DirectoryNavigation navigation({"png"});
-    navigation.select(directory.path / expected.front());
+    // A case-insensitive filesystem cannot reliably store Image1.png and image1.png
+    // together. Inject the unsorted entries so every platform checks all tie-breaks.
+    DirectoryNavigation navigation(
+        {"png"}, {}, {},
+        [&](const auto &parent, const auto &, const auto &, const auto &)
+        {
+            DirectoryScanResult result;
+            for (auto iterator = expected.rbegin(); iterator != expected.rend(); ++iterator)
+                result.entries.push_back(parent / utf8_path(*iterator));
+            return result;
+        });
+    navigation.select(directory.file(expected.front()));
     settle(navigation);
     REQUIRE_FALSE(navigation.snapshot().error);
     CHECK(forward(navigation) == expected);
@@ -98,7 +111,8 @@ TEST_CASE("directory navigation sorts numeric runs naturally with deterministic 
 
 TEST_CASE("directory navigation filters only provided formats and regular files", "[navigation]")
 {
-    Directory directory;
+    // Special files need a native filesystem: WSL Windows mounts cannot create FIFOs.
+    Directory directory(std::filesystem::temp_directory_path());
     const auto selected = directory.file("a.JPG");
     for (const auto *name : {"b.JpEg", "c.PNG", "d.svg", "e.webp", "f.bmp", "g.GIF", "h.tif", "i.TIFF", ".hidden.png"})
         directory.file(name);
@@ -179,6 +193,7 @@ TEST_CASE("explicit files without a supported suffix remain navigation anchors",
     navigation.select(selected.parent_path() / "." / selected.filename());
     settle(navigation);
     CHECK(navigation.snapshot().selected_path == selected);
+    CHECK(platform::path_bytes(selected.filename()) == "2 content with 中文");
     CHECK(navigation.snapshot().current == 2);
     CHECK(navigation.snapshot().total == 3);
     CHECK(navigation.snapshot().previous_path == first);
@@ -447,7 +462,8 @@ TEST_CASE("directory shutdown also discards ready results and an idle worker", "
 TEST_CASE("directory navigation handles Unicode names and unsupported Unicode extensions", "[navigation][path]")
 {
     Directory directory;
-    const std::vector<std::u8string> names{u8"1.png", u8"\u4e01-2.png", u8"\u4e01-10.png", u8"\u4e02.png", u8"\U0001f600.png"};
+    const std::vector<std::u8string> names{u8"1.png",    u8"\u4e01-2.png", u8"\u4e01-10.png", u8"\u4e02.png",
+                                           u8"图 2.png", u8"图 10.png",    u8"\U0001f600.png"};
     std::vector<std::string> expected;
     for (const auto &name : names)
     {

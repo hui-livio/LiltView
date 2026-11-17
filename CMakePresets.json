@@ -98,6 +98,16 @@
             ]
         },
         {
+            "name": "release-ci",
+            "displayName": "Release application + UT + packaging",
+            "inherits": "app-release",
+            "cacheVariables": {
+                "BUILD_TESTING": true,
+                "LILTVIEW_BUILD_UNIT_TESTS": true,
+                "LILTVIEW_RELEASE_PACKAGING": true
+            }
+        },
+        {
             "name": "使用工具链文件配置预设",
             "displayName": "使用工具链文件配置预设",
             "description": "设置 Ninja 生成器、版本和安装目录",
@@ -138,6 +148,10 @@
         {
             "name": "msvc-release",
             "configurePreset": "msvc-release"
+        },
+        {
+            "name": "release-ci",
+            "configurePreset": "release-ci"
         }
     ],
     "testPresets": [
@@ -174,6 +188,17 @@
         {
             "name": "msvc-dev",
             "configurePreset": "msvc-dev",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
+        },
+        {
+            "name": "release-ci",
+            "configurePreset": "release-ci",
+            "configuration": "Release",
             "output": {
                 "outputOnFailure": true
             },

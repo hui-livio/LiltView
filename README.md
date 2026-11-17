@@ -131,3 +131,16 @@ Copyright 2026 LiltView contributors. LiltView is licensed under [Apache License
 JPEG decoding uses libjpeg-turbo. This software is based in part on the work of the Independent JPEG Group.
 
 The bundled HarmonyOS Sans SC font is copyright Huawei Device Co., Ltd. and is distributed under its [original font license](assets/fonts/LICENSE.HarmonyOS-Sans.txt).
+
+## Releases
+
+The 1.0.0 [release workflow](packaging/RELEASE.md) builds Windows x64 (single EXE),
+macOS Apple Silicon / Intel (DMG and ZIP), Ubuntu (DEB), Fedora (RPM) and Arch
+(`.pkg.tar.zst`). All builds and UT run in **Release**; debug symbols and tests are
+excluded from distributed binaries. The separately uploaded `.zip` / `.tar.gz` source archives
+include all third-party dependency sources with Git metadata removed. Do not use
+GitHub's automatically generated Source code attachments, which omit submodules.
+
+Use `python3 build.py --parallel 4` to configure, compile and run Release UT;
+use `python build.py --parallel 4` in an x64 MSVC developer terminal on Windows.
+Python 3.11+ is required. CI uses the same [build entry point](packaging/RELEASE.md#unified-python-build-entry-point).

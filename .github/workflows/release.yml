@@ -1,0 +1,374 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'build.py'
+      - 'cmake/**'
+      - 'app/**'
+      - 'core/**'
+      - 'third_party/**'
+      - 'scripts/**'
+      - 'packaging/**'
+      - 'tests/**'
+      - 'assets/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+# Every binary job builds the SAME complete, Git-free source snapshot, in Release,
+# with Catch2 enabled. A failed UT prevents packaging / draft release creation.
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      suffix: ${{ steps.version.outputs.suffix }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 (Node 24)
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node 24)
+        with:
+          python-version: '3.12'
+      - name: Validate version, dependencies and packaging contracts
+        id: version
+        run: |
+          python3 scripts/init_submodules.py --check
+          python3 -m unittest discover -s tests/packaging -v
+          version=$(python3 scripts/package_release.py version --ref "$GITHUB_REF")
+          base=$(python3 scripts/package_release.py version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "suffix=${version#"$base"}" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-rc.* ]]; then preview=true; else preview=false; fi
+          echo "prerelease=$preview" >> "$GITHUB_OUTPUT"
+          echo "LILTVIEW_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Complete source distribution (including recursive dependencies)
+        run: python3 scripts/package_release.py source --output build/dist --ref "$GITHUB_REF"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (Node 24)
+        with:
+          name: release-source
+          path: |
+            build/dist/*-source.tar.gz
+            build/dist/*-source.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    needs: source
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+      LILTVIEW_RELEASE_VERSION: ${{ needs.source.outputs.version }}
+      VERSION_SUFFIX: ${{ needs.source.outputs.suffix }}
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node 24)
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (Node 24)
+        with:
+          name: release-source
+          path: incoming
+      - name: Extract sources and load x64 MSVC environment
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Expand-Archive -LiteralPath "incoming/liltview-${env:VERSION}-source.zip" -DestinationPath source-extract -ErrorAction Stop
+          Move-Item -LiteralPath "source-extract/liltview-${env:VERSION}" -Destination src -ErrorAction Stop
+          if (!(Test-Path -LiteralPath src/CMakeLists.txt)) { throw 'Incomplete source extraction' }
+          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'MSVC toolchain not found' }
+          $command = '"' + $vs + '\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && set'
+          cmd /d /s /c $command | ForEach-Object {
+            if ($_ -match '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+              Add-Content -LiteralPath $env:GITHUB_ENV -Value "$($Matches[1])=$($Matches[2])"
+            }
+          }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build Release application and Release UT
+        working-directory: src
+        run: |
+          python build.py build --parallel 4
+      - name: Run Release UT
+        working-directory: src
+        # Native Windows chrome tests share the desktop; do not overlap them.
+        run: python build.py test --test-parallel 1 --junit "$env:GITHUB_WORKSPACE/test-results.xml"
+      - name: Verify and package single EXE (no sidecars, DLLs or PDBs)
+        shell: pwsh
+        run: |
+          Copy-Item src/build/release-ci/app/liltview.exe "dist/LiltView-$env:VERSION-windows-x64.exe"
+          $exe = (Get-ChildItem dist/*.exe).FullName
+          $imports = & dumpbin /dependents $exe | Out-String
+          $imports
+          if ($imports -match '(?i)(vcruntime|msvcp|ucrtbase|SDL3)\S*\.dll') { throw 'Non-self-contained EXE' }
+          $headers = & dumpbin /headers $exe | Out-String
+          if ($headers -match '(?im)^\s*[1-9a-f][0-9a-f]*\s+\[.*\] RVA \[size\] of Debug Directory') { throw 'Debug directory found' }
+          $version = & $exe --version | Out-String
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ($version -notmatch [regex]::Escape($env:VERSION)) { throw 'EXE version mismatch' }
+          $smoke = Start-Process -FilePath $exe -ArgumentList @('--smoke-test', '--config-dir', "$env:RUNNER_TEMP/LiltView-smoke") -Wait -PassThru -WindowStyle Hidden
+          if ($smoke.ExitCode) { exit $smoke.ExitCode }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: test-results-windows-x64
+          path: test-results.xml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-windows-x64
+          path: dist/*.exe
+          if-no-files-found: error
+          compression-level: 0
+
+  macos:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+      LILTVIEW_RELEASE_VERSION: ${{ needs.source.outputs.version }}
+      VERSION_SUFFIX: ${{ needs.source.outputs.suffix }}
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node 24)
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: release-source
+          path: incoming
+      - name: Prepare sources and toolchain
+        run: |
+          brew install cmake ninja nasm llvm@20
+          mkdir -p src dist
+          tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
+      - name: Build Release application and Release UT
+        working-directory: src
+        run: |
+          python3 build.py build --parallel 3
+      - name: Run Release UT
+        working-directory: src
+        run: python3 build.py test --test-parallel 2 --junit "$GITHUB_WORKSPACE/test-results.xml"
+      - name: Stage standalone bundle, strip and ad-hoc sign
+        run: |
+          cmake --install src/build/release-ci --prefix "$PWD/stage" --strip
+          app="$PWD/stage/LiltView.app"
+          binary="$app/Contents/MacOS/LiltView"
+          strip -S "$binary"
+          otool -L "$binary"
+          # A release must not depend on Homebrew paths or a builder's local dylibs.
+          otool -L "$binary" | tail -n +2 | awk '{print $1}' | while read -r lib; do
+            case "$lib" in /System/Library/*|/usr/lib/*) ;; *) echo "Unbundled dependency: $lib"; exit 1;; esac
+          done
+          if otool -l "$binary" | grep -q '__DWARF'; then echo 'DWARF found'; exit 1; fi
+          plutil -lint "$app/Contents/Info.plist"
+          test -f "$app/Contents/Resources/share/liltview/fonts/HarmonyOS_Sans_SC_Regular.ttf"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          "$binary" --version
+          "$binary" --smoke-test --config-dir "$RUNNER_TEMP/LiltView-smoke"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "dist/LiltView-$VERSION-macos-${{ matrix.arch }}.zip"
+          ln -s /Applications stage/Applications
+          hdiutil create -volname LiltView -srcfolder stage -ov -format UDZO "dist/LiltView-$VERSION-macos-${{ matrix.arch }}.dmg"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: test-results-macos-${{ matrix.arch }}
+          path: test-results.xml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+
+  linux:
+    needs: source
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:26.04
+            platform: ubuntu26.04
+            generator: DEB
+          - image: fedora:44
+            platform: fedora44
+            generator: RPM
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+      LILTVIEW_RELEASE_VERSION: ${{ needs.source.outputs.version }}
+      VERSION_SUFFIX: ${{ needs.source.outputs.suffix }}
+    steps:
+      - name: Install distribution-native build dependencies
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              ca-certificates gcc g++ cmake ninja-build nasm pkg-config python3 file binutils \
+              dpkg-dev libfontconfig1-dev libglib2.0-dev libwayland-dev wayland-protocols \
+              libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev \
+              libxss-dev libxtst-dev libxkbcommon-dev libdecor-0-dev libdbus-1-dev \
+              libegl1-mesa-dev libgl1-mesa-dev libdrm-dev libgbm-dev
+          else
+            dnf install -y gcc gcc-c++ cmake ninja-build nasm pkgconf-pkg-config python3 file binutils \
+              rpm-build fontconfig-devel glib2-devel wayland-devel wayland-protocols-devel \
+              libX11-devel libXext-devel libXcursor-devel libXfixes-devel libXi-devel \
+              libXrandr-devel libXScrnSaver-devel libXtst-devel libxkbcommon-devel \
+              libdecor-devel dbus-devel mesa-libEGL-devel mesa-libGL-devel libdrm-devel mesa-libgbm-devel
+          fi
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: release-source
+          path: incoming
+      - name: Build Release application and Release UT
+        run: |
+          mkdir -p src dist
+          tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
+          cd src
+          python3 build.py build --parallel 3 -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
+            -DSDL_KMSDRM=OFF -DSDL_LIBUDEV=OFF -DSDL_IBUS=OFF \
+            -DCPACK_PACKAGE_FILE_NAME="liltview-$VERSION-linux-${{ matrix.platform }}-x86_64"
+      - name: Run Release UT
+        working-directory: src
+        run: python3 build.py test --test-parallel 2 --junit "$GITHUB_WORKSPACE/test-results.xml"
+      - name: Build native stripped package
+        run: |
+          cd src/build/release-ci
+          cpack -G '${{ matrix.generator }}' -C Release -B "$GITHUB_WORKSPACE/dist"
+          cmake --install . --prefix "$GITHUB_WORKSPACE/stage" --strip
+          binary="$GITHUB_WORKSPACE/stage/bin/liltview"
+          if readelf -S "$binary" | grep -E '\.debug_|\.zdebug_'; then echo 'Debug sections found'; exit 1; fi
+          "$binary" --version
+          "$binary" --licenses > "$GITHUB_WORKSPACE/third-party-notices.txt"
+          test -s "$GITHUB_WORKSPACE/third-party-notices.txt"
+          if [ '${{ matrix.generator }}' = DEB ]; then
+            dpkg-deb --info "$GITHUB_WORKSPACE"/dist/*.deb
+          else
+            rpm -qp --requires "$GITHUB_WORKSPACE"/dist/*.rpm
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: test-results-${{ matrix.platform }}
+          path: test-results.xml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-linux-${{ matrix.platform }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+          compression-level: 0
+
+  arch:
+    needs: source
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+      LILTVIEW_RELEASE_VERSION: ${{ needs.source.outputs.version }}
+      VERSION_SUFFIX: ${{ needs.source.outputs.suffix }}
+      PKGEXT: .pkg.tar.zst
+    steps:
+      - name: Prepare native Arch build environment
+        run: |
+          pacman -Syu --noconfirm --needed python cmake ninja pkgconf gcc nasm fontconfig glib2 wayland \
+            libxkbcommon libx11 libxcursor libxext libxfixes libxi libxrandr libxss libxtst \
+            libdecor dbus desktop-file-utils hicolor-icon-theme mesa
+          useradd --create-home builder
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: release-source
+          path: incoming
+      - name: Build and test Release package as non-root user
+        run: |
+          mkdir -p src dist
+          tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
+          chown -R builder:builder src
+          # The Python entry point enables Release UT and calls the SAME native PKGBUILD.
+          runuser -u builder -- python3 "$PWD/src/build.py" arch --parallel 3
+          cp src/packaging/arch/*.pkg.tar.zst dist/
+          test -n "$(find dist -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)"
+          pacman -Qip dist/*.pkg.tar.zst
+          # Extract the exact pacman artifact and confirm it has no debug sections.
+          mkdir stage
+          tar -xf dist/*.pkg.tar.zst -C stage
+          if readelf -S stage/usr/bin/liltview | grep -E '\.debug_|\.zdebug_'; then exit 1; fi
+          stage/usr/bin/liltview --version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: test-results-arch
+          path: src/packaging/arch/src/build/Testing/Temporary/LastTest.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-linux-arch
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    needs: [source, windows, macos, linux, arch]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums and draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.source.outputs.prerelease }}
+        run: |
+          cd dist
+          sha256sum * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          # Draft first: publishing remains an explicit maintainer action.
+          preview=()
+          if [ "$PRERELEASE" = true ]; then preview+=(--prerelease --latest=false); fi
+          cat > ../source-notes.md <<'EOF'
+          ## Complete source / 完整源码
+
+          Download `liltview-VERSION-source.zip` (Windows) or `liltview-VERSION-source.tar.gz`
+          (Linux/macOS). Both include all pinned third-party dependency sources and no Git metadata.
+          Use the versioned attachments below, not GitHub's automatic **Source code (zip/tar.gz)**
+          snapshots, which omit submodule contents and cannot be disabled.
+
+          请下载下方带版本号的 `liltview-VERSION-source.zip` 或 `.tar.gz` 完整源码包；
+          不要使用 GitHub 自动生成的 **Source code** 附件，它们不含子模块依赖。
+          EOF
+          sed -i 's/VERSION/${{ needs.source.outputs.version }}/g' ../source-notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft "${preview[@]}" \
+            --title "LiltView ${{ needs.source.outputs.version }}" --generate-notes --notes-file ../source-notes.md ./*
