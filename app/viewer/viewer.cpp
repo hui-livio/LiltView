@@ -474,7 +474,8 @@ void Viewer::draw(render::Point min, render::Point max, float density, bool inte
     if (scene.empty() && !image)
         return;
     viewport_.update(min, max, density, image_info.source_size, image_info.orientation);
-    if (interactive && !playback_.started() && ImGui::IsWindowHovered())
+    if (interactive && !playback_.started() &&
+        ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
     {
         const auto &io = ImGui::GetIO();
         if (io.MousePos.x >= min.x && io.MousePos.x <= max.x && io.MousePos.y >= min.y && io.MousePos.y <= max.y)

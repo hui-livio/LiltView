@@ -14,6 +14,7 @@ struct UiPalette
     ImVec4 control, hover, pressed, accent, scrollbar;
     ImVec4 overlay, overlay_hover, overlay_pressed, overlay_text, overlay_border;
     ImVec4 close_hover, close_pressed, error;
+    ImVec4 information_surface, information_border, information_secondary;
 };
 
 const UiPalette &ui_palette(bool dark);

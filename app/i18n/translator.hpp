@@ -103,6 +103,11 @@ enum class Text
     unsupported_format,
     more,
     original_size,
+    info_image_parameters,
+    info_output_group,
+    info_animation_group,
+    info_copy_path,
+    info_available_only,
     count
 };
 

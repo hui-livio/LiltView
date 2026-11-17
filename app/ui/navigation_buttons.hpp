@@ -18,6 +18,7 @@ struct NavigationButtonLayout
 {
     NavigationButtonRect previous, next;
     bool valid = false;
+    bool previous_visible = true, next_visible = true;
 };
 
 struct NavigationButtonState
@@ -25,7 +26,8 @@ struct NavigationButtonState
     bool visible = false, previous_enabled = false, next_enabled = false;
 };
 
-NavigationButtonLayout navigation_button_layout(ImVec2 canvas_min, ImVec2 canvas_max, float scale);
+NavigationButtonLayout navigation_button_layout(ImVec2 canvas_min, ImVec2 canvas_max, float scale,
+                                                NavigationButtonRect occlusion = {});
 NavigationButtonState navigation_button_state(const DirectoryNavigation::Snapshot &, bool popup_open = false);
 // Disabled buttons still exclude image pan/zoom beneath their visible bounds.
 bool navigation_buttons_hit(const NavigationButtonLayout &, const NavigationButtonState &, ImVec2 mouse) noexcept;
@@ -37,7 +39,7 @@ struct NavigationButtonGesture
 };
 // Draw after the image, in its canvas window, so normal popup layering is retained.
 MenuAction draw_navigation_buttons(Language, const DirectoryNavigation::Snapshot &, ImVec2 canvas_min, ImVec2 canvas_max,
-                                   float scale);
+                                   float scale, NavigationButtonRect occlusion = {});
 } // namespace liltview
 
 #endif

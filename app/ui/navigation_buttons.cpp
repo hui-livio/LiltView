@@ -12,7 +12,7 @@ bool NavigationButtonRect::contains(ImVec2 point) const noexcept
     return point.x >= min.x && point.x < max.x && point.y >= min.y && point.y < max.y;
 }
 
-NavigationButtonLayout navigation_button_layout(ImVec2 canvas_min, ImVec2 canvas_max, float scale)
+NavigationButtonLayout navigation_button_layout(ImVec2 canvas_min, ImVec2 canvas_max, float scale, NavigationButtonRect occlusion)
 {
     NavigationButtonLayout layout;
     if (!std::isfinite(canvas_min.x) || !std::isfinite(canvas_min.y) || !std::isfinite(canvas_max.x) ||
@@ -30,6 +30,13 @@ NavigationButtonLayout navigation_button_layout(ImVec2 canvas_min, ImVec2 canvas
     layout.next               = {{canvas_max.x - margin - button_width, top}, {canvas_max.x - margin, top + button_height}};
     layout.valid              = layout.previous.min.x < layout.previous.max.x && layout.previous.min.y < layout.previous.max.y &&
         layout.next.min.x < layout.next.max.x && layout.next.min.y < layout.next.max.y;
+    const auto covered = [&](const NavigationButtonRect &rect)
+    {
+        return occlusion.min.x < occlusion.max.x && occlusion.min.y < occlusion.max.y && rect.min.x < occlusion.max.x &&
+            rect.max.x > occlusion.min.x && rect.min.y < occlusion.max.y && rect.max.y > occlusion.min.y;
+    };
+    layout.previous_visible = !covered(layout.previous);
+    layout.next_visible     = !covered(layout.next);
     return layout;
 }
 
@@ -45,7 +52,8 @@ NavigationButtonState navigation_button_state(const DirectoryNavigation::Snapsho
 
 bool navigation_buttons_hit(const NavigationButtonLayout &layout, const NavigationButtonState &state, ImVec2 mouse) noexcept
 {
-    return state.visible && layout.valid && (layout.previous.contains(mouse) || layout.next.contains(mouse));
+    return state.visible && layout.valid &&
+        ((layout.previous_visible && layout.previous.contains(mouse)) || (layout.next_visible && layout.next.contains(mouse)));
 }
 
 bool NavigationButtonGesture::blocks(const NavigationButtonLayout &layout, const NavigationButtonState &state, ImVec2 mouse,
@@ -98,9 +106,9 @@ MenuAction draw_button(Language language, const NavigationButtonRect &rect, cons
 } // namespace
 
 MenuAction draw_navigation_buttons(Language language, const DirectoryNavigation::Snapshot &snapshot, ImVec2 canvas_min,
-                                   ImVec2 canvas_max, float scale)
+                                   ImVec2 canvas_max, float scale, NavigationButtonRect occlusion)
 {
-    const auto layout     = navigation_button_layout(canvas_min, canvas_max, scale);
+    const auto layout     = navigation_button_layout(canvas_min, canvas_max, scale, occlusion);
     const bool popup_open = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     const auto state      = navigation_button_state(snapshot, popup_open);
     if (!layout.valid || !state.visible)
@@ -108,8 +116,11 @@ MenuAction draw_navigation_buttons(Language language, const DirectoryNavigation:
     const auto cursor = ImGui::GetCursorScreenPos();
     ImGui::PushID("canvas_navigation");
     ImGui::PushClipRect(canvas_min, canvas_max, true);
-    auto action     = draw_button(language, layout.previous, "previous", true, state.previous_enabled, scale);
-    const auto next = draw_button(language, layout.next, "next", false, state.next_enabled, scale);
+    auto action = layout.previous_visible ?
+        draw_button(language, layout.previous, "previous", true, state.previous_enabled, scale) :
+        MenuAction::none;
+    const auto next =
+        layout.next_visible ? draw_button(language, layout.next, "next", false, state.next_enabled, scale) : MenuAction::none;
     if (next != MenuAction::none)
         action = next;
     ImGui::PopClipRect();

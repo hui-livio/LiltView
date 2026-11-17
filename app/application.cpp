@@ -307,18 +307,20 @@ private:
                 // Windows' modal move/resize loop does not return to this outer
                 // loop until release. Redraw on SDL's live expose notification,
                 // not by pumping events recursively or changing native hit tests.
-                LiveResizeRedraw live_resize(SDL_GetWindowID(window_), [&]
-                {
-                    if (quit_ || (SDL_GetWindowFlags(window_) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0)
-                        return;
-                    // SDL holds its event-watch lock here. Do not drain or
-                    // retire image work: retirement may join a worker waiting
-                    // to post an SDL wakeup. Redraw the current scene only;
-                    // normal viewer pumping resumes after the native loop.
-                    update_visual_style();
-                    update_window_shape(); // Match the native region to this frame's current dimensions.
-                    render_frame(options, shell, global_menu.active(), true);
-                });
+                LiveResizeRedraw live_resize(
+                    SDL_GetWindowID(window_),
+                    [&]
+                    {
+                        if (quit_ || (SDL_GetWindowFlags(window_) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0)
+                            return;
+                        // SDL holds its event-watch lock here. Do not drain or
+                        // retire image work: retirement may join a worker waiting
+                        // to post an SDL wakeup. Redraw the current scene only;
+                        // normal viewer pumping resumes after the native loop.
+                        update_visual_style();
+                        update_window_shape(); // Match the native region to this frame's current dimensions.
+                        render_frame(options, shell, global_menu.active(), true);
+                    });
                 process_events(options.smoke_test, shell, mode_changed);
                 live_resize.rethrow_if_failed();
             }
@@ -404,7 +406,7 @@ private:
             shell.show_about();
             break;
         case MenuAction::image_info:
-            if (viewer_->has_visible_image() || shell.image_info_open())
+            if (viewer_->has_image() || viewer_->has_visible_image() || shell.image_info_open())
             {
                 shell.toggle_image_info();
                 spdlog::debug("Image information panel: open={}", shell.image_info_open());
@@ -500,7 +502,10 @@ private:
 
     void handle_event(const SDL_Event &event, Shell &shell)
     {
-        const auto handled_ns  = SDL_GetTicksNS();
+        const auto handled_ns = SDL_GetTicksNS();
+        const auto *event_window = SDL_GetWindowFromEvent(&event);
+        if (event_window && event_window != window_)
+            return;
         const bool trace_input = spdlog::should_log(spdlog::level::debug);
         auto &context          = *ImGui::GetCurrentContext();
         if (trace_input)
@@ -527,7 +532,7 @@ private:
 
     void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell, const CloseTiming &timing)
     {
-        // 文本输入和弹窗优先处理按键；图片尚未加载完成时不执行应用快捷键。
+        // 文本输入和弹窗优先处理按键；加载中仅允许切换图片信息面板。
         const ShortcutContext context{dialog_ || ImGui::GetIO().WantTextInput ||
                                           ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
                                       is_fullscreen(), shell.image_info_open(), !viewer_->settled(), shell.dock_keyboard_focus()};
@@ -601,6 +606,8 @@ private:
 
     void update_window_settings(const SDL_Event &event)
     {
+        if (SDL_GetWindowFromEvent(&event) != window_)
+            return;
         const auto flags = SDL_GetWindowFlags(window_);
         if (event.type == SDL_EVENT_WINDOW_RESIZED && !is_fullscreen() && (flags & SDL_WINDOW_MAXIMIZED) == 0)
         {
@@ -770,7 +777,7 @@ private:
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu, bool live_resize = false)
     {
         renderer_->begin_frame();
-        ImGui_ImplSDL3_NewFrame();
+        new_imgui_platform_frame(window_);
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
         const auto action =

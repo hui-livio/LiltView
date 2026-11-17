@@ -335,12 +335,15 @@ TEST_CASE("image information menu shares checked state and a nonrepeating I shor
                 REQUIRE(item != nullptr);
                 CHECK(item->checkable);
                 CHECK(item->checked == open);
-                CHECK(item->enabled == visible);
+                CHECK(item->enabled == (visible || open));
                 CHECK_FALSE(item->repeatable);
                 CHECK(item->shortcut == std::vector<std::string>{"i"});
-                CHECK(menu_action_for_shortcut(menu, {"i"}) == (visible ? MenuAction::image_info : MenuAction::none));
+                CHECK(menu_action_for_shortcut(menu, {"i"}) == ((visible || open) ? MenuAction::image_info : MenuAction::none));
                 CHECK(menu_action_for_shortcut(menu, {"i"}, true) == MenuAction::none);
                 CHECK(menu_action_for_shortcut(menu, {"Control", "i"}) == MenuAction::none);
+                CHECK(menu_action_for_input(menu, {"i"}, false, {true, false, open, true}) == MenuAction::none);
+                CHECK(menu_action_for_input(menu, {"i"}, false, {false, false, open, true}) ==
+                      ((visible || open) ? MenuAction::image_info : MenuAction::none));
             }
 }
 
@@ -501,7 +504,7 @@ TEST_CASE("rounded borderless corners default on and can be independently disabl
     CHECK_FALSE(settings.disable_rounding);
 }
 
-TEST_CASE("loading blocks every application shortcut and repeat until completion", "[menu][shortcut][loading]")
+TEST_CASE("loading blocks image shortcuts but allows the information overlay toggle", "[menu][shortcut][loading]")
 {
     for (const auto language : {Language::english, Language::chinese})
         for (const bool fullscreen : {false, true})
@@ -514,7 +517,10 @@ TEST_CASE("loading blocks every application shortcut and repeat until completion
                         for (const bool repeat : {false, true})
                         {
                             const ShortcutContext loading{false, fullscreen, info, true};
-                            CHECK(menu_action_for_input(menu, item.shortcut, repeat, loading) == MenuAction::none);
+                            const auto expected = item.action == MenuAction::image_info ?
+                                menu_action_for_shortcut(menu, item.shortcut, repeat) :
+                                MenuAction::none;
+                            CHECK(menu_action_for_input(menu, item.shortcut, repeat, loading) == expected);
                             const ShortcutContext ready{false, fullscreen, info, false};
                             CHECK(menu_action_for_input(menu, item.shortcut, repeat, ready) ==
                                   menu_action_for_shortcut(menu, item.shortcut, repeat));

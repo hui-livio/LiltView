@@ -211,8 +211,8 @@ std::filesystem::path progressive_bmp(const Source &source, bool corrupt)
 }
 } // namespace
 
-TEST_CASE("full information shell keeps the image navigation panel and footer disjoint at small sizes and DPI",
-          "[image_details][shell]")
+TEST_CASE("information overlay toggle preserves the full main canvas FIT and navigation at every DPI",
+          "[image_details][shell][regression]")
 {
     using namespace liltview;
     Source source;
@@ -229,7 +229,6 @@ TEST_CASE("full information shell keeps the image navigation panel and footer di
     }
     REQUIRE_FALSE(viewer.failed());
     Shell shell;
-    shell.toggle_image_info();
     for (const auto language : {Language::english, Language::chinese})
         for (const float scale : {1.0f, 1.25f, 2.0f})
             for (const bool native_titlebar : {false, true})
@@ -237,60 +236,63 @@ TEST_CASE("full information shell keeps the image navigation panel and footer di
                 {
                     CAPTURE(scale, native_titlebar, dark);
                     apply_style(dark, scale);
-                    auto &io                   = ImGui::GetIO();
-                    io.DisplaySize             = {640, 480};
-                    io.DisplayFramebufferScale = {scale, scale};
-                    ImGui::NewFrame();
-                    WindowChromeState chrome;
-                    chrome.system_titlebar = native_titlebar;
-                    chrome.dark            = dark;
-                    chrome.scale           = scale;
-                    chrome.line_height     = ImGui::GetTextLineHeight();
-                    const auto metrics     = window_chrome_metrics(io.DisplaySize, chrome);
-                    const auto menu        = build_menu(Settings{}, language, true, false, true, true, false, false, true, true);
-                    CHECK(shell.draw(language, menu, false, renderer, {}, viewer, chrome) == MenuAction::none);
-                    ImGuiWindow *canvas = nullptr, *panel = nullptr;
-                    for (auto *window : ImGui::GetCurrentContext()->Windows)
+                    ImRect canvas_rect;
+                    std::optional<Viewport> original_view;
+                    for (const bool open : {false, true, false})
                     {
-                        const auto name = std::string_view(window->Name);
-                        if (window->Active && name.find("/canvas_") != std::string_view::npos)
-                            canvas = window;
-                        if (window->Active && name.find("/image_information_") != std::string_view::npos)
-                            panel = window;
+                        if (shell.image_info_open() != open)
+                            shell.toggle_image_info();
+                        auto &io                   = ImGui::GetIO();
+                        io.DisplaySize             = {640, 480};
+                        io.DisplayFramebufferScale = {scale, scale};
+                        ImGui::NewFrame();
+                        WindowChromeState chrome;
+                        chrome.system_titlebar = native_titlebar;
+                        chrome.dark            = dark;
+                        chrome.scale           = scale;
+                        chrome.line_height     = ImGui::GetTextLineHeight();
+                        const auto metrics     = window_chrome_metrics(io.DisplaySize, chrome);
+                        const auto menu = build_menu(Settings{}, language, true, false, true, true, false, false, open, true);
+                        CHECK(shell.draw(language, menu, false, renderer, {}, viewer, chrome) == MenuAction::none);
+                        ImGuiWindow *canvas = nullptr;
+                        for (auto *window : ImGui::GetCurrentContext()->Windows)
+                        {
+                            const auto name = std::string_view(window->Name);
+                            if (window->Active && name.find("/canvas_") != std::string_view::npos &&
+                                name.find("/image_information_") == std::string_view::npos)
+                                canvas = window;
+                            if (window->Active && name.find("/image_information_") != std::string_view::npos)
+                                CHECK(open);
+                        }
+                        REQUIRE(canvas);
+                        CHECK(canvas->Size.x > 0);
+                        CHECK(canvas->Pos.x + canvas->Size.x >= metrics.width - metrics.border - 1);
+                        CHECK(canvas->Pos.y + canvas->Size.y <= metrics.status_top() + 1);
+                        const auto buttons = navigation_button_layout(canvas->InnerRect.Min, canvas->InnerRect.Max, scale);
+                        REQUIRE(buttons.valid);
+                        CHECK(buttons.next.max.x <= canvas->Pos.x + canvas->Size.x);
+                        if (!original_view)
+                        {
+                            original_view = viewer.presented_view();
+                            canvas_rect   = canvas->Rect();
+                        }
+                        else
+                        {
+                            CHECK(viewer.presented_view().same_view(*original_view));
+                            CHECK(canvas->Rect().Min.x == canvas_rect.Min.x);
+                            CHECK(canvas->Rect().Max.x == canvas_rect.Max.x);
+                            CHECK(canvas->Rect().Min.y == canvas_rect.Min.y);
+                            CHECK(canvas->Rect().Max.y == canvas_rect.Max.y);
+                        }
+                        CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
+                        ImGui::Render();
+                        CHECK(ImGui::GetDrawData()->TotalVtxCount > 0);
+                        const auto &p = current_ui_palette();
+                        CHECK(ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_ChildBg]) ==
+                              ImGui::ColorConvertFloat4ToU32(p.canvas));
+                        REQUIRE(viewer.image_details());
+                        CHECK(viewer.image_details()->path == source.path);
                     }
-                    REQUIRE(canvas);
-                    REQUIRE(panel);
-                    CHECK(canvas->Size.x > 0);
-                    CHECK(canvas->Pos.x + canvas->Size.x <= panel->Pos.x + 1);
-                    CHECK(panel->Pos.x + panel->Size.x <= 640);
-                    CHECK(canvas->Pos.y + canvas->Size.y <= metrics.status_top() + 1);
-                    CHECK(panel->Pos.y + panel->Size.y <= metrics.status_top() + 1);
-                    const auto buttons = navigation_button_layout(canvas->InnerRect.Min, canvas->InnerRect.Max, scale);
-                    REQUIRE(buttons.valid);
-                    CHECK(buttons.next.max.x <= panel->Pos.x + 1);
-                    CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
-                    ImGui::Render();
-                    CHECK(ImGui::GetDrawData()->TotalVtxCount > 0);
-                    // Sample blank margins (no text/icons) to verify custom-drawn surfaces
-                    // use the applied palette in native and custom chrome modes alike.
-                    const auto &p = current_ui_palette();
-                    const auto &data = *ImGui::GetDrawData();
-                    const auto check_color = [](ImVec4 actual, ImVec4 expected)
-                    {
-                        CHECK(std::abs(actual.x - expected.x) < 0.005f);
-                        CHECK(std::abs(actual.y - expected.y) < 0.005f);
-                        CHECK(std::abs(actual.z - expected.z) < 0.005f);
-                        CHECK(actual.w > 0.99f);
-                    };
-                    check_color(corner_pixel(data, {panel->Pos.x + 5.371f * scale, panel->Pos.y + 80.213f * scale}), p.surface);
-                    check_color(corner_pixel(data, {canvas->Pos.x + 5.371f * scale,
-                                                   canvas->Pos.y + canvas->Size.y - 8.213f * scale}), p.canvas);
-                    check_color(corner_pixel(data, {320.371f, metrics.status_top() + 2.213f * scale}), p.chrome);
-                    // The panel's ChildBg override must not leak into the next frame/canvas.
-                    CHECK(ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_ChildBg]) ==
-                          ImGui::ColorConvertFloat4ToU32(p.canvas));
-                    REQUIRE(viewer.image_details());
-                    CHECK(viewer.image_details()->path == source.path);
                 }
 }
 
@@ -338,7 +340,8 @@ TEST_CASE("loading shell centers the application icon above its text", "[shell][
                             CHECK(text.find(translate(language, Text::loading)) != std::string::npos);
                             ImGuiWindow *canvas = nullptr;
                             for (auto *window : ImGui::GetCurrentContext()->Windows)
-                                if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
+                                if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos &&
+                                    std::string_view(window->Name).find("/image_information_") == std::string_view::npos)
                                     canvas = window;
                             REQUIRE(canvas);
                             const auto min = canvas->DC.CursorStartPos;
@@ -616,8 +619,8 @@ TEST_CASE("failed replacement shows a failure illustration and its reason below 
                             CHECK(message > title);
                             CHECK(text.substr(title, message - title).find('\n') != std::string::npos);
                             CHECK(text.find(std::string(100, 'x')) == std::string::npos);
-                            if (panel)
-                                CHECK(text.find(translate(language, Text::no_image)) != std::string::npos);
+                            // A failed replacement cannot expose stale image details.
+                            CHECK(text.find("100%.bmp") == std::string::npos);
                         }
     }
 }
@@ -684,7 +687,8 @@ struct CanvasMenuContext
     ImGuiWindow *canvas() const
     {
         for (auto *window : ImGui::GetCurrentContext()->Windows)
-            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
+            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos &&
+                std::string_view(window->Name).find("/image_information_") == std::string_view::npos)
                 return window;
         return nullptr;
     }
@@ -824,18 +828,23 @@ TEST_CASE("canvas menu rejects empty queued loading and failed images and closes
     CHECK(context.popup());
 }
 
-TEST_CASE("canvas menu does not open from chrome information panel or over a modal", "[shell][canvas_menu]")
+TEST_CASE("canvas menu ignores chrome modals and the information overlay", "[shell][canvas_menu]")
 {
     CanvasMenuContext context;
     context.load();
     context.shell.toggle_image_info();
     context.frame();
-    for (const auto point : {ImVec2{20, 8}, ImVec2{400, 894}, ImVec2{940, 400}})
+    for (const auto point : {ImVec2{20, 8}, ImVec2{400, 894}})
     {
         CAPTURE(point.x, point.y);
         context.right_click(point);
         CHECK_FALSE(context.popup());
     }
+    context.right_click({850, 400}); // The Info overlay consumes right-clicks.
+    CHECK_FALSE(context.popup());
+    context.right_click({300, 400});
+    REQUIRE(context.popup());
+    context.close();
     context.shell.show_about();
     context.frame();
     context.right_click(context.center());
@@ -1033,6 +1042,7 @@ struct DockShellScenario
     liltview::WindowChromeState chrome;
     liltview::DockLayout layout;
     bool external_blocked = false;
+    bool focus_lost_in_frame = false;
 
     DockShellScenario()
     {
@@ -1049,13 +1059,15 @@ struct DockShellScenario
         if (pump)
             (viewer.pump(), viewer.prepare_loading_view());
         ImGui::NewFrame();
+        focus_lost_in_frame = ImGui::GetIO().AppFocusLost;
         chrome.line_height = ImGui::GetTextLineHeight();
         const auto menu    = build_menu(Settings{}, Language::english, true, chrome.fullscreen, viewer.has_image(),
                                         viewer.can_actual_size(), viewer.navigation().can_previous, viewer.navigation().can_next,
                                         shell.image_info_open(), viewer.has_visible_image());
         const auto action  = shell.draw(Language::english, menu, false, renderer, {}, viewer, chrome, external_blocked);
         for (auto *window : ImGui::GetCurrentContext()->Windows)
-            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
+            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos &&
+                std::string_view(window->Name).find("/image_information_") == std::string_view::npos)
                 layout =
                     dock_layout(window->WorkRect.Min, window->WorkRect.Max, chrome.scale, viewer.fitting(), chrome.fullscreen);
         ImGui::Render();
@@ -1131,10 +1143,13 @@ TEST_CASE("full shell dock overlays without changing FIT in both themes DPI pane
                     s.chrome.fullscreen                      = fullscreen;
                     s.chrome.scale                           = scale;
                     s.chrome.system_titlebar                 = !fullscreen;
-                    if (s.shell.image_info_open() != panel)
-                        s.shell.toggle_image_info();
+                    // The Info panel does not change the Dock auto-hide policy.
+                    s.shell.dismiss_image_info();
                     ImGui::GetIO().AddMousePosEvent(100, 100);
                     s.frames(15);
+                    if (panel)
+                        s.shell.toggle_image_info();
+                    s.frames(2);
                     const auto before = s.viewer.presented_view();
                     REQUIRE(s.layout.valid);
                     CHECK_FALSE(s.dock_visible());
@@ -1147,6 +1162,49 @@ TEST_CASE("full shell dock overlays without changing FIT in both themes DPI pane
                     CHECK(s.viewer.presented_view().same_view(before));
                     CHECK(s.viewer.fitting());
                 }
+}
+
+TEST_CASE("opening Info from the Dock preserves its anchor and normal auto hide", "[dock][shell][image_details][regression]")
+{
+    using namespace liltview;
+    for (const bool fullscreen : {false, true})
+    {
+        CAPTURE(fullscreen);
+        DockShellScenario s;
+        s.chrome.fullscreen = fullscreen;
+        s.frames(2);
+        s.reveal();
+        REQUIRE(s.dock_visible());
+        const auto view   = s.viewer.presented_view();
+        const auto bounds = s.layout.bounds;
+        const auto button = std::find_if(s.layout.buttons.begin(), s.layout.buttons.end(),
+                                         [](const DockButton &value) { return value.action == MenuAction::image_info; });
+        REQUIRE(button != s.layout.buttons.end());
+        auto &io = ImGui::GetIO();
+        io.AddMousePosEvent((button->rect.min.x + button->rect.max.x) / 2, (button->rect.min.y + button->rect.max.y) / 2);
+        s.frames(2);
+        io.AddMouseButtonEvent(0, true);
+        CHECK(s.frame() == MenuAction::none);
+        io.AddMouseButtonEvent(0, false);
+        REQUIRE(s.frame() == MenuAction::image_info);
+        s.shell.toggle_image_info();
+        for (unsigned frame = 0; frame < 20; ++frame)
+        {
+            CHECK(s.frame() == MenuAction::none);
+            CHECK(s.dock_visible()); // No flash on opening while the pointer remains over the Dock.
+        }
+        CHECK(s.layout.bounds.min.x == bounds.min.x);
+        CHECK(s.layout.bounds.min.y == bounds.min.y);
+        io.AddMousePosEvent(1100, 200); // Read Info; the Dock may hide normally.
+        s.frames(20);
+        CHECK_FALSE(s.dock_visible());
+        CHECK(s.shell.image_info_open());
+        CHECK(s.viewer.presented_view().same_view(view));
+        s.reveal();
+        CHECK(s.dock_visible());
+        s.shell.dismiss_image_info();
+        CHECK(s.viewer.presented_view().same_view(view));
+    }
 }
 
 TEST_CASE("full shell double-click uses view mode including FIT at exactly 100 percent and manual zoom", "[dock][shell]")
@@ -1177,11 +1235,36 @@ TEST_CASE("full shell double-click uses view mode including FIT at exactly 100 p
     }
     s.shell.toggle_image_info();
     s.frames(2);
-    CHECK(s.double_click({1200, 150}) == MenuAction::none); // Information panel.
+    CHECK(s.double_click({1200, 150}) == MenuAction::none); // Info owns its rectangle.
+    CHECK(s.double_click({300, 200}) == MenuAction::actual_size);
     CHECK(s.double_click({300, 895}) == MenuAction::none);  // Status bar.
     CHECK(s.double_click({500, 15}) == MenuAction::none);   // Titlebar.
     s.external_blocked = true;
     CHECK(s.double_click({300, 200}) == MenuAction::none); // Native file chooser.
+}
+
+TEST_CASE("information toggle preserves a manually zoomed and panned camera", "[image_details][shell][regression]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    s.viewer.zoom(4);
+    s.settle();
+    s.viewer.pan(17, -11);
+    s.settle();
+    REQUIRE_FALSE(s.viewer.fitting());
+    const auto view = s.viewer.presented_view();
+    const auto layout = s.layout;
+    for (unsigned toggle = 0; toggle < 4; ++toggle)
+    {
+        s.shell.toggle_image_info();
+        s.frames(2);
+        CHECK(s.viewer.presented_view().same_view(view));
+        CHECK_FALSE(s.viewer.fitting());
+        CHECK(s.layout.bounds.min.x == layout.bounds.min.x);
+        CHECK(s.layout.bounds.min.y == layout.bounds.min.y);
+        CHECK(s.layout.bounds.max.x == layout.bounds.max.x);
+        CHECK(s.layout.bounds.max.y == layout.bounds.max.y);
+    }
 }
 
 TEST_CASE("full shell loading replacement failure and no-image cannot reveal or double-click", "[dock][shell]")
@@ -1331,16 +1414,17 @@ TEST_CASE("Dock navigation retains opacity and position across previous and next
             SDL_Delay(1);
         } while (!s.viewer.interaction_ready());
     }
-    // Info changes the available canvas; this is the one action allowed to reset visibility.
-    s.shell.toggle_image_info();
-    s.frame();
-    CHECK_FALSE(s.dock_visible());
-    CHECK(s.layout.bounds.min.x != bounds.min.x);
-    s.reveal();
-    REQUIRE(s.dock_visible());
-    s.shell.toggle_image_info();
-    s.frame();
-    CHECK_FALSE(s.dock_visible());
+    // The Info overlay must not reset the Dock or move its anchor.
+    const auto view = s.viewer.presented_view();
+    for (unsigned toggle = 0; toggle < 2; ++toggle)
+    {
+        s.shell.toggle_image_info();
+        s.frame();
+        CHECK(s.dock_visible());
+        CHECK(s.layout.bounds.min.x == bounds.min.x);
+        CHECK(s.layout.bounds.min.y == bounds.min.y);
+        CHECK(s.viewer.presented_view().same_view(view));
+    }
 }
 
 TEST_CASE("a shown Dock survives progressive replacement but still auto hides when the pointer leaves",
@@ -1421,4 +1505,237 @@ TEST_CASE("full shell image arrows keep navigating after a mouse Dock action has
         CHECK_FALSE(s.shell.dock_keyboard_focus());
     }
     CHECK(s.viewer.filename() == "a.bmp");
+}
+
+
+TEST_CASE("information panel owns its input without hiding the edge arrows or moving the image",
+          "[image_details][shell][regression]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    s.viewer.open(progressive_bmp(s.source, false));
+    s.settle();
+    s.viewer.zoom(8);
+    s.settle();
+    s.shell.toggle_image_info();
+    s.frames(3);
+    const auto view = s.viewer.presented_view();
+    auto &io        = ImGui::GetIO();
+    io.AddMousePosEvent(1100, 250);
+    s.frames(2);
+    io.AddMouseWheelEvent(0, 3);
+    s.frames(3);
+    CHECK(s.viewer.presented_view().same_view(view));
+    io.AddMouseButtonEvent(0, true);
+    s.frame();
+    io.AddMousePosEvent(1150, 300);
+    s.frames(2);
+    io.AddMousePosEvent(400, 400); // Leaving the panel cannot turn its press into an image drag.
+    s.frames(2);
+    io.AddMouseButtonEvent(0, false);
+    CHECK(s.frame() == MenuAction::none);
+    CHECK(s.viewer.presented_view().same_view(view));
+    CHECK_FALSE(s.dock_visible());
+    CHECK(s.double_click({1200, 150}) == MenuAction::none);
+    CHECK(s.viewer.presented_view().same_view(view));
+    // The right arrow keeps its visual and hit area outside the Info panel.
+    const ImVec2 min{0, 68}, max{1280, 870};
+    const auto panel = image_information_layout(min, {max.x, s.layout.bounds.min.y}, 1);
+    REQUIRE(panel.valid);
+    const auto arrows = navigation_button_layout(min, max, 1, {panel.min, panel.max});
+    CHECK(arrows.previous_visible);
+    CHECK(arrows.next_visible);
+    CHECK(panel.max.x + 12 <= arrows.next.min.x);
+    const auto nav = navigation_button_state(s.viewer.navigation());
+    CHECK(navigation_buttons_hit(arrows, nav, {arrows.next.min.x + 5, arrows.next.min.y + 5}));
+    // The clear canvas still accepts normal zoom after a panel gesture.
+    io.AddMousePosEvent(400, 350);
+    s.frames(3);
+    io.AddMouseWheelEvent(0, 1);
+    s.settle();
+    CHECK_FALSE(s.viewer.presented_view().same_view(view));
+}
+
+TEST_CASE("an image drag keeps ownership while crossing the information panel", "[image_details][shell][regression]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    s.viewer.open(progressive_bmp(s.source, false));
+    s.settle();
+    s.viewer.zoom(8);
+    s.settle();
+    s.shell.toggle_image_info();
+    s.frames(3);
+    auto &io = ImGui::GetIO();
+    io.AddMousePosEvent(500, 300);
+    s.frames(3);
+    io.AddMouseButtonEvent(0, true);
+    s.frame();
+    io.AddMousePosEvent(600, 320);
+    s.settle();
+    const auto before = s.viewer.presented_view();
+    io.AddMousePosEvent(1100, 350);
+    s.settle();
+    CHECK_FALSE(s.viewer.presented_view().same_view(before));
+    io.AddMouseButtonEvent(0, false);
+    CHECK(s.frame() == MenuAction::none);
+    CHECK(s.shell.image_info_open());
+}
+
+
+TEST_CASE("reopening information starts at the file identity while retaining image view", "[image_details][shell][regression]")
+{
+    DockShellScenario s;
+    s.shell.toggle_image_info();
+    s.frames(3);
+    ImGuiWindow *body = nullptr;
+    for (auto *child : ImGui::GetCurrentContext()->Windows)
+        if (child->Active && std::string_view(child->Name).find("/image_information_body_") != std::string_view::npos)
+            body = child;
+    REQUIRE(body);
+    REQUIRE(body->ScrollMax.y > 0); // The fixture's long literal path exceeds the preferred height.
+    const auto view = s.viewer.presented_view();
+    auto &io        = ImGui::GetIO();
+    io.AddMousePosEvent(body->Pos.x + 40, body->Pos.y + 40);
+    s.frames(2);
+    io.AddMouseWheelEvent(0, -8);
+    s.frames(3);
+    CHECK(body->Scroll.y > 0);
+    s.shell.dismiss_image_info();
+    s.frames(2);
+    s.shell.toggle_image_info();
+    s.frames(3);
+    CHECK(body->Scroll.y == 0);
+    CHECK(s.viewer.presented_view().same_view(view));
+}
+
+
+TEST_CASE("canvas popup retains priority when it overlaps the information panel", "[image_details][shell][canvas_menu]")
+{
+    using namespace liltview;
+    CanvasMenuContext context;
+    context.load();
+    context.shell.toggle_image_info();
+    context.frame();
+    context.right_click({580, 150}); // Open on clear canvas, adjacent to the Info panel.
+    auto *popup = context.popup();
+    REQUIRE(popup);
+    auto &io         = ImGui::GetIO();
+    const auto first = popup->DC.CursorStartPos;
+    io.AddMousePosEvent(first.x + 50, first.y + 4); // The popup now covers Info pixels.
+    context.frame();
+    REQUIRE(context.popup());
+    io.AddMouseButtonEvent(0, true);
+    CHECK(context.frame() == MenuAction::none);
+    io.AddMouseButtonEvent(0, false);
+    CHECK(context.frame() == MenuAction::previous);
+    CHECK(context.shell.image_info_open());
+}
+
+
+TEST_CASE("both edge navigation buttons remain clickable with information open", "[image_details][shell][navigation_buttons]")
+{
+    using namespace liltview;
+    CanvasMenuContext context;
+    context.load();
+    context.shell.toggle_image_info();
+    for (const auto scale : {1.f, 1.5f, 2.f})
+    {
+        context.scale = scale;
+        context.viewer.open(context.source.directory / "a.bmp");
+        context.settle();
+        context.frame();
+        context.frame();
+        auto *canvas = context.canvas();
+        REQUIRE(canvas);
+        const auto arrows = navigation_button_layout(canvas->WorkRect.Min, canvas->WorkRect.Max, scale);
+        const auto dock   = dock_layout(canvas->WorkRect.Min, canvas->WorkRect.Max, scale, true, false);
+        const auto panel  = image_information_layout(canvas->WorkRect.Min, {canvas->WorkRect.Max.x, dock.bounds.min.y}, scale);
+        REQUIRE(panel.valid);
+        CHECK(panel.max.x + 12 * scale <= arrows.next.min.x);
+        const auto click = [&](const NavigationButtonRect &rect)
+        {
+            auto &io = ImGui::GetIO();
+            io.AddMousePosEvent((rect.min.x + rect.max.x) / 2, (rect.min.y + rect.max.y) / 2);
+            context.frame();
+            context.frame();
+            io.AddMouseButtonEvent(0, true);
+            CHECK(context.frame() == MenuAction::none);
+            io.AddMouseButtonEvent(0, false);
+            return context.frame();
+        };
+        CHECK(click(arrows.next) == MenuAction::next);
+        context.viewer.open(context.source.path);
+        context.settle();
+        context.frame();
+        CHECK(click(arrows.previous) == MenuAction::previous);
+        CHECK(context.shell.image_info_open());
+    }
+}
+
+TEST_CASE("information arrow keys never focus full width layout containers", "[image_details][shell][keyboard][regression]")
+{
+    using namespace liltview;
+    for (const bool native : {false, true})
+        for (const bool dark : {false, true})
+        {
+            CAPTURE(native, dark);
+            DockShellScenario s;
+            s.chrome.system_titlebar = native;
+            s.chrome.dark = dark;
+            apply_style(dark, 1);
+            auto &io = ImGui::GetIO();
+            io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+            s.shell.toggle_image_info();
+            s.frames(3);
+            for (const bool control : {false, true})
+                for (const auto key : {ImGuiKey_UpArrow, ImGuiKey_DownArrow})
+                    for (int press = 0; press < 4; ++press)
+                    {
+                        CAPTURE(control, key, press);
+                        io.AddKeyEvent(ImGuiMod_Ctrl, control);
+                        io.AddKeyEvent(key, true);
+                        s.frames(3);
+                        const auto &g = *ImGui::GetCurrentContext();
+                        int containers = 0;
+                        for (const auto *window : g.Windows)
+                            if (window->Active && window->ParentWindow && window->ParentWindow->ParentWindow == nullptr)
+                            {
+                                INFO(window->Name);
+                                ++containers;
+                                CHECK_FALSE((g.NavCursorVisible && g.NavId == window->ChildId));
+                            }
+                        REQUIRE(containers == (native ? 1 : 2));
+                        io.AddKeyEvent(key, false);
+                        io.AddKeyEvent(ImGuiMod_Ctrl, false);
+                        s.frames(2);
+                    }
+        }
+}
+
+TEST_CASE("flattened canvas retains explicit Dock keyboard navigation with information open", "[dock][image_details][shell][keyboard]")
+{
+    using namespace liltview;
+    DockShellScenario s;
+    auto &io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    s.shell.toggle_image_info();
+    s.frames(3);
+    s.reveal();
+    for (int tab = 0; tab < 12 && !s.shell.dock_keyboard_focus(); ++tab)
+    {
+        io.AddKeyEvent(ImGuiKey_Tab, true);
+        s.frames(2);
+        io.AddKeyEvent(ImGuiKey_Tab, false);
+        s.frames(2);
+    }
+    REQUIRE(s.shell.dock_keyboard_focus());
+    const auto first = ImGui::GetCurrentContext()->NavId;
+    io.AddKeyEvent(ImGuiKey_RightArrow, true);
+    s.frames(2);
+    io.AddKeyEvent(ImGuiKey_RightArrow, false);
+    s.frames(2);
+    CHECK(s.shell.dock_keyboard_focus());
+    CHECK(ImGui::GetCurrentContext()->NavId != first);
+    CHECK(s.shell.image_info_open());
 }

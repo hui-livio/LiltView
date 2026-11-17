@@ -22,16 +22,17 @@ const char *image_format_name(lv_format);
 // Presentation only: no file access, Core calls, rendering or metadata parsing.
 std::vector<ImageInformationRow> image_information_rows(Language, const ImageDetails &);
 
+// A canvas overlay: geometry is resolved before any image input, never a viewport inset.
 struct ImageInformationLayout
 {
-    ImVec2 canvas_max{}, panel_min{}, panel_max{};
-    bool visible = false;
+    ImVec2 min{}, max{};
+    bool valid = false;
+    bool contains(ImVec2 point) const noexcept;
 };
-
-ImageInformationLayout image_information_layout(ImVec2 min, ImVec2 max, float scale, bool open);
-// Draw as a sibling of the canvas, outside its image and navigation hit region.
-// Returns true only when the close button is activated; this is not a popup.
-bool draw_image_information(Language, const std::optional<ImageDetails> &, ImVec2 min, ImVec2 max);
+ImageInformationLayout image_information_layout(ImVec2 canvas_min, ImVec2 canvas_max, float scale);
+// The header stays fixed while the full information body scrolls. Returns true on close.
+bool draw_image_information(Language, const std::optional<ImageDetails> &, const ImageInformationLayout &,
+                            bool accept_input = true);
 } // namespace liltview
 
 #endif
