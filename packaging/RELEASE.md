@@ -13,7 +13,7 @@ Tests and debug files are never installed or published.
 | Ubuntu | 26.04, x86_64 | `liltview-1.0.0-linux-ubuntu26.04-x86_64.deb` |
 | Fedora | 44, x86_64 | `liltview-1.0.0-linux-fedora44-x86_64.rpm` |
 | Arch Linux | rolling, x86_64 | `liltview-1.0.0-1-x86_64.pkg.tar.zst` |
-| Source | all targets | `liltview-1.0.0-source.tar.gz` |
+| Source | all targets | `liltview-1.0.0-source.zip` and `.tar.gz` |
 
 Ubuntu/Fedora packages target the named distribution and ABI, not every older
 Debian/RPM system. macOS architectures are built independently, not Universal 2.
@@ -78,8 +78,9 @@ packaging scripts.
 ## Complete source archive
 
 GitHub's automatically generated “Source code” downloads do not contain submodule
-contents. Use the separately uploaded `liltview-1.0.0-source.tar.gz` instead. It
-contains all tracked third-party sources, including nested PlutoVG and Catch2,
+contents and cannot currently be disabled or removed from the release page.
+Use the separately uploaded `liltview-1.0.0-source.zip` (Windows) or
+`liltview-1.0.0-source.tar.gz` (Linux/macOS) instead. Both contain all tracked third-party sources, including nested PlutoVG and Catch2,
 and their licenses. A plain `RELEASE_VERSION` marker preserves RC identity for
 offline builds (no Git history is stored). It excludes `.git`, `.gitmodules`, other `.git*` administrative
 files, `.github`, untracked files and build outputs. Dependency provenance
@@ -93,9 +94,12 @@ git submodule update --init --recursive
 python3 scripts/package_release.py source --output build/dist
 ```
 
-All binary jobs build this exact archive **without a Git checkout**, which checks
+Both formats contain the same normalized snapshot, including UTF-8 Chinese filenames.
+Windows CI uses PowerShell `Expand-Archive` on the ZIP, not Windows tar or an
+external unzip command. Linux/macOS use the tarball. All binary jobs build this
+snapshot **without a Git checkout**, which checks
 that application and third-party CMake builds work from the source distribution.
-File ownership/timestamps/permissions and gzip headers are normalized for
+File ownership/timestamps/permissions and archive metadata are normalized for
 reproducible archives. System compilers, SDKs and Linux development packages are
 still required; the archive contains project dependencies, not an operating-system
 sysroot.

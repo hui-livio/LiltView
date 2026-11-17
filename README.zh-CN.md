@@ -134,4 +134,4 @@ JPEG 使用 libjpeg-turbo。This software is based in part on the work of the In
 
 ## 正式发布
 
-1.0.0 [发布流水线](packaging/RELEASE.md) 使用 GitHub Actions 编译 Windows x64 单 EXE、macOS Apple Silicon / Intel 的 DMG / ZIP、Ubuntu DEB、Fedora RPM 和 Arch `.pkg.tar.zst`。主程序与 UT 全部使用 **Release**，测试通过后才打包，产物不包含调试信息或测试程序。独立上传的源码包包含所有第三方依赖源码并去除 Git 元数据。
+1.0.0 [发布流水线](packaging/RELEASE.md) 使用 GitHub Actions 编译 Windows x64 单 EXE、macOS Apple Silicon / Intel 的 DMG / ZIP、Ubuntu DEB、Fedora RPM 和 Arch `.pkg.tar.zst`。主程序与 UT 全部使用 **Release**，测试通过后才打包，产物不包含调试信息或测试程序。独立上传的 `.zip` / `.tar.gz` 完整源码包包含所有第三方依赖源码并去除 Git 元数据；不要使用 GitHub 自动生成的 Source code 附件。

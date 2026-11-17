@@ -25,7 +25,7 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
-# Every binary job builds the SAME complete, Git-free source archive, in Release,
+# Every binary job builds the SAME complete, Git-free source snapshot, in Release,
 # with Catch2 enabled. A failed UT prevents packaging / draft release creation.
 jobs:
   source:
@@ -56,7 +56,9 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7 (Node 24)
         with:
           name: release-source
-          path: build/dist/*.tar.gz
+          path: |
+            build/dist/*-source.tar.gz
+            build/dist/*-source.zip
           if-no-files-found: error
           compression-level: 0
 
@@ -75,9 +77,10 @@ jobs:
       - name: Extract sources and load x64 MSVC environment
         shell: pwsh
         run: |
-          New-Item -ItemType Directory src, dist | Out-Null
-          tar -xf "incoming/liltview-$env:VERSION-source.tar.gz" -C src --strip-components=1
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory dist | Out-Null
+          Expand-Archive -LiteralPath "incoming/liltview-${env:VERSION}-source.zip" -DestinationPath source-extract -ErrorAction Stop
+          Move-Item -LiteralPath "source-extract/liltview-${env:VERSION}" -Destination src -ErrorAction Stop
+          if (!(Test-Path -LiteralPath src/CMakeLists.txt)) { throw 'Incomplete source extraction' }
           $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (!$vs) { throw 'MSVC toolchain not found' }
           $command = '"' + $vs + '\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && set'
@@ -358,5 +361,17 @@ jobs:
           # Draft first: publishing remains an explicit maintainer action.
           preview=()
           if [ "$PRERELEASE" = true ]; then preview+=(--prerelease --latest=false); fi
+          cat > ../source-notes.md <<'EOF'
+          ## Complete source / 完整源码
+
+          Download `liltview-VERSION-source.zip` (Windows) or `liltview-VERSION-source.tar.gz`
+          (Linux/macOS). Both include all pinned third-party dependency sources and no Git metadata.
+          Use the versioned attachments below, not GitHub's automatic **Source code (zip/tar.gz)**
+          snapshots, which omit submodule contents and cannot be disabled.
+
+          请下载下方带版本号的 `liltview-VERSION-source.zip` 或 `.tar.gz` 完整源码包；
+          不要使用 GitHub 自动生成的 **Source code** 附件，它们不含子模块依赖。
+          EOF
+          sed -i 's/VERSION/${{ needs.source.outputs.version }}/g' ../source-notes.md
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft "${preview[@]}" \
-            --title "LiltView ${{ needs.source.outputs.version }}" --generate-notes ./*
+            --title "LiltView ${{ needs.source.outputs.version }}" --generate-notes --notes-file ../source-notes.md ./*

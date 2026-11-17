@@ -11,8 +11,12 @@ import io
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+import stat
 import subprocess
 import tarfile
+import time
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -120,6 +124,30 @@ def write_source(destination, root=ROOT, allow_dirty=False):
     return destination
 
 
+def write_source_zip(source_tar, destination):
+    """Encode the same normalized source snapshot as a UTF-8 ZIP for Windows."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(source_tar, mode="r|gz") as source:
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for member in source:
+                # DOS ZIP dates have a narrower range and two-second resolution.
+                stamp = time.gmtime(max(315532800, min(int(member.mtime), 4354819198)))[:6]
+                info = zipfile.ZipInfo(member.name, date_time=stamp)
+                info.create_system = 3
+                info.compress_type = zipfile.ZIP_DEFLATED
+                kind = stat.S_IFLNK if member.issym() else stat.S_IFREG
+                info.external_attr = (kind | member.mode) << 16
+                if member.issym():
+                    archive.writestr(info, member.linkname.encode("utf-8"))
+                elif member.isfile():
+                    info.file_size = member.size
+                    with source.extractfile(member) as data, archive.open(info, "w") as output:
+                        shutil.copyfileobj(data, output, length=1024 * 1024)
+                else:
+                    raise ValueError(f"Unsupported source archive entry: {member.name}")
+    return destination
+
+
 def sha256(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
@@ -147,7 +175,9 @@ def main():
     if args.action == "version":
         print(selected_version)
     elif args.action == "source":
-        print(write_source(args.output / f"liltview-{selected_version}-source.tar.gz"))
+        source_tar = write_source(args.output / f"liltview-{selected_version}-source.tar.gz")
+        print(source_tar)
+        print(write_source_zip(source_tar, args.output / f"liltview-{selected_version}-source.zip"))
     else:
         checksums(args.output)
 
