@@ -93,7 +93,8 @@ jobs:
       - name: Build Release application and Release UT
         working-directory: src
         run: |
-          cmake --preset release-ci -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe "-DLILTVIEW_VERSION_SUFFIX=$env:VERSION_SUFFIX"
+          # Quote whole -D arguments so PowerShell does not split cl.exe at the dot.
+          cmake --preset release-ci "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DLILTVIEW_VERSION_SUFFIX=$env:VERSION_SUFFIX"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build --preset release-ci --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
