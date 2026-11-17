@@ -127,7 +127,7 @@ ImageInformationLayout image_information_layout(ImVec2 canvas_min, ImVec2 canvas
     const auto navigation = navigation_button_layout(canvas_min, canvas_max, scale);
     const float right =
         navigation.valid ? std::min(canvas_max.x - margin, navigation.next.min.x - 12 * scale) : canvas_max.x - margin;
-    const float width  = std::min(300 * scale, right - canvas_min.x - margin);
+    const float width  = std::min(360 * scale, right - canvas_min.x - margin);
     const float height = std::min(562 * scale, canvas_max.y - canvas_min.y - 2 * margin);
     if (width < 160 * scale || height < 90 * scale)
         return layout;
@@ -219,7 +219,7 @@ bool draw_image_information(Language language, const std::optional<ImageDetails>
     bool close         = false;
     if (visible)
     {
-        ImGui::PushFont(nullptr, 14);
+        ImGui::PushFont(nullptr, 17);
         const ImVec2 center{layout.min.x + 22 * scale, layout.min.y + 22 * scale};
         auto *draw = ImGui::GetWindowDrawList();
         const ImVec4 icon_color{p.information_border.x, p.information_border.y, p.information_border.z, 1};
@@ -245,7 +245,7 @@ bool draw_image_information(Language language, const std::optional<ImageDetails>
         ImGui::PushStyleColor(ImGuiCol_ChildBg, {0, 0, 0, 0});
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {16 * scale, 10 * scale});
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0, 8 * scale});
-        ImGui::PushFont(nullptr, 13);
+        ImGui::PushFont(nullptr, 16);
         if (ImGui::IsWindowAppearing())
             ImGui::SetNextWindowScroll({0, 0});
         if (ImGui::BeginChild(
@@ -292,7 +292,7 @@ bool draw_image_information(Language language, const std::optional<ImageDetails>
                     ImGui::PopTextWrapPos();
                     ImGui::SetCursorScreenPos({pos.x, pos.y + std::max(label_size.y, value_size.y) + 12 * scale});
                 };
-                ImGui::PushFont(nullptr, 15);
+                ImGui::PushFont(nullptr, 18);
                 const auto filename = platform::path_bytes(details->path.filename());
                 ImGui::TextUnformatted(filename.c_str());
                 ImGui::PopFont();

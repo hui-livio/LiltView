@@ -1617,7 +1617,12 @@ TEST_CASE("canvas popup retains priority when it overlaps the information panel"
     context.load();
     context.shell.toggle_image_info();
     context.frame();
-    context.right_click({580, 150}); // Open on clear canvas, adjacent to the Info panel.
+    const auto *canvas = context.canvas();
+    REQUIRE(canvas);
+    const auto dock = dock_layout(canvas->WorkRect.Min, canvas->WorkRect.Max, context.scale, true, false);
+    const auto panel = image_information_layout(canvas->WorkRect.Min, {canvas->WorkRect.Max.x, dock.bounds.min.y}, context.scale);
+    REQUIRE(panel.valid);
+    context.right_click({panel.min.x - 18 * context.scale, panel.min.y + 82 * context.scale});
     auto *popup = context.popup();
     REQUIRE(popup);
     auto &io         = ImGui::GetIO();

@@ -264,7 +264,7 @@ TEST_CASE("information overlay stays within the canvas and rejects invalid geome
         REQUIRE(layout.valid);
         CHECK(layout.max.x == end.x - 64 * scale);
         CHECK(layout.min.y == start.y + 16 * scale);
-        CHECK(layout.max.x - layout.min.x == 300 * scale);
+        CHECK(layout.max.x - layout.min.x == 360 * scale);
         CHECK(layout.max.y - layout.min.y == 562 * scale);
         CHECK(layout.contains(layout.min));
         CHECK_FALSE(layout.contains(layout.max));
