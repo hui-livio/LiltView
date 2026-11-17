@@ -41,5 +41,20 @@ foreach(relative IN LISTS liltview_notice_files)
     endif()
     string(APPEND LILTVIEW_NOTICES "\n========== ${relative} ==========\n${text}\n")
 endforeach()
+# MSVC before 14.51 limits each string literal to roughly 16 KiB. Encode
+# fixed-size byte chunks instead of one raw literal. Hex escapes keep UTF-8 byte
+# boundaries, quotes, backslashes and raw-string delimiters completely lossless.
+# Adjacent literals concatenate into one NUL-terminated array without separators.
+string(HEX "${LILTVIEW_NOTICES}" liltview_notices_hex)
+string(LENGTH "${liltview_notices_hex}" liltview_notices_hex_length)
+set(LILTVIEW_NOTICES_LITERALS "")
+set(liltview_notices_offset 0)
+while(liltview_notices_offset LESS liltview_notices_hex_length)
+    # 2048 hex digits = at most 1024 decoded bytes (4096 source characters).
+    string(SUBSTRING "${liltview_notices_hex}" ${liltview_notices_offset} 2048 chunk)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "\\\\x\\1" escaped "${chunk}")
+    string(APPEND LILTVIEW_NOTICES_LITERALS "\"${escaped}\"\n")
+    math(EXPR liltview_notices_offset "${liltview_notices_offset} + 2048")
+endwhile()
 configure_file("${PROJECT_SOURCE_DIR}/app/resources/notices.hpp.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/notices.hpp" @ONLY)

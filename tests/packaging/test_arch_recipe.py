@@ -80,7 +80,7 @@ printf 'CHECK_COMPLETED\n'
 
     def test_ci_explicitly_enables_tests(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertIn("LILTVIEW_RUN_TESTS=1 CMAKE_BUILD_PARALLEL_LEVEL=3 makepkg --check", workflow)
+        self.assertIn('runuser -u builder -- python3 "$PWD/src/build.py" arch --parallel 3', workflow)
 
 
 if __name__ == "__main__":

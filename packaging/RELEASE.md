@@ -75,6 +75,48 @@ all native assets and the complete source archive. Review the draft release note
 and artifacts, then publish it in GitHub. No tag or release is created by local
 packaging scripts.
 
+## Unified Python build entry point
+
+`build.py` is the shared entry point for local builds and all binary CI jobs. It
+requires Python **3.11+** and only the standard library. Windows/macOS/source CI
+select Python 3.12 through `actions/setup-python`; Linux containers install their
+native Python 3 package alongside CMake and the compilers.
+
+From a checkout with initialized dependencies, or an extracted complete source archive:
+
+```sh
+# Configure, compile, and run Release UT (default).
+python3 build.py --parallel 4
+
+# CI keeps compilation and tests as separate steps for readable logs/reports.
+python3 build.py build --parallel 4
+python3 build.py test --test-parallel 2 --junit build/test-results.xml
+
+# Application only, without compiling or running UT.
+python3 build.py build --preset app-release --parallel 4
+
+# Arch CI, as a normal user: Release build + UT + native pkg.tar.zst.
+python3 build.py arch --parallel 3
+```
+
+On Windows use `python` instead of `python3` from an **x64 MSVC developer
+terminal**; CI loads the same MSVC environment before invoking the script. Windows
+UT run serially by default because native window tests share the desktop. On
+macOS the script selects Homebrew LLVM 20 for C, and Xcode Clang for C++ and
+Objective-C. Linux uses the distribution compiler.
+
+The script uses the existing `release-ci` and `app-release` CMake presets. Extra
+cache settings use repeatable `-DNAME=VALUE` arguments; quote the whole argument
+when its value contains spaces. `--build-dir` overrides the default
+`build/<preset>` directory for CMake builds. `VERSION_SUFFIX` or
+`--version-suffix=-rc.1` selects an RC, while `--version-suffix=` selects stable;
+without an override the source archive's `RELEASE_VERSION` marker applies.
+CMake/CTest errors stop the command and propagate a nonzero exit code to CI.
+
+Arch delegates to the checked-in PKGBUILD with `LILTVIEW_RUN_TESTS=1` and
+`makepkg --check`; direct `makepkg -si` still defaults to no UT. Native packaging,
+signing and artifact verification remain platform-specific CI steps.
+
 ## Complete source archive
 
 GitHub's automatically generated “Source code” downloads do not contain submodule
@@ -108,6 +150,8 @@ sysroot.
 
 Windows embeds the original HarmonyOS Sans font and full redistribution notices,
 uses static vendor libraries and the static MSVC CRT, and publishes only the EXE.
+Embedded notices use bounded byte-escaped literals to support VS 2022/MSVC 14.44
+without truncating licenses or requiring external text files.
 `liltview.exe --licenses` prints its embedded licenses (redirect output to a text
 file if launching from a GUI terminal). The CI tests the copied EXE from a directory
 with no adjacent font files and rejects DLL CRT / SDL dependencies.

@@ -9,6 +9,7 @@ on:
       - '.github/workflows/release.yml'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
+      - 'build.py'
       - 'cmake/**'
       - 'app/**'
       - 'core/**'
@@ -39,6 +40,9 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node 24)
+        with:
+          python-version: '3.12'
       - name: Validate version, dependencies and packaging contracts
         id: version
         run: |
@@ -70,6 +74,9 @@ jobs:
       LILTVIEW_RELEASE_VERSION: ${{ needs.source.outputs.version }}
       VERSION_SUFFIX: ${{ needs.source.outputs.suffix }}
     steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node 24)
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (Node 24)
         with:
           name: release-source
@@ -93,15 +100,11 @@ jobs:
       - name: Build Release application and Release UT
         working-directory: src
         run: |
-          # Quote whole -D arguments so PowerShell does not split cl.exe at the dot.
-          cmake --preset release-ci "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DLILTVIEW_VERSION_SUFFIX=$env:VERSION_SUFFIX"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build --preset release-ci --parallel 4
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python build.py build --parallel 4
       - name: Run Release UT
         working-directory: src
         # Native Windows chrome tests share the desktop; do not overlap them.
-        run: ctest --preset release-ci --parallel 1 --output-junit "$env:GITHUB_WORKSPACE/test-results.xml"
+        run: python build.py test --test-parallel 1 --junit "$env:GITHUB_WORKSPACE/test-results.xml"
       - name: Verify and package single EXE (no sidecars, DLLs or PDBs)
         shell: pwsh
         run: |
@@ -146,6 +149,9 @@ jobs:
       VERSION_SUFFIX: ${{ needs.source.outputs.suffix }}
       MACOSX_DEPLOYMENT_TARGET: '15.0'
     steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node 24)
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: release-source
@@ -158,18 +164,10 @@ jobs:
       - name: Build Release application and Release UT
         working-directory: src
         run: |
-          # LLVM 20 provides the required C23 constexpr/nullptr; Xcode Clang builds
-          # C++ and SDL Cocoa/Metal Objective-C against Apple's libc++ / frameworks.
-          cmake --preset release-ci -DLILTVIEW_VERSION_SUFFIX="$VERSION_SUFFIX" \
-            -DCMAKE_C_COMPILER="$(brew --prefix llvm@20)/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$(xcrun -f clang++)" \
-            -DCMAKE_OBJC_COMPILER="$(xcrun -f clang)" \
-            -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
-          cmake --build --preset release-ci --parallel 3
+          python3 build.py build --parallel 3
       - name: Run Release UT
         working-directory: src
-        run: ctest --preset release-ci --parallel 2 --output-junit "$GITHUB_WORKSPACE/test-results.xml"
+        run: python3 build.py test --test-parallel 2 --junit "$GITHUB_WORKSPACE/test-results.xml"
       - name: Stage standalone bundle, strip and ad-hoc sign
         run: |
           cmake --install src/build/release-ci --prefix "$PWD/stage" --strip
@@ -251,13 +249,12 @@ jobs:
           mkdir -p src dist
           tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
           cd src
-          cmake --preset release-ci -DLILTVIEW_VERSION_SUFFIX="$VERSION_SUFFIX" -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
+          python3 build.py build --parallel 3 -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
             -DSDL_KMSDRM=OFF -DSDL_LIBUDEV=OFF -DSDL_IBUS=OFF \
             -DCPACK_PACKAGE_FILE_NAME="liltview-$VERSION-linux-${{ matrix.platform }}-x86_64"
-          cmake --build --preset release-ci --parallel 3
       - name: Run Release UT
         working-directory: src
-        run: ctest --preset release-ci --parallel 2 --output-junit "$GITHUB_WORKSPACE/test-results.xml"
+        run: python3 build.py test --test-parallel 2 --junit "$GITHUB_WORKSPACE/test-results.xml"
       - name: Build native stripped package
         run: |
           cd src/build/release-ci
@@ -315,9 +312,8 @@ jobs:
           mkdir -p src dist
           tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
           chown -R builder:builder src
-          # The SAME checked-in native PKGBUILD works locally and in CI.
-          # Opt in to Release UT; --check overrides a disabled makepkg check environment.
-          runuser -u builder -- bash -c 'cd "$1" && LILTVIEW_RUN_TESTS=1 CMAKE_BUILD_PARALLEL_LEVEL=3 makepkg --check --noconfirm' bash "$PWD/src/packaging/arch"
+          # The Python entry point enables Release UT and calls the SAME native PKGBUILD.
+          runuser -u builder -- python3 "$PWD/src/build.py" arch --parallel 3
           cp src/packaging/arch/*.pkg.tar.zst dist/
           test -n "$(find dist -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)"
           pacman -Qip dist/*.pkg.tar.zst

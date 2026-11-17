@@ -140,3 +140,7 @@ macOS Apple Silicon / Intel (DMG and ZIP), Ubuntu (DEB), Fedora (RPM) and Arch
 excluded from distributed binaries. The separately uploaded `.zip` / `.tar.gz` source archives
 include all third-party dependency sources with Git metadata removed. Do not use
 GitHub's automatically generated Source code attachments, which omit submodules.
+
+Use `python3 build.py --parallel 4` to configure, compile and run Release UT;
+use `python build.py --parallel 4` in an x64 MSVC developer terminal on Windows.
+Python 3.11+ is required. CI uses the same [build entry point](packaging/RELEASE.md#unified-python-build-entry-point).
