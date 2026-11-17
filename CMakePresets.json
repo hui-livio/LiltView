@@ -31,7 +31,7 @@
             "name": "release",
             "inherits": "base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_BUILD_TYPE": "MinSizeRel",
                 "BUILD_TESTING": false
             }
         },
@@ -47,6 +47,15 @@
             "inherits": "release",
             "cacheVariables": {
                 "LILTVIEW_BUILD_APP_COMPONENTS": true
+            }
+        },
+        {
+            "name": "app-minirel",
+            "displayName": "app-minirel",
+            "description": "MinSizeRel application without tests; Linux executable stripped of debug information and ordinary symbols.",
+            "inherits": "app-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "MinSizeRel"
             }
         },
         {
@@ -90,8 +99,8 @@
         },
         {
             "name": "msvc-release",
-            "displayName": "MSVC x64 Ninja - Release",
-            "description": "Release application without tests; requires an x64 MSVC developer environment.",
+            "displayName": "MSVC x64 Ninja - MinSizeRel",
+            "description": "MinSizeRel application without tests; requires an x64 MSVC developer environment.",
             "inherits": [
                 "app-release",
                 "msvc-base"
@@ -99,7 +108,7 @@
         },
         {
             "name": "release-ci",
-            "displayName": "Release application + UT + packaging",
+            "displayName": "MinSizeRel application + UT + packaging",
             "inherits": "app-release",
             "cacheVariables": {
                 "BUILD_TESTING": true,
@@ -140,6 +149,10 @@
         {
             "name": "app-release",
             "configurePreset": "app-release"
+        },
+        {
+            "name": "app-minirel",
+            "configurePreset": "app-minirel"
         },
         {
             "name": "msvc-dev",
@@ -198,7 +211,7 @@
         {
             "name": "release-ci",
             "configurePreset": "release-ci",
-            "configuration": "Release",
+            "configuration": "MinSizeRel",
             "output": {
                 "outputOnFailure": true
             },

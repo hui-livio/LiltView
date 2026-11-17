@@ -136,11 +136,11 @@ The bundled HarmonyOS Sans SC font is copyright Huawei Device Co., Ltd. and is d
 
 The 1.0.0 [release workflow](packaging/RELEASE.md) builds Windows x64 (single EXE),
 macOS Apple Silicon / Intel (DMG and ZIP), Ubuntu (DEB), Fedora (RPM) and Arch
-(`.pkg.tar.zst`). All builds and UT run in **Release**; debug symbols and tests are
+(`.pkg.tar.zst`). All builds and UT run in **MinSizeRel**; debug symbols and tests are
 excluded from distributed binaries. The separately uploaded `.zip` / `.tar.gz` source archives
 include all third-party dependency sources with Git metadata removed. Do not use
 GitHub's automatically generated Source code attachments, which omit submodules.
 
-Use `python3 build.py --parallel 4` to configure, compile and run Release UT;
+Use `python3 build.py --parallel 4` to configure, compile and run MinSizeRel UT;
 use `python build.py --parallel 4` in an x64 MSVC developer terminal on Windows.
 Python 3.11+ is required. CI uses the same [build entry point](packaging/RELEASE.md#unified-python-build-entry-point).

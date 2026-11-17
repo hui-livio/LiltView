@@ -40,7 +40,7 @@ printf 'CHECK_COMPLETED\n'
     def test_default_install_neither_builds_nor_runs_tests(self):
         result = self.run_recipe(ctest_status=23)
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("-DCMAKE_BUILD_TYPE=Release", result.stdout)
+        self.assertIn("-DCMAKE_BUILD_TYPE=MinSizeRel", result.stdout)
         self.assertIn("-DBUILD_TESTING=OFF", result.stdout)
         self.assertIn("-DLILTVIEW_BUILD_UNIT_TESTS=OFF", result.stdout)
         self.assertNotIn("CTEST ", result.stdout)
@@ -53,7 +53,7 @@ printf 'CHECK_COMPLETED\n'
         self.assertIn("-DBUILD_TESTING=ON", result.stdout)
         self.assertIn("-DLILTVIEW_BUILD_UNIT_TESTS=ON", result.stdout)
         self.assertIn("CTEST --test-dir", result.stdout)
-        self.assertIn("--build-config Release", result.stdout)
+        self.assertIn("--build-config MinSizeRel", result.stdout)
         self.assertIn("--no-tests=error", result.stdout)
 
     def test_explicit_opt_out_turns_tests_off(self):

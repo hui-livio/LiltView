@@ -1,4 +1,4 @@
-# Only enabled explicitly for Release distributions, never ordinary dev builds.
+# Only enabled explicitly for MinSizeRel distributions, never ordinary dev builds.
 set(CPACK_PACKAGE_NAME "liltview")
 set(CPACK_PACKAGE_VENDOR "LiltView contributors")
 set(CPACK_PACKAGE_CONTACT "hui-livio <yuanfeng1897@gmail.com>")

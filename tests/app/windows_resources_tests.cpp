@@ -89,7 +89,7 @@ TEST_CASE("Windows executable version matches the CMake project version", "[wind
     }
 }
 
-TEST_CASE("Windows Release uses the GUI subsystem while Debug keeps its console", "[windows][resources]")
+TEST_CASE("Windows optimized builds use the GUI subsystem while Debug keeps its console", "[windows][resources]")
 {
     std::ifstream executable(application_path(), std::ios::binary);
     REQUIRE(executable);

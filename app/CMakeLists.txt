@@ -79,8 +79,8 @@ if(WIN32)
     set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/liltview.rc" APPEND PROPERTY
         OBJECT_DEPENDS "${LILTVIEW_WINDOWS_ICON};${LILTVIEW_WINDOWS_FONT}")
     target_compile_definitions(liltview PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:RC>>:_DEBUG>")
-    # Keep Debug's console, but launch Release as a GUI application (also multi-config).
-    set_property(TARGET liltview PROPERTY WIN32_EXECUTABLE "$<CONFIG:Release>")
+    # Keep Debug's console, but launch optimized builds as GUI applications (also multi-config).
+    set_property(TARGET liltview PROPERTY WIN32_EXECUTABLE "$<CONFIG:Release,MinSizeRel>")
 endif()
 target_include_directories(liltview PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(liltview PRIVATE liltview_cli LiltView::ui LiltView::logging liltview_sdl_platform liltview_fonts spdlog::spdlog)
@@ -120,6 +120,11 @@ else()
     target_sources(liltview PRIVATE platform/global_menu_stub.cpp)
 endif()
 liltview_configure_cxx_target(liltview)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Strip the executable at link time, including symbols from static vendors.
+    # Keep Debug and RelWithDebInfo usable for debugging.
+    target_link_options(liltview PRIVATE "$<$<CONFIG:Release,MinSizeRel>:LINKER:--strip-all>")
+endif()
 
 # Build-tree resources stay beside the executable. Installed architecture-neutral
 # resources live in share/liltview; both paths resolve relative to the executable.

@@ -26,7 +26,7 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
-# Every binary job builds the SAME complete, Git-free source snapshot, in Release,
+# Every binary job builds the SAME complete, Git-free source snapshot, in MinSizeRel,
 # with Catch2 enabled. A failed UT prevents packaging / draft release creation.
 jobs:
   source:
@@ -97,11 +97,11 @@ jobs:
             }
           }
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Build Release application and Release UT
+      - name: Build MinSizeRel application and MinSizeRel UT
         working-directory: src
         run: |
           python build.py build --parallel 4
-      - name: Run Release UT
+      - name: Run MinSizeRel UT
         working-directory: src
         # Native Windows chrome tests share the desktop; do not overlap them.
         run: python build.py test --test-parallel 1 --junit "$env:GITHUB_WORKSPACE/test-results.xml"
@@ -161,19 +161,19 @@ jobs:
           brew install cmake ninja nasm llvm@20
           mkdir -p src dist
           tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
-      - name: Build Release application and Release UT
+      - name: Build MinSizeRel application and MinSizeRel UT
         working-directory: src
         run: |
           python3 build.py build --parallel 3
-      - name: Run Release UT
+      - name: Run MinSizeRel UT
         working-directory: src
         run: python3 build.py test --test-parallel 2 --junit "$GITHUB_WORKSPACE/test-results.xml"
       - name: Stage standalone bundle, strip and ad-hoc sign
         run: |
-          cmake --install src/build/release-ci --prefix "$PWD/stage" --strip
+          cmake --install src/build/release-ci --config MinSizeRel --prefix "$PWD/stage" --strip
           app="$PWD/stage/LiltView.app"
           binary="$app/Contents/MacOS/LiltView"
-          strip -S "$binary"
+          strip -S -x "$binary"
           otool -L "$binary"
           # A release must not depend on Homebrew paths or a builder's local dylibs.
           otool -L "$binary" | tail -n +2 | awk '{print $1}' | while read -r lib; do
@@ -244,7 +244,7 @@ jobs:
         with:
           name: release-source
           path: incoming
-      - name: Build Release application and Release UT
+      - name: Build MinSizeRel application and MinSizeRel UT
         run: |
           mkdir -p src dist
           tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
@@ -252,16 +252,16 @@ jobs:
           python3 build.py build --parallel 3 -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
             -DSDL_KMSDRM=OFF -DSDL_LIBUDEV=OFF -DSDL_IBUS=OFF \
             -DCPACK_PACKAGE_FILE_NAME="liltview-$VERSION-linux-${{ matrix.platform }}-x86_64"
-      - name: Run Release UT
+      - name: Run MinSizeRel UT
         working-directory: src
         run: python3 build.py test --test-parallel 2 --junit "$GITHUB_WORKSPACE/test-results.xml"
       - name: Build native stripped package
         run: |
           cd src/build/release-ci
-          cpack -G '${{ matrix.generator }}' -C Release -B "$GITHUB_WORKSPACE/dist"
-          cmake --install . --prefix "$GITHUB_WORKSPACE/stage" --strip
+          cpack -G '${{ matrix.generator }}' -C MinSizeRel -B "$GITHUB_WORKSPACE/dist"
+          cmake --install . --config MinSizeRel --prefix "$GITHUB_WORKSPACE/stage" --strip
           binary="$GITHUB_WORKSPACE/stage/bin/liltview"
-          if readelf -S "$binary" | grep -E '\.debug_|\.zdebug_'; then echo 'Debug sections found'; exit 1; fi
+          if readelf -S "$binary" | grep -E '\.debug_|\.zdebug_|\.symtab|\.strtab'; then echo 'Debug or ordinary symbol sections found'; exit 1; fi
           "$binary" --version
           "$binary" --licenses > "$GITHUB_WORKSPACE/third-party-notices.txt"
           test -s "$GITHUB_WORKSPACE/third-party-notices.txt"
@@ -307,20 +307,20 @@ jobs:
         with:
           name: release-source
           path: incoming
-      - name: Build and test Release package as non-root user
+      - name: Build and test MinSizeRel package as non-root user
         run: |
           mkdir -p src dist
           tar -xf "incoming/liltview-$VERSION-source.tar.gz" -C src --strip-components=1
           chown -R builder:builder src
-          # The Python entry point enables Release UT and calls the SAME native PKGBUILD.
+          # The Python entry point enables MinSizeRel UT and calls the SAME native PKGBUILD.
           runuser -u builder -- python3 "$PWD/src/build.py" arch --parallel 3
           cp src/packaging/arch/*.pkg.tar.zst dist/
           test -n "$(find dist -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)"
           pacman -Qip dist/*.pkg.tar.zst
-          # Extract the exact pacman artifact and confirm it has no debug sections.
+          # Extract the exact pacman artifact and confirm it has no debug or ordinary symbol sections.
           mkdir stage
           tar -xf dist/*.pkg.tar.zst -C stage
-          if readelf -S stage/usr/bin/liltview | grep -E '\.debug_|\.zdebug_'; then exit 1; fi
+          if readelf -S stage/usr/bin/liltview | grep -E '\.debug_|\.zdebug_|\.symtab|\.strtab'; then exit 1; fi
           stage/usr/bin/liltview --version
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()

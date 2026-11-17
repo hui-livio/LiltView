@@ -34,8 +34,8 @@ option(LILTVIEW_WARNINGS_AS_ERRORS "Treat warnings in LiltView targets as errors
 
 option(LILTVIEW_RELEASE_PACKAGING "Build stripped, self-contained release artifacts" OFF)
 if(LILTVIEW_RELEASE_PACKAGING)
-    if(NOT CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_CONFIGURATION_TYPES)
-        message(FATAL_ERROR "Release packaging requires a single-config generator with CMAKE_BUILD_TYPE=Release")
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "MinSizeRel" OR CMAKE_CONFIGURATION_TYPES)
+        message(FATAL_ERROR "Release packaging requires a single-config generator with CMAKE_BUILD_TYPE=MinSizeRel")
     endif()
     # Set before adding vendors so the EXE and every static library agree.
     if(MSVC)

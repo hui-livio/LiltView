@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build LiltView with Python 3.11+ and the existing Release CMake presets.
+"""Build LiltView with Python 3.11+ and the MinSizeRel release CMake presets.
 
-Default: configure, build and run Release UT. Requires CMake, Ninja and a C23
+Default: configure, build and run MinSizeRel UT. Requires CMake, Ninja and a C23
 compiler (Windows: an x64 MSVC developer environment). No Python packages needed.
 SPDX-License-Identifier: Apache-2.0
 """
@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
+CONFIGURATION = "MinSizeRel"
 
 
 def positive_integer(text):
@@ -59,7 +60,7 @@ def main(argv=None):
     parser.add_argument("action", choices=("all", "configure", "build", "test", "arch"),
                         nargs="?", default="all",
                         help="build configures and compiles; all also runs UT; arch uses native makepkg with UT")
-    parser.add_argument("--preset", choices=("release-ci", "app-release"), default="release-ci")
+    parser.add_argument("--preset", choices=("release-ci", "app-release", "app-minirel"), default="release-ci")
     parser.add_argument("--build-dir", type=Path, help="override the preset build directory")
     parser.add_argument("--parallel", type=positive_integer,
                         default=os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or str(min(os.cpu_count() or 1, 8)))
@@ -93,9 +94,9 @@ def main(argv=None):
         command.extend("-D" + value for value in args.definitions)
         run(command)
     if args.action in ("all", "build"):
-        run(["cmake", "--build", str(build_dir), "--config", "Release", "--parallel", str(args.parallel)])
+        run(["cmake", "--build", str(build_dir), "--config", CONFIGURATION, "--parallel", str(args.parallel)])
     if args.action in ("all", "test"):
-        command = ["ctest", "--test-dir", str(build_dir), "--build-config", "Release",
+        command = ["ctest", "--test-dir", str(build_dir), "--build-config", CONFIGURATION,
                    "--parallel", str(args.test_parallel), "--output-on-failure", "--no-tests=error"]
         if args.junit:
             destination = args.junit.resolve()

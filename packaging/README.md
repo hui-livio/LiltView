@@ -1,6 +1,6 @@
 # 打包
 
-1.0.0 多平台发布流程、产物矩阵和 Release UT 说明见 [正式发布](RELEASE.md)。GitHub Actions 会编译 Windows、macOS（Apple Silicon / Intel）、Ubuntu、Fedora 和 Arch Linux。全部使用 Release，UT 通过后才打包；源码归档包含完整第三方源码并去除 Git 元数据。
+1.0.0 多平台发布流程、产物矩阵和 MinSizeRel UT 说明见 [正式发布](RELEASE.md)。GitHub Actions 会编译 Windows、macOS（Apple Silicon / Intel）、Ubuntu、Fedora 和 Arch Linux。全部使用 MinSizeRel，UT 通过后才打包；源码归档包含完整第三方源码并去除 Git 元数据。
 
 Windows 正式发布为单个 EXE：字体、许可证内嵌，静态链接 MSVC CRT。macOS 发布含独立 `.app` 的 DMG / ZIP。下文的 CMake 安装布局仍用于本地开发和部署检查。
 
@@ -23,6 +23,6 @@ Linux 同时安装 `io.github.hui_livio.LiltView.desktop` 与同名 hicolor SVG 
 
 全局菜单默认依赖系统 GIO、Wayland、X11；安装附 MIT 许可的 KDE appmenu 协议归属文件。系统顶栏需要桌面已提供全局菜单组件，不存在时程序回退窗口内菜单。
 
-应用图标源使用 `assets/icons/liltview-color.svg` 及对应 PNG；Windows 已通过 `app/resources/liltview.rc.in` 接入多尺寸 ICO 与文件 / 产品版本资源，Release 使用 GUI 子系统。Windows 正式发布通过独立目录冒烟检查，仍需在目标桌面验收。鸿蒙字体保持原样并随应用分发，不单独作为产品分发。
+应用图标源使用 `assets/icons/liltview-color.svg` 及对应 PNG；Windows 已通过 `app/resources/liltview.rc.in` 接入多尺寸 ICO 与文件 / 产品版本资源，MinSizeRel 使用 GUI 子系统。Windows 正式发布通过独立目录冒烟检查，仍需在目标桌面验收。鸿蒙字体保持原样并随应用分发，不单独作为产品分发。
 
 Arch 本地源码包、makepkg / pacman / paru 命令与检查步骤统一见 [Arch 部署](arch/README.md)。源码包包含 submodule 源码，系统依赖仍由包管理器解析；尚未发布 AUR，不使用 `paru -S liltview` 作为当前入口。
