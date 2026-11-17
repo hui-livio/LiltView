@@ -188,7 +188,8 @@ struct DockGui
     {
         ImGui::DestroyContext();
     }
-    MenuAction frame(bool ready = true, bool held = false, bool blocked = false, bool modal = false, bool camera_busy = false)
+    MenuAction frame(bool ready = true, bool held = false, bool blocked = false, bool modal = false, bool camera_busy = false,
+                     bool accept_input = true)
     {
         ImGui::NewFrame();
         ImGui::SetNextWindowPos({0, 0});
@@ -198,7 +199,7 @@ struct DockGui
             ImGui::OpenPopup("blocker");
         toolbar.prepare(layout, ready, held, blocked, camera_busy);
         const auto cursor = ImGui::GetCursorScreenPos();
-        const auto action = toolbar.draw(layout, menu, Language::english, ready, held, blocked, camera_busy);
+        const auto action = toolbar.draw(layout, menu, Language::english, ready, held, blocked, camera_busy, accept_input);
         CHECK(ImGui::GetCursorScreenPos().x == cursor.x);
         CHECK(ImGui::GetCursorScreenPos().y == cursor.y);
         ImGui::Dummy({0, 0});
@@ -258,6 +259,35 @@ TEST_CASE("real dock widgets emit shared menu actions only when visible and enab
     gui.frame(false);
     CHECK_FALSE(gui.toolbar.hit(gui.layout, gui.center(3)));
     CHECK(gui.click(3) == MenuAction::none);
+}
+
+TEST_CASE("inactive Dock ignores new and interrupted clicks without changing action availability", "[dock][imgui][regression]")
+{
+    for (const bool press_before_focus_loss : {false, true})
+        for (const std::size_t index : {std::size_t{0}, std::size_t{3}, std::size_t{7}, std::size_t{9}})
+        {
+            CAPTURE(press_before_focus_loss, index);
+            DockGui gui;
+            gui.frame();
+            gui.reveal();
+            auto &io          = ImGui::GetIO();
+            const auto center = gui.center(index);
+            io.AddMousePosEvent(center.x, center.y);
+            gui.frame();
+            const auto inactive_frame = [&]
+            {
+                return gui.frame(true, false, false, false, false, false);
+            };
+            io.AddMouseButtonEvent(0, true);
+            CHECK((press_before_focus_loss ? gui.frame() : inactive_frame()) == MenuAction::none);
+            CHECK(inactive_frame() == MenuAction::none);
+            io.AddMouseButtonEvent(0, false);
+            CHECK(inactive_frame() == MenuAction::none);
+            CHECK(ImGui::GetCurrentContext()->OpenPopupStack.empty()); // Inactive More cannot open its menu.
+            CHECK_FALSE(gui.toolbar.has_keyboard_focus());
+            CHECK(gui.frame() == MenuAction::none);         // Re-enabling input cannot replay the release.
+            CHECK(gui.click(3) == MenuAction::actual_size); // Availability was not changed by focus gating.
+        }
 }
 
 TEST_CASE("more popup reuses the entire View menu and pins dock until dismissed", "[dock][imgui]")

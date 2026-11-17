@@ -4,6 +4,7 @@
 
 #include "platform/fonts.hpp"
 #include "platform/global_menu.hpp"
+#include "platform/image_information_window.hpp"
 #include "platform/live_resize.hpp"
 #include "platform/sdl_render_host.hpp"
 #include "platform/window_shape.hpp"
@@ -79,6 +80,7 @@ public:
         if (window_ != nullptr)
             SDL_SetWindowHitTest(window_, nullptr, nullptr);
         // 逆初始化顺序释放；标志位也覆盖启动途中抛异常的情况。
+        information_window_.reset();
         viewer_.reset();
         if (renderer_)
         {
@@ -275,6 +277,7 @@ private:
             chinese_font_ = font.chinese;
             spdlog::info("UI font: {} (Chinese={})", font.path, chinese_font_);
         }
+        ui_font_ = loaded ? font : SystemFont{};
         if (io.Fonts->Fonts.empty())
             io.Fonts->AddFontDefault();
         if (!chinese_font_)
@@ -307,20 +310,32 @@ private:
                 // Windows' modal move/resize loop does not return to this outer
                 // loop until release. Redraw on SDL's live expose notification,
                 // not by pumping events recursively or changing native hit tests.
-                LiveResizeRedraw live_resize(SDL_GetWindowID(window_), [&]
-                {
-                    if (quit_ || (SDL_GetWindowFlags(window_) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0)
-                        return;
-                    // SDL holds its event-watch lock here. Do not drain or
-                    // retire image work: retirement may join a worker waiting
-                    // to post an SDL wakeup. Redraw the current scene only;
-                    // normal viewer pumping resumes after the native loop.
-                    update_visual_style();
-                    update_window_shape(); // Match the native region to this frame's current dimensions.
-                    render_frame(options, shell, global_menu.active(), true);
-                });
+                LiveResizeRedraw live_resize(
+                    SDL_GetWindowID(window_),
+                    [&]
+                    {
+                        if (quit_ || (SDL_GetWindowFlags(window_) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0)
+                            return;
+                        // SDL holds its event-watch lock here. Do not drain or
+                        // retire image work: retirement may join a worker waiting
+                        // to post an SDL wakeup. Redraw the current scene only;
+                        // normal viewer pumping resumes after the native loop.
+                        update_visual_style();
+                        update_window_shape(); // Match the native region to this frame's current dimensions.
+                        render_frame(options, shell, global_menu.active(), true);
+                    });
+                std::unique_ptr<LiveResizeRedraw> information_resize;
+                if (information_window_)
+                    information_resize = std::make_unique<LiveResizeRedraw>(SDL_GetWindowID(information_window_->window()),
+                                                                            [&]
+                                                                            {
+                                                                                if (!quit_)
+                                                                                    draw_information_window(shell);
+                                                                            });
                 process_events(options.smoke_test, shell, mode_changed);
                 live_resize.rethrow_if_failed();
+                if (information_resize)
+                    information_resize->rethrow_if_failed();
             }
             // 系统菜单动作由刚收到的 SDL 唤醒事件触发，不延后到下一帧。
             if (!quit_)
@@ -333,14 +348,52 @@ private:
             viewer_->pump();
 
             if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0)
+            {
+                draw_information_window(shell);
                 continue;
+            }
 
             update_visual_style();
             update_window_shape();
             update_native_window_theme();
             synchronize_menu(global_menu, shell);
             render_frame(options, shell, global_menu.active());
+            if (!quit_)
+                draw_information_window(shell);
         }
+    }
+
+    void synchronize_information_window(Shell &shell)
+    {
+        if (!shell.image_info_open())
+        {
+            if (information_window_ && information_window_->visible())
+                information_window_->hide();
+            return;
+        }
+        try
+        {
+            if (!information_window_)
+                information_window_ = std::make_unique<ImageInformationWindow>(window_, ui_font_);
+            information_window_->show();
+        } catch (const std::exception &error)
+        {
+            if (information_window_)
+                information_window_->hide();
+            shell.dismiss_image_info();
+            spdlog::error("Cannot open image information window: {}", error.what());
+        }
+    }
+
+    void draw_information_window(Shell &shell)
+    {
+        if (!shell.image_info_open() || !information_window_)
+            return;
+        const auto language = resolve_language(settings_.language, locale_, chinese_font_);
+        const bool dark     = resolve_theme(settings_.theme, system_theme_) == Theme::dark;
+        information_window_->draw(language, viewer_->failed() ? std::nullopt : viewer_->image_details(), dark);
+        if (!information_window_->visible())
+            shell.dismiss_image_info();
     }
 
     void request_quit(const CloseTiming &timing = {})
@@ -349,6 +402,8 @@ private:
             return;
         const auto started = SDL_GetTicksNS();
         quit_              = true;
+        if (information_window_)
+            information_window_->hide();
         // 先让窗口从桌面消失，解码、总线及 GL 仍按原有安全顺序回收。
         if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) == 0)
         {
@@ -404,9 +459,10 @@ private:
             shell.show_about();
             break;
         case MenuAction::image_info:
-            if (viewer_->has_visible_image() || shell.image_info_open())
+            if (viewer_->has_image() || viewer_->has_visible_image() || shell.image_info_open())
             {
                 shell.toggle_image_info();
+                synchronize_information_window(shell);
                 spdlog::debug("Image information panel: open={}", shell.image_info_open());
             }
             break;
@@ -500,7 +556,17 @@ private:
 
     void handle_event(const SDL_Event &event, Shell &shell)
     {
-        const auto handled_ns  = SDL_GetTicksNS();
+        const auto handled_ns = SDL_GetTicksNS();
+        if (information_window_ && information_window_->process_event(event))
+        {
+            last_activity_ = SDL_GetTicks();
+            if (!information_window_->visible())
+                shell.dismiss_image_info();
+            return;
+        }
+        const auto *event_window = SDL_GetWindowFromEvent(&event);
+        if (event_window && event_window != window_)
+            return;
         const bool trace_input = spdlog::should_log(spdlog::level::debug);
         auto &context          = *ImGui::GetCurrentContext();
         if (trace_input)
@@ -527,7 +593,7 @@ private:
 
     void handle_shortcut(const SDL_KeyboardEvent &key, Shell &shell, const CloseTiming &timing)
     {
-        // 文本输入和弹窗优先处理按键；图片尚未加载完成时不执行应用快捷键。
+        // 文本输入和弹窗优先处理按键；加载中仅允许切换独立的信息窗口。
         const ShortcutContext context{dialog_ || ImGui::GetIO().WantTextInput ||
                                           ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
                                       is_fullscreen(), shell.image_info_open(), !viewer_->settled(), shell.dock_keyboard_focus()};
@@ -601,6 +667,8 @@ private:
 
     void update_window_settings(const SDL_Event &event)
     {
+        if (SDL_GetWindowFromEvent(&event) != window_)
+            return;
         const auto flags = SDL_GetWindowFlags(window_);
         if (event.type == SDL_EVENT_WINDOW_RESIZED && !is_fullscreen() && (flags & SDL_WINDOW_MAXIMIZED) == 0)
         {
@@ -770,7 +838,7 @@ private:
     void render_frame(const LaunchOptions &options, Shell &shell, bool system_menu, bool live_resize = false)
     {
         renderer_->begin_frame();
-        ImGui_ImplSDL3_NewFrame();
+        new_imgui_platform_frame(window_);
         ImGui::NewFrame();
         const auto language = resolve_language(settings_.language, locale_, chinese_font_);
         const auto action =
@@ -984,6 +1052,8 @@ private:
     SDL_Window *window_ = nullptr;
     std::unique_ptr<render::Renderer> renderer_;
     std::unique_ptr<Viewer> viewer_;
+    SystemFont ui_font_;
+    std::unique_ptr<ImageInformationWindow> information_window_;
     std::shared_ptr<DialogResult> dialog_;
     render::Image icon_;
     Uint64 smoke_started_ = 0;

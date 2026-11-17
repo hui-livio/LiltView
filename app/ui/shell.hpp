@@ -57,9 +57,8 @@ private:
     void draw_about_licenses(Language language);
     void draw_about_author(Language language);
 
-    bool open_about_           = false;
-    bool image_info_open_      = false;
-    bool dock_image_info_open_ = false;
+    bool open_about_      = false;
+    bool image_info_open_ = false;
     NavigationButtonGesture navigation_gesture_;
     DockToolbar dock_;
     CanvasGesture canvas_gesture_;

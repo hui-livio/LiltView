@@ -92,11 +92,13 @@ void exercise(render::Renderer &renderer, const std::filesystem::path &captures)
                 apply_style(dark, 1);
                 s.chrome.dark       = dark;
                 s.chrome.fullscreen = fullscreen;
-                if (s.shell.image_info_open() != information)
-                    s.shell.toggle_image_info();
+                s.shell.dismiss_image_info();
                 auto &io = ImGui::GetIO();
                 io.AddMousePosEvent(100, 100);
                 s.frames(15);
+                if (information)
+                    s.shell.toggle_image_info();
+                s.frames(2);
                 const auto before      = renderer.readback();
                 const auto view        = s.viewer.presented_view();
                 const std::string stem = std::string(dark ? "dark" : "light") + (fullscreen ? "-fullscreen" : "-window") +
@@ -126,6 +128,24 @@ void exercise(render::Renderer &renderer, const std::filesystem::path &captures)
                     save(captures / (stem + "-shown.ppm"), shown);
                 io.AddMousePosEvent(100, 100);
                 s.frames(15);
+                if (information)
+                {
+                    check(renderer.readback().rgb == shown.rgb, "Info did not retain the shown Dock");
+                    for (unsigned cycle = 0; cycle < 3; ++cycle)
+                    {
+                        io.AddFocusEvent(false);
+                        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+                        s.frame(); // Check the transition frame, not only the settled appearance.
+                        check(renderer.readback().rgb == shown.rgb, "Info focus transition changed Dock pixels");
+                        s.frames(15);
+                        check(renderer.readback().rgb == shown.rgb, "Inactive Info Dock appearance changed");
+                        io.AddFocusEvent(true);
+                        s.frame();
+                        check(renderer.readback().rgb == shown.rgb, "Returning focus changed Dock pixels");
+                    }
+                    s.shell.dismiss_image_info();
+                    s.frames(15);
+                }
                 check(renderer.readback().rgb == before.rgb, "Hidden dock left pixels/layout behind");
                 std::printf("PASS %s: overlay-only %u changed pixels; hidden framebuffer identical\n", stem.c_str(), changed);
             }

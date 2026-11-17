@@ -89,9 +89,12 @@ class DockToolbar
 {
 public:
     // Call before Viewer::draw so both wheel and drag input respect the visible overlay.
-    bool prepare(const DockLayout &, bool ready, bool image_held, bool input_blocked, bool retain_visible = false);
+    // keep_visible pins an already shown Dock, but does not reveal hidden controls.
+    bool prepare(const DockLayout &, bool ready, bool image_held, bool input_blocked, bool retain_visible = false,
+                 bool keep_visible = false);
+    // Losing focus suppresses input without changing the enabled/selected appearance.
     MenuAction draw(const DockLayout &, const MenuItem &, Language, bool ready, bool image_held, bool input_blocked,
-                    bool retain_visible = false);
+                    bool retain_visible = false, bool accept_input = true);
     bool hit(const DockLayout &, ImVec2) const noexcept;
     bool needs_frames() const noexcept
     {

@@ -86,7 +86,7 @@ MenuItem view_menu(Language language, bool fullscreen, bool has_image, bool can_
     pan_separator.separator = true;
     auto information        = toggle(language, 57, Text::image_info, MenuAction::image_info, image_info_open);
     information.shortcut    = {"i"};
-    information.enabled     = has_image || has_image_info;
+    information.enabled     = has_image || has_image_info || image_info_open;
     view.children           = {previous, next,        navigation_separator, fit,           actual_size,    zoom_in,
                                zoom_out, rotate_left, rotate_right,         pan_separator, pan_left,       pan_right,
                                pan_up,   pan_down,    zoom_separator,       information,   fullscreen_item};
@@ -178,7 +178,13 @@ MenuAction menu_action_for_input(const MenuItem &menu, const std::vector<std::st
     const bool dock_key = context.dock_keyboard_focus && shortcut.size() == 1 &&
         (shortcut.back() == "Left" || shortcut.back() == "Right" || shortcut.back() == "Up" || shortcut.back() == "Down" ||
          shortcut.back() == "Tab" || shortcut.back() == "Return" || shortcut.back() == "Space" || shortcut.back() == "Escape");
-    if (context.blocked || context.loading || dock_key)
+    if (context.blocked)
+        return MenuAction::none;
+    // A non-modal information window does not affect image work. Allow its
+    // toggle while loading too, including closing it after the image is cleared.
+    if (shortcut == std::vector<std::string>{"i"})
+        return menu_action_for_shortcut(menu, shortcut, repeat);
+    if (context.loading || dock_key)
         return MenuAction::none;
     if (shortcut == std::vector<std::string>{"Escape"})
     {

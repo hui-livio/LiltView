@@ -5,8 +5,8 @@
 // 4. Unknown output color is explicit; RGBA8 straight-alpha is the actual pixel output, not source precision.
 // 5. GIF unknown/known frame count, duration and total plays are separate; zero total plays means infinite.
 // 6. Long UTF-8 paths containing percent signs remain literal; formatting performs no filesystem I/O.
-// 7. A bounded right-side panel leaves the image canvas and its navigation buttons separate from the panel.
-// 8. Real ImGui frames cover empty/details content, translated stable close IDs and nonmodal behavior.
+// 7. A dedicated desktop window leaves the main image canvas, FIT and navigation geometry unchanged.
+// 8. Real ImGui frames cover empty/details content, header-free translated content and nonmodal behavior.
 // 9. Escape closes information before fullscreen; text inputs and other popups retain key priority.
 // Viewer tests additionally cover old A -> pending B -> B row bands -> completion, failed B -> A,
 // rapid A/B/C replacement, no-source queries, GIF completion metadata, and presented-camera scale.
@@ -57,44 +57,41 @@ struct Context
         auto &io       = ImGui::GetIO();
         io.DisplaySize = {800, 500};
         io.DeltaTime   = 1.0f / 60;
-        io.IniFilename = io.LogFilename = nullptr;
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.IniFilename = io.LogFilename  = nullptr;
+        io.ConfigFlags                  |= ImGuiConfigFlags_NavEnableKeyboard;
         io.Fonts->AddFontDefault();
         unsigned char *pixels = nullptr;
-        int width = 0, height = 0;
-        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        int atlas_width = 0, atlas_height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &atlas_width, &atlas_height);
         io.Fonts->SetTexID(1);
     }
     ~Context()
     {
         ImGui::DestroyContext();
     }
-    bool frame(const std::optional<ImageDetails> &details, Language language)
+    void frame(const std::optional<ImageDetails> &details, Language language)
     {
         ImGui::NewFrame();
         ImGui::SetNextWindowPos({0, 0});
         ImGui::SetNextWindowSize({800, 500});
         ImGui::Begin("information_test", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
-        const bool closed = draw_image_information(language, details, {300, 20}, {640, 460});
+        ImGui::LogToBuffer();
+        draw_image_information(language, details, {300, 20}, {300 + width, 460});
+        text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
         panel = nullptr;
         for (auto *window : ImGui::GetCurrentContext()->Windows)
             if (window->Active && std::string_view(window->Name).find("/image_information_") != std::string_view::npos)
                 panel = window;
         REQUIRE(panel);
-        close_id = panel->GetID("###close_image_information");
-        const float size = std::min(28.0f * ImGui::GetStyle().FontScaleDpi,
-                                    std::max(1.0f, panel->WorkRect.GetWidth()));
-        close_rect = {{panel->WorkRect.Max.x - size, panel->DC.CursorStartPos.y},
-                      {panel->WorkRect.Max.x, panel->DC.CursorStartPos.y + size}};
         CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
         ImGui::End();
         ImGui::Render();
         REQUIRE(ImGui::GetDrawData()->TotalVtxCount > 0);
-        return closed;
     }
     ImGuiWindow *panel = nullptr;
-    ImGuiID close_id = 0;
-    ImRect close_rect;
+    std::string text;
+    float width = 340;
 };
 } // namespace
 
@@ -177,119 +174,44 @@ TEST_CASE("information animation known flags distinguish unknown zero and finite
     CHECK(field(Language::english, details, Text::info_animation_plays) == "3");
 }
 
-TEST_CASE("information layout reserves an in-bounds sibling and preserves a positive canvas at every scale",
-          "[image_details][layout]")
+TEST_CASE("information content renders long literal paths without a duplicate title bar", "[image_details][ui]")
 {
-    for (const ImVec2 size : {ImVec2{1000, 700}, {640, 480}, {80, 40}, {1, 1}})
-        for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
-        {
-            const ImVec2 min{20, 30}, max{min.x + size.x, min.y + size.y};
-            const auto layout = image_information_layout(min, max, scale, true);
-            REQUIRE(layout.visible);
-            CHECK(layout.canvas_max.x > min.x);
-            CHECK(layout.canvas_max.x == layout.panel_min.x);
-            CHECK(layout.panel_min.x < layout.panel_max.x);
-            CHECK(layout.panel_min.y == min.y);
-            CHECK(layout.panel_max.x == max.x);
-            CHECK(layout.panel_max.y == max.y);
-            CHECK(layout.panel_max.x - layout.panel_min.x <= size.x * 0.45f + 0.001f);
-        }
-    CHECK_FALSE(image_information_layout({0, 0}, {800, 500}, 1, false).visible);
-    CHECK_FALSE(image_information_layout({0, 0}, {0, 500}, 1, true).visible);
-    CHECK_FALSE(image_information_layout({0, 0}, {800, 500}, 0, true).visible);
-}
-
-TEST_CASE("information panel renders literal long paths and closes through a stable translated button", "[image_details][ui]")
-{
-    Context context;
-    CHECK_FALSE(context.frame(std::nullopt, Language::english));
     auto details = example();
     details.path = std::filesystem::path(std::u8string(u8"/a/") + std::u8string(500, u8'x') + u8"-中文-%s-%d-100%.png");
-    CHECK_FALSE(context.frame(details, Language::english));
-    CHECK_FALSE(context.frame(details, Language::english)); // Let the new content reserve its scrollbar.
-    auto &io = ImGui::GetIO();
-    const auto center = context.close_rect.GetCenter();
-    io.AddMousePosEvent(center.x, center.y);
-    io.AddMouseButtonEvent(0, true);
-    CHECK_FALSE(context.frame(details, Language::english));
-    io.AddMouseButtonEvent(0, false);
-    CHECK(context.frame(details, Language::chinese));
-    CHECK_FALSE(context.frame(details, Language::chinese));
+    for (const auto language : {Language::english, Language::chinese})
+    {
+        Context context;
+        context.frame(details, language);
+        context.frame(details, language); // Reserve the scrollbar after wrapping the long path.
+        CHECK(field(language, details, Text::info_path) == platform::path_bytes(details.path));
+        CHECK(context.text.find("100%.png") != std::string::npos);
+        CHECK(context.text.find(translate(language, Text::image_info)) == std::string::npos);
+        CHECK(context.text.find(translate(language, Text::info_path)) < context.text.find("/a/"));
+        CHECK(context.panel->ScrollMax.y > 0);
+    }
 }
 
-TEST_CASE("information close icon stays right aligned and mouse activation survives language changes", "[image_details][ui][theme]")
+TEST_CASE("information content has no custom header in either theme at narrow widths and high DPI", "[image_details][ui][theme]")
 {
     for (const bool dark : {false, true})
         for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
-        {
-            CAPTURE(dark, scale);
-            Context context;
-            apply_style(dark, scale);
-            // Warm up the child window and reserve its scrollbar width.
-            CHECK_FALSE(context.frame(example(), Language::english));
-            CHECK_FALSE(context.frame(example(), Language::english));
-            const auto rect = context.close_rect;
-            CHECK(rect.GetWidth() == 28 * scale);
-            CHECK(rect.GetHeight() == 28 * scale);
-            CHECK(rect.Min.x > context.panel->Pos.x + context.panel->Size.x / 2);
-            CHECK(rect.Max.x <= context.panel->Pos.x + context.panel->Size.x);
-            CHECK(rect.Min.y >= context.panel->Pos.y);
-            const auto id = context.close_id;
-            auto &io = ImGui::GetIO();
-            const auto point = rect.GetCenter();
-            io.AddMousePosEvent(point.x, point.y);
-            io.AddMouseButtonEvent(0, true);
-            CHECK_FALSE(context.frame(example(), Language::english));
-            CHECK(ImGui::GetCurrentContext()->ActiveId == id);
-            io.AddMouseButtonEvent(0, false);
-            CHECK(context.frame(example(), Language::chinese));
-            CHECK(context.close_id == id);
-            CHECK_FALSE(context.frame(example(), Language::chinese));
-        }
-}
-
-TEST_CASE("information close icon cancels a dragged-away click and ignores title clicks", "[image_details][ui]")
-{
-    Context context;
-    apply_style(false, 1);
-    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-    auto &io = ImGui::GetIO();
-    const auto center = context.close_rect.GetCenter();
-    io.AddMousePosEvent(center.x, center.y);
-    io.AddMouseButtonEvent(0, true);
-    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-    io.AddMousePosEvent(330, center.y);
-    io.AddMouseButtonEvent(0, false);
-    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-    io.AddMouseButtonEvent(0, true);
-    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-    io.AddMouseButtonEvent(0, false);
-    CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-}
-
-TEST_CASE("information close icon supports keyboard activation without repeated dismissals", "[image_details][ui][shortcut]")
-{
-    for (const auto key : {ImGuiKey_Enter, ImGuiKey_Space})
-    {
-        CAPTURE(key);
-        Context context;
-        apply_style(true, 1);
-        CHECK_FALSE(context.frame(std::nullopt, Language::english));
-        CHECK_FALSE(context.frame(std::nullopt, Language::english));
-        ImGui::FocusWindow(context.panel);
-        auto rect = context.close_rect;
-        rect.Translate({-context.panel->Pos.x, -context.panel->Pos.y});
-        ImGui::SetNavID(context.close_id, ImGuiNavLayer_Main, context.panel->NavRootFocusScopeId, rect);
-        ImGui::GetCurrentContext()->NavCursorVisible = true;
-        ImGui::GetCurrentContext()->NavHighlightItemUnderNav = true;
-        auto &io = ImGui::GetIO();
-        io.AddKeyEvent(key, true);
-        CHECK(context.frame(std::nullopt, Language::english));
-        CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-        io.AddKeyEvent(key, false);
-        CHECK_FALSE(context.frame(std::nullopt, Language::chinese));
-    }
+            for (const auto language : {Language::english, Language::chinese})
+                for (const float width : {260.0f, 340.0f})
+                {
+                    CAPTURE(dark, scale, language, width);
+                    Context context;
+                    context.width = width;
+                    apply_style(dark, scale);
+                    context.frame(std::nullopt, language);
+                    CHECK(context.text.find(translate(language, Text::no_image)) != std::string::npos);
+                    CHECK(context.text.find(translate(language, Text::image_info)) == std::string::npos);
+                    // The empty state starts at the first content line, not below a second title bar.
+                    CHECK(context.panel->ContentSize.y <= ImGui::GetTextLineHeightWithSpacing());
+                    context.frame(example(), language);
+                    CHECK(context.text.find(translate(language, Text::info_path)) != std::string::npos);
+                    CHECK(context.text.find(translate(language, Text::image_info)) == std::string::npos);
+                    CHECK(context.panel->DC.NavLayersActiveMaskNext == 0); // No custom close button.
+                }
 }
 
 TEST_CASE("information shell toggle and dismiss retain a one-action Escape contract", "[image_details][ui]")

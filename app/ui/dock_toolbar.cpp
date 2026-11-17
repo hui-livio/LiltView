@@ -303,7 +303,8 @@ bool DockToolbar::keyboard_focus(const DockLayout &layout) const
     ImGui::PopID();
     return focused;
 }
-bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held, bool blocked, bool retain_visible)
+bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held, bool blocked, bool retain_visible,
+                          bool keep_visible)
 {
     const auto &g = *ImGui::GetCurrentContext();
     if (visibility_.opacity() == 0 || blocked || !g.NavCursorVisible)
@@ -326,12 +327,12 @@ bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held,
     const bool visible_ready = ready || (retain_visible && visibility_.opacity() > 0);
     visibility_.update(ImGui::GetTime(), visible_ready && layout.valid && !blocked && (!any_popup || more),
                        hovered && layout.trigger.contains(mouse), hovered && hit(layout, mouse), image_drag, more,
-                       pressed_ || keyboard_focus(layout));
+                       pressed_ || keyboard_focus(layout) || (keep_visible && visibility_.opacity() > 0));
     return !image_drag && hit(layout, mouse);
 }
 
 MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Language language, bool ready, bool image_held,
-                             bool blocked, bool retain_visible)
+                             bool blocked, bool retain_visible, bool accept_input)
 {
     tooltip_pending_   = false;
     const auto *view   = find_menu_item(menu, 2);
@@ -369,11 +370,17 @@ MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Lan
             ImGui::PushOverrideID(button_id(button));
             // Mouse activation must not seed arrow-key navigation; Tab can still
             // enter the visible Dock and keyboard activation keeps its existing ID.
+            // Focus is an input gate, not a change in action availability. Unlike
+            // BeginDisabled(), this flag does not multiply the drawing alpha.
+            if (!accept_input)
+                ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
             const bool pressed =
                 ImGui::InvisibleButton("", {36 * s, 36 * s}, ImGuiButtonFlags_EnableNav | ImGuiButtonFlags_NoNavFocus);
+            if (!accept_input)
+                ImGui::PopItemFlag();
             ImGui::PopID();
-            const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
-            const bool focused = ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
+            const bool hovered = accept_input && ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
+            const bool focused = accept_input && ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible;
             if (selected || hovered || ImGui::IsItemActive() || focused)
             {
                 const auto bg = ImGui::IsItemActive() ? palette.pressed : palette.hover;
@@ -383,7 +390,7 @@ MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Lan
             }
             const ImVec2 center{button.rect.min.x + 18 * s, button.rect.min.y + 18 * s};
             icon(draw, button.icon, center, s, ImGui::GetColorU32(selected || hovered ? palette.accent : palette.text));
-            if (pressed && enabled)
+            if (pressed && enabled && accept_input)
             {
                 if (button.icon == DockIcon::more)
                     open_more = true;
@@ -394,7 +401,7 @@ MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Lan
             const bool tooltip_hover =
                 ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_NoNavOverride);
             const auto &g = *ImGui::GetCurrentContext();
-            if (tooltip_hover && !image_drag && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            if (accept_input && tooltip_hover && !image_drag && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
             {
                 tooltip_pending_ = g.HoveredIdTimer < 0.450f;
                 if (!tooltip_pending_)
@@ -431,8 +438,12 @@ MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Lan
         if (display)
         {
             ImGui::BeginDisabled(!ready);
+            if (!accept_input)
+                ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
             const auto selected = draw_menu(*view);
-            if (ready && selected != MenuAction::none)
+            if (!accept_input)
+                ImGui::PopItemFlag();
+            if (accept_input && ready && selected != MenuAction::none)
                 action = selected;
             ImGui::EndDisabled();
         }
@@ -440,7 +451,7 @@ MenuAction DockToolbar::draw(const DockLayout &layout, const MenuItem &menu, Lan
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
-    focused_ = ready && keyboard_focus(layout);
+    focused_ = accept_input && ready && keyboard_focus(layout);
     return action;
 }
 } // namespace liltview
