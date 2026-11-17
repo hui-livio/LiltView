@@ -131,3 +131,11 @@ Copyright 2026 LiltView contributors. LiltView is licensed under [Apache License
 JPEG decoding uses libjpeg-turbo. This software is based in part on the work of the Independent JPEG Group.
 
 The bundled HarmonyOS Sans SC font is copyright Huawei Device Co., Ltd. and is distributed under its [original font license](assets/fonts/LICENSE.HarmonyOS-Sans.txt).
+
+## Releases
+
+The 1.0.0 [release workflow](packaging/RELEASE.md) builds Windows x64 (single EXE),
+macOS Apple Silicon / Intel (DMG and ZIP), Ubuntu (DEB), Fedora (RPM) and Arch
+(`.pkg.tar.zst`). All builds and UT run in **Release**; debug symbols and tests are
+excluded from distributed binaries. The separately uploaded source archive
+includes all third-party dependency sources with Git metadata removed.

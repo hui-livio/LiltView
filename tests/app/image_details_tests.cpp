@@ -309,8 +309,21 @@ TEST_CASE("information close button dismisses without scrolling or changing the 
 
 TEST_CASE("information copy action uses the complete literal UTF-8 path", "[image_details][ui][clipboard]")
 {
+    std::string clipboard;
     Context context;
     const auto details = example();
+    // Unit-test the copy action, not the desktop clipboard shared with other
+    // processes. Win32 clipboard contention can return nullptr even after a set.
+    auto &platform_io = ImGui::GetPlatformIO();
+    platform_io.Platform_ClipboardUserData = &clipboard;
+    platform_io.Platform_SetClipboardTextFn = [](ImGuiContext *ctx, const char *text)
+    {
+        *static_cast<std::string *>(ctx->PlatformIO.Platform_ClipboardUserData) = text;
+    };
+    platform_io.Platform_GetClipboardTextFn = [](ImGuiContext *ctx)
+    {
+        return static_cast<std::string *>(ctx->PlatformIO.Platform_ClipboardUserData)->c_str();
+    };
     context.frame(details, Language::english);
     context.frame(details, Language::english);
     ImGui::SetClipboardText("unchanged");

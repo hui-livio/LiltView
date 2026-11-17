@@ -48,13 +48,18 @@ std::uint32_t font_crc32(std::span<const unsigned char> bytes)
 SystemFont bundled_font()
 {
     SystemFont result;
+#if defined(_WIN32)
+    if (FindResourceW(nullptr, MAKEINTRESOURCEW(201), MAKEINTRESOURCEW(10)) != nullptr)
+        return {"embedded:HarmonyOS_Sans_SC_Regular.ttf", 0, true, true};
+#endif
     // Executable-relative resources: independent of the process working directory.
     if (const char *base = SDL_GetBasePath(); base != nullptr)
     {
         const std::string_view base_utf8(base);
         const auto directory =
             std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(base_utf8.data()), base_utf8.size()));
-        const std::array directories{directory / "assets/fonts", directory / LILTVIEW_INSTALLED_FONT_DIR};
+        const std::array directories{directory / "assets/fonts", directory / "share/liltview/fonts",
+                                     directory / LILTVIEW_INSTALLED_FONT_DIR};
         for (const auto &candidate : directories)
         {
             const auto font = candidate / "HarmonyOS_Sans_SC_Regular.ttf";
@@ -164,15 +169,36 @@ bool load_font_candidate(const SystemFont &font)
         return false;
     if (font.path.empty())
         return false;
-    const auto path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(font.path.data()), font.path.size()));
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (error || size <= 100 || size > 64 * 1024 * 1024)
-        return false;
-    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
-    std::ifstream input(path, std::ios::binary);
-    if (!input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size)))
-        return false;
+    std::vector<unsigned char> storage;
+    std::span<const unsigned char> bytes;
+#if defined(_WIN32)
+    if (font.path == "embedded:HarmonyOS_Sans_SC_Regular.ttf")
+    {
+        const auto resource = FindResourceW(nullptr, MAKEINTRESOURCEW(201), MAKEINTRESOURCEW(10));
+        if (resource == nullptr)
+            return false;
+        const auto data = LoadResource(nullptr, resource);
+        const auto *memory = static_cast<const unsigned char *>(LockResource(data));
+        const auto length = SizeofResource(nullptr, resource);
+        if (memory == nullptr || length == 0)
+            return false;
+        bytes = {memory, length};
+    }
+    else
+#endif
+    {
+        const auto path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(font.path.data()), font.path.size()));
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error || size <= 100 || size > 64 * 1024 * 1024)
+            return false;
+        storage.resize(static_cast<std::size_t>(size));
+        std::ifstream input(path, std::ios::binary);
+        if (!input.read(reinterpret_cast<char *>(storage.data()), static_cast<std::streamsize>(size)))
+            return false;
+        bytes = storage;
+    }
+    const auto size = bytes.size();
     // CRC detects a corrupted copy of our immutable bundled font before stb
     // parses it. It is an integrity check, not a signature or trust mechanism.
     if (font.bundled && (size != 8261128 || font_crc32(bytes) != 0x88e4e870U))
@@ -192,6 +218,6 @@ bool load_font_candidate(const SystemFont &font)
     config.FontNo                = static_cast<FaceIndex>(font.face_index);
     config.FontDataOwnedByAtlas  = false; // ImGui makes its own owned copy.
     config.Flags                |= ImFontFlags_NoLoadError;
-    return io.Fonts->AddFontFromMemoryTTF(bytes.data(), static_cast<int>(size), 17.0f, &config) != nullptr;
+    return io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char *>(bytes.data()), static_cast<int>(size), 17.0f, &config) != nullptr;
 }
 } // namespace liltview

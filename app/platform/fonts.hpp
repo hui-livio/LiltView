@@ -15,7 +15,7 @@ struct SystemFont
 
 SystemFont find_application_font();
 SystemFont find_system_font();
-// Reads a bounded font file, verifies bundled resource integrity, then asks
+// Reads a bounded font file or embedded Win32 resource, verifies bundled integrity, then asks
 // ImGui to load it with recoverable errors; returns false for fallback.
 bool load_font_candidate(const SystemFont &font);
 } // namespace liltview

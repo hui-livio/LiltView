@@ -38,6 +38,16 @@ TEST_CASE("Windows executable embeds the application icon", "[windows][resources
     const auto group = FindResourceW(module.handle, MAKEINTRESOURCEW(101), reinterpret_cast<LPCWSTR>(RT_GROUP_ICON));
     REQUIRE(group != nullptr);
     CHECK(SizeofResource(module.handle, group) > 6);
+    // A copied EXE must retain the original Chinese font with no sidecar files.
+    const auto font = FindResourceW(module.handle, MAKEINTRESOURCEW(201), MAKEINTRESOURCEW(10));
+    REQUIRE(font != nullptr);
+    REQUIRE(SizeofResource(module.handle, font) == 8261128);
+    const auto *embedded = static_cast<const char *>(LockResource(LoadResource(module.handle, font)));
+    REQUIRE(embedded != nullptr);
+    std::ifstream original(std::filesystem::path(LILTVIEW_TEST_FONT_DIR) / "HarmonyOS_Sans_SC_Regular.ttf", std::ios::binary);
+    const std::string bytes{std::istreambuf_iterator<char>(original), std::istreambuf_iterator<char>()};
+    REQUIRE(bytes.size() == 8261128);
+    CHECK(std::string_view(embedded, bytes.size()) == bytes);
     // RC expands the multi-resolution ICO into individual RT_ICON resources.
     CHECK(FindResourceW(module.handle, MAKEINTRESOURCEW(1), reinterpret_cast<LPCWSTR>(RT_ICON)) != nullptr);
 }

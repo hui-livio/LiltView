@@ -2,6 +2,7 @@
 #include "file_io.hpp"
 #include <array>
 #include <cstdint>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -175,6 +176,9 @@ inline void checker_tiff(const std::filesystem::path &path, unsigned width, unsi
 inline void checkerboard(const std::filesystem::path &path, unsigned width, unsigned height, unsigned cell = 1024)
 {
     fixture_check(width && height && cell, "Invalid checkerboard geometry");
+    std::error_code metadata_error;
+    const auto previous_write = std::filesystem::last_write_time(path, metadata_error);
+    const bool overwriting = !metadata_error;
     if (path.has_parent_path())
         std::filesystem::create_directories(path.parent_path());
     const auto suffix = path.extension().string();
@@ -188,5 +192,10 @@ inline void checkerboard(const std::filesystem::path &path, unsigned width, unsi
         checker_tiff(path, width, height, cell);
     else
         throw std::runtime_error("Use .png/.jpg/.bmp/.tiff output");
+    // Source-version contracts deliberately overwrite fixtures while a reader
+    // is paused. Fast Release runs can perform same-size writes in one Windows
+    // filesystem clock tick; signal that mutation explicitly, without sleeps.
+    if (overwriting)
+        std::filesystem::last_write_time(path, previous_write + std::chrono::seconds(1));
 }
 } // namespace liltview::test

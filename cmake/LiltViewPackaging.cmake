@@ -1,0 +1,27 @@
+# Only enabled explicitly for Release distributions, never ordinary dev builds.
+set(CPACK_PACKAGE_NAME "liltview")
+set(CPACK_PACKAGE_VENDOR "LiltView contributors")
+set(CPACK_PACKAGE_CONTACT "hui-livio <yuanfeng1897@gmail.com>")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+if(LILTVIEW_VERSION_SUFFIX)
+    string(REGEX REPLACE "^-" "~" liltview_package_suffix "${LILTVIEW_VERSION_SUFFIX}")
+    # Tilde sorts RC below stable in both dpkg and RPM.
+    set(CPACK_DEBIAN_PACKAGE_VERSION "${PROJECT_VERSION}${liltview_package_suffix}")
+    set(CPACK_RPM_PACKAGE_VERSION "${PROJECT_VERSION}${liltview_package_suffix}")
+endif()
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A lightweight image viewer")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/hui-livio/LiltView")
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
+set(CPACK_STRIP_FILES TRUE)
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+# SDL loads these backends at runtime; shlibdeps / RPM autoreq cannot see dlopen.
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libxcursor1, libxfixes3, libxi6, libxrandr2, libxss1, libxtst6, libxkbcommon0, libdecor-0-0, libdbus-1-3")
+set(CPACK_RPM_PACKAGE_REQUIRES "libXcursor, libXfixes, libXi, libXrandr, libXScrnSaver, libXtst, libxkbcommon, libdecor, dbus-libs")
+set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
+set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0 AND MIT AND BSD-3-Clause AND Zlib AND IJG AND LicenseRef-HarmonyOS-Sans")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+# CPack must not add GCC debug packages / debuginfo.
+set(CPACK_RPM_DEBUGINFO_PACKAGE OFF)
+include(CPack)

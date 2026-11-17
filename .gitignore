@@ -95,3 +95,8 @@ Testing/
 .cache/
 __pycache__/
 *.py[cod]
+
+# Direct native Arch packaging output
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.pkg.tar.*

@@ -23,10 +23,10 @@ namespace
 {
 struct Directory
 {
-    Directory()
+    explicit Directory(const std::filesystem::path &root = std::filesystem::current_path())
     {
         static std::atomic<unsigned> next{0};
-        path = std::filesystem::current_path() /
+        path = root /
             ("liltview-navigation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
              std::to_string(next.fetch_add(1)));
         std::filesystem::create_directories(path);
@@ -98,7 +98,8 @@ TEST_CASE("directory navigation sorts numeric runs naturally with deterministic 
 
 TEST_CASE("directory navigation filters only provided formats and regular files", "[navigation]")
 {
-    Directory directory;
+    // Special files need a native filesystem: WSL Windows mounts cannot create FIFOs.
+    Directory directory(std::filesystem::temp_directory_path());
     const auto selected = directory.file("a.JPG");
     for (const auto *name : {"b.JpEg", "c.PNG", "d.svg", "e.webp", "f.bmp", "g.GIF", "h.tif", "i.TIFF", ".hidden.png"})
         directory.file(name);

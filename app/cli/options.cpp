@@ -1,5 +1,6 @@
 #include "options.hpp"
 #include "version.hpp"
+#include "notices.hpp"
 
 #include <CLI/CLI.hpp>
 
@@ -16,6 +17,8 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     app.footer(
         "Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF (first page). Large static JPEG/PNG/BMP/TIFF support regional detail.");
 
+    bool licenses = false;
+    app.add_flag("--licenses", licenses, "Print embedded licenses and third-party notices");
     std::string language;
     auto *language_option =
         app.add_option("--language", language, "Override the saved language")->check(CLI::IsMember({"system", "en-US", "zh-CN"}));
@@ -27,6 +30,12 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     try
     {
         app.parse(argc, argv);
+        if (licenses)
+        {
+            out << liltview_notices;
+            result.exit_code = 0;
+            return result;
+        }
         if (*language_option)
             options.language = parse_language(language);
     } catch (const CLI::ParseError &failure)

@@ -1,4 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -15,9 +18,14 @@ uint64_t lv_clock_ns(void)
 
 static lv_file_version version(const struct stat *s)
 {
-    return (lv_file_version){(uint64_t)s->st_dev,         (uint64_t)s->st_ino,          (uint64_t)s->st_size,
-                             (uint64_t)s->st_mtim.tv_sec, (uint64_t)s->st_mtim.tv_nsec, (uint64_t)s->st_ctim.tv_sec,
-                             (uint64_t)s->st_ctim.tv_nsec};
+#if defined(__APPLE__)
+    const struct timespec modified = s->st_mtimespec, changed = s->st_ctimespec;
+#else
+    const struct timespec modified = s->st_mtim, changed = s->st_ctim;
+#endif
+    return (lv_file_version){(uint64_t)s->st_dev, (uint64_t)s->st_ino, (uint64_t)s->st_size,
+                             (uint64_t)modified.tv_sec, (uint64_t)modified.tv_nsec,
+                             (uint64_t)changed.tv_sec, (uint64_t)changed.tv_nsec};
 }
 
 FILE *lv_file_open(const char *path, lv_file_version *out, uint32_t *system_code)
