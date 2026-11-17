@@ -10,7 +10,7 @@ Validated on Windows 10, Arch Linux with a Wayland desktop, and Arch Linux in WS
 
 ## Screenshots
 
-Image information, the status bar, and both themes. Both screenshots display the same PNG; changing the theme only changes the interface colors. The information screenshots show the previous embedded layout; the current panel is a separate desktop window.
+Image information, the status bar, and both themes. Both screenshots display the same PNG; changing the theme only changes the interface colors. The full information panel overlays the top-right of the canvas with a translucent surface and highlighted border.
 
 | Light theme | Dark theme |
 | --- | --- |
@@ -24,7 +24,7 @@ Image information, the status bar, and both themes. Both screenshots display the
 - **On-demand Dock**: hidden by default; hover at the canvas bottom for 200 ms to reveal it. More attaches above the Dock. Double-click the successfully loaded canvas to toggle 100% / fit.
 - **View large static images**: tiled display and detail restoration let you explore large images. Once a static image finishes loading, zooming and panning do not decode the source file again. Actual size limits depend on the format and available resources.
 - **Play GIFs automatically**: ordinary-size GIFs follow their source frame durations and loop information, including transparency and frame compositing. Playback scheduling pauses when the window is hidden or minimized.
-- **See image information**: the status bar shows the filename, folder position, original format, source dimensions, and zoom. Press `I` to toggle a separate, non-modal information window. Drag it outside the main window without changing the canvas, FIT, or zoom.
+- **See image information**: the status bar shows the filename, folder position, original format, source dimensions, and zoom. Press `I` to toggle the full information panel at the top-right of the canvas. Its translucent surface and highlighted border keep it readable without changing the canvas, FIT, zoom, or pan. Copy the full path, scroll details in a small window, and close with `I`, `Esc`, or ×.
 - **Understand loading and failures**: the status bar distinguishes ready, loading, and restoring states. If loading fails, a central illustration and a reason below it explain the problem instead of presenting the old image as a successful load.
 - **Use the canvas context menu**: after an image loads successfully, right-click the central viewing area for the same actions as the View menu.
 - **Make it yours**: English or Simplified Chinese, light / dark / system theme, system or custom title bar, and optional rounded corners. Your preferences are saved.

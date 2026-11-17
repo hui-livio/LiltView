@@ -219,14 +219,14 @@ void rounded_modal_dim(float radius, ImVec4 color)
     list->PopClipRect();
 }
 
-MenuAction draw_canvas_menu(const MenuItem &menu, bool enabled)
+MenuAction draw_canvas_menu(const MenuItem &menu, bool enabled, bool allow_open)
 {
     // The stable View ID and renderer are shared with the menu bar, including
     // shortcuts, separators, checked state and per-action availability.
     const auto *view     = find_menu_item(menu, 2);
     enabled              = enabled && view && view->enabled;
     constexpr auto popup = "canvas_view_menu";
-    if (enabled && ImGui::IsWindowHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+    if (enabled && allow_open && ImGui::IsWindowHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
         ImGui::OpenPopup(popup);
     MenuAction action = MenuAction::none;
     if (ImGui::BeginPopup(popup))
@@ -351,16 +351,22 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
     const auto &io         = ImGui::GetIO();
     const bool popup_open  = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     input_blocked          = input_blocked || ImGui::GetTopMostPopupModal() != nullptr;
-    // The nonmodal Info window may own focus without dismissing the main Dock.
-    // Keep its surface visible, but never accept input in the inactive canvas.
-    const bool dock_input_blocked = input_blocked || (io.AppFocusLost && !image_info_open_);
-    input_blocked                 = input_blocked || io.AppFocusLost;
-    const bool ready              = viewer.interaction_ready() && !input_blocked;
-    const auto buttons            = navigation_button_layout(position, end, scale);
-    const auto state              = navigation_button_state(viewer.navigation(), popup_open);
-    const auto *fullscreen        = dock_menu_item(menu, MenuAction::fullscreen);
-    const auto dock_layout_value  = dock_layout(position, end, scale, viewer.fitting(), fullscreen && fullscreen->checked);
-    const bool canvas_hit         = !popup_open && !input_blocked && ImGui::IsWindowHovered() &&
+    input_blocked                = input_blocked || io.AppFocusLost;
+    const bool ready             = viewer.interaction_ready() && !input_blocked;
+    const auto *fullscreen       = dock_menu_item(menu, MenuAction::fullscreen);
+    const auto dock_layout_value = dock_layout(position, end, scale, viewer.fitting(), fullscreen && fullscreen->checked);
+    // Reserve the Dock's normal footprint even while hidden; Info never changes the viewport.
+    const auto information     = image_info_open_ ?
+            image_information_layout(position, {end.x, dock_layout_value.valid ? dock_layout_value.bounds.min.y : end.y}, scale) :
+            ImageInformationLayout{};
+    const bool information_hit = information.contains(io.MousePos);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        image_info_right_held_ = information_hit;
+    const NavigationButtonRect occlusion =
+        information.valid ? NavigationButtonRect{information.min, information.max} : NavigationButtonRect{};
+    const auto buttons    = navigation_button_layout(position, end, scale, occlusion);
+    const auto state      = navigation_button_state(viewer.navigation(), popup_open);
+    const bool canvas_hit = !popup_open && !input_blocked && !information_hit && ImGui::IsWindowHovered() &&
         DockRect{position, end}.contains(io.MousePos) && !navigation_buttons_hit(buttons, state, io.MousePos) &&
         !dock_.hit(dock_layout_value, io.MousePos);
     const bool toggle = canvas_gesture_.update(
@@ -368,27 +374,34 @@ MenuAction Shell::draw_canvas(Language language, const MenuItem &menu, render::R
         ImGui::IsMouseDragging(ImGuiMouseButton_Left), ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
     const bool image_held = canvas_gesture_.image_held();
     const bool drag_busy  = image_held || ImGui::IsMouseDragging(ImGuiMouseButton_Left);
-    const bool dock_blocked =
-        dock_.prepare(dock_layout_value, ready, drag_busy, dock_input_blocked, retain_dock, image_info_open_);
+    const bool dock_blocked       = dock_.prepare(dock_layout_value, ready, drag_busy, input_blocked, retain_dock);
     const bool navigation_blocked = navigation_gesture_.blocks(
         buttons, state, io.MousePos, ImGui::IsMouseClicked(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Left));
-    const bool blocked = input_blocked || popup_open || (!image_held && (dock_blocked || navigation_blocked)) ||
+    const bool blocked = input_blocked || popup_open ||
+        (!image_held && (dock_blocked || navigation_blocked || information_hit)) ||
         (ImGui::IsMouseDown(ImGuiMouseButton_Left) && !image_held);
     const auto finish = [&]
     {
         auto selected =
             toggle ? dock_toggle_action(menu, viewer.fitting(), viewer.interaction_ready() && !input_blocked) : MenuAction::none;
-        const auto context_action = draw_canvas_menu(menu, viewer.interaction_ready() && !input_blocked);
+        const auto context_action =
+            draw_canvas_menu(menu, viewer.interaction_ready() && !input_blocked, !information_hit && !image_info_right_held_);
         if (context_action != MenuAction::none)
             selected = context_action;
-        const auto navigation = draw_navigation_buttons(language, viewer.navigation(), position, end, scale);
+        const auto navigation = draw_navigation_buttons(language, viewer.navigation(), position, end, scale, occlusion);
         if (navigation != MenuAction::none)
             selected = navigation;
-        // Draw last in the canvas, above the image/edge navigation, never in the layout flow.
+        // The Dock and Info are overlays; neither participates in image layout.
         const auto dock_action = dock_.draw(dock_layout_value, menu, language, viewer.interaction_ready(), drag_busy,
-                                            dock_input_blocked, retain_dock, !input_blocked);
+                                            input_blocked, retain_dock, !input_blocked);
         if (dock_action != MenuAction::none)
             selected = dock_action;
+        if (image_info_open_ &&
+            draw_image_information(language, viewer.failed() ? std::nullopt : viewer.image_details(), information,
+                                   !input_blocked && !image_held))
+            dismiss_image_info();
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
+            image_info_right_held_ = false;
         // Navigation restores the cursor after the reason text. Submit its
         // trailing spacing explicitly rather than extending child bounds via SetCursorPos.
         ImGui::Dummy({0, 0});

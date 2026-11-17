@@ -5,8 +5,8 @@
 // 4. Unknown output color is explicit; RGBA8 straight-alpha is the actual pixel output, not source precision.
 // 5. GIF unknown/known frame count, duration and total plays are separate; zero total plays means infinite.
 // 6. Long UTF-8 paths containing percent signs remain literal; formatting performs no filesystem I/O.
-// 7. A dedicated desktop window leaves the main image canvas, FIT and navigation geometry unchanged.
-// 8. Real ImGui frames cover empty/details content, header-free translated content and nonmodal behavior.
+// 7. A canvas overlay leaves the main image canvas, FIT and navigation geometry unchanged.
+// 8. Real ImGui frames cover empty/details content, a translated fixed header and scrollable content and nonmodal behavior.
 // 9. Escape closes information before fullscreen; text inputs and other popups retain key priority.
 // Viewer tests additionally cover old A -> pending B -> B row bands -> completion, failed B -> A,
 // rapid A/B/C replacement, no-source queries, GIF completion metadata, and presented-camera scale.
@@ -76,20 +76,29 @@ struct Context
         ImGui::SetNextWindowSize({800, 500});
         ImGui::Begin("information_test", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
         ImGui::LogToBuffer();
-        draw_image_information(language, details, {300, 20}, {300 + width, 460});
+        closed = draw_image_information(language, details, {{300, 20}, {300 + width, 460}, true});
         text = ImGui::GetCurrentContext()->LogBuffer.c_str();
         ImGui::LogFinish();
-        panel = nullptr;
+        panel = body = nullptr;
         for (auto *window : ImGui::GetCurrentContext()->Windows)
-            if (window->Active && std::string_view(window->Name).find("/image_information_") != std::string_view::npos)
+        {
+            const auto name = std::string_view(window->Name);
+            if (!window->Active)
+                continue;
+            if (name.find("/image_information_body_") != std::string_view::npos)
+                body = window;
+            else if (name.find("/image_information_") != std::string_view::npos)
                 panel = window;
+        }
         REQUIRE(panel);
+        REQUIRE(body);
         CHECK_FALSE(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
         ImGui::End();
         ImGui::Render();
         REQUIRE(ImGui::GetDrawData()->TotalVtxCount > 0);
     }
-    ImGuiWindow *panel = nullptr;
+    ImGuiWindow *panel = nullptr, *body = nullptr;
+    bool closed = false;
     std::string text;
     float width = 340;
 };
@@ -185,13 +194,15 @@ TEST_CASE("information content renders long literal paths without a duplicate ti
         context.frame(details, language); // Reserve the scrollbar after wrapping the long path.
         CHECK(field(language, details, Text::info_path) == platform::path_bytes(details.path));
         CHECK(context.text.find("100%.png") != std::string::npos);
-        CHECK(context.text.find(translate(language, Text::image_info)) == std::string::npos);
+        CHECK(context.text.find(translate(language, Text::image_info)) != std::string::npos);
         CHECK(context.text.find(translate(language, Text::info_path)) < context.text.find("/a/"));
-        CHECK(context.panel->ScrollMax.y > 0);
+        CHECK(context.body->ScrollMax.y > 0);
+        CHECK_FALSE(context.panel->ScrollbarY);
     }
 }
 
-TEST_CASE("information content has no custom header in either theme at narrow widths and high DPI", "[image_details][ui][theme]")
+TEST_CASE("information has one fixed header and complete scrollable content in both themes and at high DPI",
+          "[image_details][ui][theme]")
 {
     for (const bool dark : {false, true})
         for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f})
@@ -204,13 +215,17 @@ TEST_CASE("information content has no custom header in either theme at narrow wi
                     apply_style(dark, scale);
                     context.frame(std::nullopt, language);
                     CHECK(context.text.find(translate(language, Text::no_image)) != std::string::npos);
-                    CHECK(context.text.find(translate(language, Text::image_info)) == std::string::npos);
-                    // The empty state starts at the first content line, not below a second title bar.
-                    CHECK(context.panel->ContentSize.y <= ImGui::GetTextLineHeightWithSpacing());
+                    CHECK(context.text.find(translate(language, Text::image_info)) != std::string::npos);
+                    CHECK_FALSE(context.panel->ScrollbarY);
+                    CHECK(context.body->Pos.y > context.panel->Pos.y);
                     context.frame(example(), language);
                     CHECK(context.text.find(translate(language, Text::info_path)) != std::string::npos);
-                    CHECK(context.text.find(translate(language, Text::image_info)) == std::string::npos);
-                    CHECK(context.panel->DC.NavLayersActiveMaskNext == 0); // No custom close button.
+                    CHECK(context.text.find(translate(language, Text::image_info)) != std::string::npos);
+                    CHECK(context.panel->DC.NavLayersActiveMaskNext != 0); // Keyboard-accessible close action.
+                    CHECK(context.text.find(translate(language, Text::info_image_parameters)) != std::string::npos);
+                    CHECK(context.text.find(translate(language, Text::info_output_group)) != std::string::npos);
+                    CHECK_FALSE(context.panel->Collapsed);
+                    CHECK_FALSE(context.panel->ScrollbarY);
                 }
 }
 
@@ -238,4 +253,71 @@ TEST_CASE("information paths preserve UTF-8 Chinese and emoji independently of W
         Context context;
         CHECK_NOTHROW(context.frame(details, language));
     }
+}
+
+TEST_CASE("information overlay stays within the canvas and rejects invalid geometry", "[image_details][ui][geometry]")
+{
+    for (const auto scale : {1.f, 1.25f, 2.f})
+    {
+        const ImVec2 start{10 * scale, 20 * scale}, end{1010 * scale, 820 * scale};
+        const auto layout = image_information_layout(start, end, scale);
+        REQUIRE(layout.valid);
+        CHECK(layout.max.x == end.x - 64 * scale);
+        CHECK(layout.min.y == start.y + 16 * scale);
+        CHECK(layout.max.x - layout.min.x == 300 * scale);
+        CHECK(layout.max.y - layout.min.y == 562 * scale);
+        CHECK(layout.contains(layout.min));
+        CHECK_FALSE(layout.contains(layout.max));
+        const auto small = image_information_layout(start, {300 * scale, 300 * scale}, scale);
+        REQUIRE(small.valid);
+        CHECK(small.min.x >= start.x);
+        CHECK(small.max.y <= 300 * scale);
+    }
+    CHECK_FALSE(image_information_layout({0, 0}, {100, 80}, 1).valid);
+    CHECK_FALSE(image_information_layout({0, 0}, {800, 600}, 0).valid);
+    CHECK_FALSE(image_information_layout({0, 0}, {800, 600}, std::numeric_limits<float>::quiet_NaN()).valid);
+}
+
+TEST_CASE("information close button dismisses without scrolling or changing the title", "[image_details][ui]")
+{
+    Context context;
+    auto details = example();
+    details.path = std::filesystem::path(std::u8string(900, u8'x'));
+    context.frame(details, Language::english);
+    context.frame(details, Language::english);
+    REQUIRE(context.body->ScrollMax.y > 0);
+    const auto header_y = context.panel->Pos.y;
+    auto &io            = ImGui::GetIO();
+    io.AddMousePosEvent(context.body->Pos.x + 50, context.body->Pos.y + 60);
+    context.frame(details, Language::english);
+    io.AddMouseWheelEvent(0, -4);
+    context.frame(details, Language::english);
+    context.frame(details, Language::english);
+    CHECK(context.body->Scroll.y > 0);
+    CHECK(context.panel->Pos.y == header_y);
+    CHECK(context.panel->Scroll.y == 0);
+    io.AddMousePosEvent(context.panel->Pos.x + context.width - 22, header_y + 22);
+    context.frame(details, Language::english);
+    io.AddMouseButtonEvent(0, true);
+    context.frame(details, Language::english);
+    CHECK_FALSE(context.closed);
+    io.AddMouseButtonEvent(0, false);
+    context.frame(details, Language::english);
+    CHECK(context.closed);
+}
+
+
+TEST_CASE("information copy action uses the complete literal UTF-8 path", "[image_details][ui][clipboard]")
+{
+    Context context;
+    const auto details = example();
+    context.frame(details, Language::english);
+    context.frame(details, Language::english);
+    ImGui::SetClipboardText("unchanged");
+    // Activate the same keyboard-navigable copy item without relying on translated geometry.
+    const auto copy_id = context.body->GetID("###copy_image_path");
+    ImGui::ActivateItemByID(copy_id);
+    context.frame(details, Language::english);
+    CHECK(std::string(ImGui::GetClipboardText()) == platform::path_bytes(details.path));
+    CHECK_FALSE(context.closed);
 }

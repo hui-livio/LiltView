@@ -130,3 +130,22 @@ TEST_CASE("theme changes reset every color without accumulating DPI or leaking o
             CHECK(luminance(p.surface) > luminance(p.canvas));
         }
 }
+
+
+TEST_CASE("information text stays opaque and readable through its translucent surface", "[image_details][theme][contrast]")
+{
+    for (const bool dark : {false, true})
+    {
+        const auto &p = ui_palette(dark);
+        CHECK(p.information_surface.w > .75f);
+        CHECK(p.information_surface.w < .9f);
+        CHECK(p.information_border.w > .9f);
+        CHECK(p.text.w == 1);
+        CHECK(p.information_secondary.w == 1);
+        for (const auto image : {ImVec4{0, 0, 0, 1}, ImVec4{1, 1, 1, 1}})
+        {
+            CHECK(contrast(p.text, over(p.information_surface, image)) >= 4.5);
+            CHECK(contrast(p.information_secondary, over(p.information_surface, image)) >= 4.5);
+        }
+    }
+}

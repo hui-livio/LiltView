@@ -504,7 +504,7 @@ TEST_CASE("rounded borderless corners default on and can be independently disabl
     CHECK_FALSE(settings.disable_rounding);
 }
 
-TEST_CASE("loading blocks image shortcuts but allows the independent information toggle", "[menu][shortcut][loading]")
+TEST_CASE("loading blocks image shortcuts but allows the information overlay toggle", "[menu][shortcut][loading]")
 {
     for (const auto language : {Language::english, Language::chinese})
         for (const bool fullscreen : {false, true})

@@ -303,8 +303,7 @@ bool DockToolbar::keyboard_focus(const DockLayout &layout) const
     ImGui::PopID();
     return focused;
 }
-bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held, bool blocked, bool retain_visible,
-                          bool keep_visible)
+bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held, bool blocked, bool retain_visible)
 {
     const auto &g = *ImGui::GetCurrentContext();
     if (visibility_.opacity() == 0 || blocked || !g.NavCursorVisible)
@@ -327,7 +326,7 @@ bool DockToolbar::prepare(const DockLayout &layout, bool ready, bool image_held,
     const bool visible_ready = ready || (retain_visible && visibility_.opacity() > 0);
     visibility_.update(ImGui::GetTime(), visible_ready && layout.valid && !blocked && (!any_popup || more),
                        hovered && layout.trigger.contains(mouse), hovered && hit(layout, mouse), image_drag, more,
-                       pressed_ || keyboard_focus(layout) || (keep_visible && visibility_.opacity() > 0));
+                       pressed_ || keyboard_focus(layout));
     return !image_drag && hit(layout, mouse);
 }
 

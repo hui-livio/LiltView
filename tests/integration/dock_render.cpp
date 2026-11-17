@@ -10,6 +10,7 @@
 #include <thread>
 #include "platform/fonts.hpp"
 #include "platform/sdl_render_host.hpp"
+#include "resources/icon_rgba.hpp"
 #include "ui/shell.hpp"
 #include "ui/theme.hpp"
 #include "viewer/viewer.hpp"
@@ -34,13 +35,22 @@ struct Scenario
     render::Renderer &renderer;
     Viewer viewer{renderer};
     Shell shell;
-    render::Image icon = renderer.create_image({{1, 1}, false});
+    render::Image icon;
+    Scenario(render::Renderer &value) :
+        renderer(value)
+    {
+        const render::Size size{resources::icon_size, resources::icon_size};
+        icon = renderer.create_image({size, true});
+        renderer.update_image(icon, {0, 0, size.width, size.height},
+                              {resources::icon_rgba.data(), resources::icon_rgba.size(), size.width * 4ULL, size});
+    }
     ~Scenario()
     {
         renderer.destroy_image(icon);
     }
     WindowChromeState chrome;
     DockLayout layout;
+    Language language = Language::chinese;
     MenuAction frame()
     {
         viewer.pump();
@@ -52,13 +62,15 @@ struct Scenario
         io.DeltaTime               = .01f;
         ImGui::NewFrame();
         chrome.line_height = ImGui::GetTextLineHeight();
-        const auto menu    = build_menu(Settings{}, Language::chinese, true, chrome.fullscreen, viewer.has_image(),
-                                        viewer.can_actual_size(), viewer.navigation().can_previous, viewer.navigation().can_next,
-                                        shell.image_info_open(), viewer.has_visible_image());
-        const auto action  = shell.draw(Language::chinese, menu, false, renderer, icon, viewer, chrome);
+        const auto menu = build_menu(Settings{}, language, true, chrome.fullscreen, viewer.has_image(), viewer.can_actual_size(),
+                                     viewer.navigation().can_previous, viewer.navigation().can_next, shell.image_info_open(),
+                                     viewer.has_visible_image());
+        const auto action = shell.draw(language, menu, false, renderer, icon, viewer, chrome);
         for (const auto *window : ImGui::GetCurrentContext()->Windows)
-            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos)
-                layout = dock_layout(window->WorkRect.Min, window->WorkRect.Max, 1, viewer.fitting(), chrome.fullscreen);
+            if (window->Active && std::string_view(window->Name).find("/canvas_") != std::string_view::npos &&
+                std::string_view(window->Name).find("/image_information_") == std::string_view::npos)
+                layout =
+                    dock_layout(window->WorkRect.Min, window->WorkRect.Max, chrome.scale, viewer.fitting(), chrome.fullscreen);
         ImGui::Render();
         renderer.render_frame(ImGui::GetDrawData());
         return action;
@@ -128,24 +140,6 @@ void exercise(render::Renderer &renderer, const std::filesystem::path &captures)
                     save(captures / (stem + "-shown.ppm"), shown);
                 io.AddMousePosEvent(100, 100);
                 s.frames(15);
-                if (information)
-                {
-                    check(renderer.readback().rgb == shown.rgb, "Info did not retain the shown Dock");
-                    for (unsigned cycle = 0; cycle < 3; ++cycle)
-                    {
-                        io.AddFocusEvent(false);
-                        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
-                        s.frame(); // Check the transition frame, not only the settled appearance.
-                        check(renderer.readback().rgb == shown.rgb, "Info focus transition changed Dock pixels");
-                        s.frames(15);
-                        check(renderer.readback().rgb == shown.rgb, "Inactive Info Dock appearance changed");
-                        io.AddFocusEvent(true);
-                        s.frame();
-                        check(renderer.readback().rgb == shown.rgb, "Returning focus changed Dock pixels");
-                    }
-                    s.shell.dismiss_image_info();
-                    s.frames(15);
-                }
                 check(renderer.readback().rgb == before.rgb, "Hidden dock left pixels/layout behind");
                 std::printf("PASS %s: overlay-only %u changed pixels; hidden framebuffer identical\n", stem.c_str(), changed);
             }
@@ -192,6 +186,92 @@ void exercise(render::Renderer &renderer, const std::filesystem::path &captures)
         save(captures / "light-more-menu.ppm", renderer.readback());
     std::puts("PASS rendered double-click mode/icon change and More popup");
 }
+
+void information_variants(render::Renderer &renderer, SDL_Window *window, const std::filesystem::path &captures)
+{
+    Scenario s{renderer};
+    s.viewer.open(std::filesystem::path(LILTVIEW_SOURCE_DIR) / "assets/icons/preview-color.png");
+    s.settle();
+    struct Variant
+    {
+        int width, height;
+        float scale;
+        const char *name;
+    };
+    for (const auto &variant : {Variant{1120, 860, 1, "full"}, Variant{640, 480, 1, "small"}, Variant{1120, 760, 2, "2x"}})
+        for (const bool dark : {false, true})
+            for (const auto language : {Language::chinese, Language::english})
+            {
+                check(SDL_SetWindowSize(window, variant.width, variant.height), SDL_GetError());
+                SDL_PumpEvents();
+                apply_style(dark, variant.scale);
+                s.chrome.scale      = variant.scale;
+                s.chrome.dark       = dark;
+                s.chrome.fullscreen = false;
+                s.language          = language;
+                s.shell.dismiss_image_info();
+                ImGui::GetIO().AddMousePosEvent(100, 100);
+                s.frames(3);
+                const auto view = s.viewer.presented_view();
+                s.shell.toggle_image_info();
+                s.frames(3);
+                ImGuiWindow *panel = nullptr, *body = nullptr;
+                for (auto *child : ImGui::GetCurrentContext()->Windows)
+                {
+                    if (!child->Active)
+                        continue;
+                    const auto name = std::string_view(child->Name);
+                    if (name.find("/image_information_body_") != std::string_view::npos)
+                        body = child;
+                    else if (name.find("/image_information_") != std::string_view::npos)
+                        panel = child;
+                }
+                check(panel && body, "Info overlay and scroll body are missing");
+                for (const auto *child : ImGui::GetCurrentContext()->Windows)
+                    if (child->Active && std::string_view(child->Name).find("/canvas_") != std::string_view::npos &&
+                        std::string_view(child->Name).find("/image_information_") == std::string_view::npos)
+                    {
+                        const auto arrows =
+                            navigation_button_layout(child->WorkRect.Min, child->WorkRect.Max, variant.scale,
+                                                     {panel->Pos, {panel->Pos.x + panel->Size.x, panel->Pos.y + panel->Size.y}});
+                        check(arrows.previous_visible && arrows.next_visible, "Info hides an edge navigation button");
+                        check(panel->Pos.x + panel->Size.x + 12 * variant.scale <= arrows.next.min.x,
+                              "Info intrudes into the right navigation lane");
+                    }
+                check(panel->Pos.y + panel->Size.y < s.layout.bounds.min.y, "Info covers the Dock");
+                check(panel->Scroll.y == 0 && !panel->ScrollbarY, "Info header scrolled with its body");
+                check(s.viewer.presented_view().same_view(view), "Info changed the image camera");
+                if (variant.scale > 1 || variant.height < 500)
+                    check(body->ScrollMax.y > 0, "Small Info panel lost its scrollable details");
+                const std::string stem = std::string(dark ? "dark" : "light") + "-information-" + variant.name +
+                    (language == Language::chinese ? "-zh-cn" : "-en-us");
+                if (!captures.empty())
+                    save(captures / (stem + ".ppm"), renderer.readback());
+                if (body->ScrollMax.y > 0)
+                {
+                    auto &io = ImGui::GetIO();
+                    io.AddMousePosEvent(body->Pos.x + 40, body->Pos.y + 40);
+                    s.frames(2);
+                    io.AddMouseWheelEvent(0, -8);
+                    s.frames(3);
+                    check(body->Scroll.y > 0, "Info body cannot scroll");
+                    check(panel->Scroll.y == 0, "Info header moved during body scroll");
+                    check(s.viewer.presented_view().same_view(view), "Info wheel zoomed the image");
+                    if (!captures.empty())
+                        save(captures / (stem + "-scrolled.ppm"), renderer.readback());
+                }
+                auto &io = ImGui::GetIO();
+                io.AddMousePosEvent(panel->Pos.x + panel->Size.x - 22 * variant.scale, panel->Pos.y + 22 * variant.scale);
+                s.frames(2);
+                io.AddMouseButtonEvent(0, true);
+                s.frame();
+                io.AddMouseButtonEvent(0, false);
+                s.frame();
+                check(!s.shell.image_info_open(), "Info close action did not dismiss the overlay");
+                check(s.viewer.presented_view().same_view(view), "Closing Info changed the image camera");
+                std::printf("PASS %s: camera preserved, fixed header, bounded overlay and close\n", stem.c_str());
+            }
+}
 } // namespace
 int main(int argc, char **argv)
 {
@@ -213,6 +293,7 @@ int main(int argc, char **argv)
         if (!captures.empty())
             std::filesystem::create_directories(captures);
         exercise(*renderer, captures);
+        information_variants(*renderer, window, captures);
         renderer.reset();
         ImGui::DestroyContext();
         SDL_DestroyWindow(window);

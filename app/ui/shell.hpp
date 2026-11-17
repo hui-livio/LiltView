@@ -59,6 +59,7 @@ private:
 
     bool open_about_      = false;
     bool image_info_open_ = false;
+    bool image_info_right_held_ = false;
     NavigationButtonGesture navigation_gesture_;
     DockToolbar dock_;
     CanvasGesture canvas_gesture_;
