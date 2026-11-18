@@ -1646,10 +1646,36 @@ TEST_CASE("both edge navigation buttons remain clickable with information open",
     context.shell.toggle_image_info();
     for (const auto scale : {1.f, 1.5f, 2.f})
     {
+        CAPTURE(scale);
         context.scale = scale;
+        const auto prepare_click = [&](bool previous)
+        {
+            // Replacements and layout changes may both schedule asynchronous
+            // work. Drive the same pump/draw sequence as the application before
+            // testing a hit target, and report loading/scanning failures here.
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            do
+            {
+                context.viewer.pump();
+                context.viewer.prepare_loading_view();
+                REQUIRE(context.frame() == MenuAction::none);
+                const auto &navigation = context.viewer.navigation();
+                CAPTURE(context.viewer.filename(), context.viewer.image_generation(), context.viewer.error(),
+                        context.viewer.loading(), context.viewer.settled(), context.viewer.interaction_ready(),
+                        navigation.scanning, navigation.error.message(), navigation.current, navigation.total);
+                REQUIRE_FALSE(context.viewer.failed());
+                REQUIRE_FALSE(navigation.error);
+                REQUIRE(std::chrono::steady_clock::now() < deadline);
+                if (context.viewer.interaction_ready() && !navigation.scanning)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } while (true);
+            const auto &navigation = context.viewer.navigation();
+            CAPTURE(navigation.current, navigation.total);
+            REQUIRE((previous ? navigation.can_previous : navigation.can_next));
+        };
         context.viewer.open(context.source.directory / "a.bmp");
-        context.settle();
-        context.frame();
+        prepare_click(false);
         context.frame();
         auto *canvas = context.canvas();
         REQUIRE(canvas);
@@ -1658,7 +1684,7 @@ TEST_CASE("both edge navigation buttons remain clickable with information open",
         const auto panel  = image_information_layout(canvas->WorkRect.Min, {canvas->WorkRect.Max.x, dock.bounds.min.y}, scale);
         REQUIRE(panel.valid);
         CHECK(panel.max.x + 12 * scale <= arrows.next.min.x);
-        const auto click = [&](const NavigationButtonRect &rect)
+        const auto click = [&](const NavigationButtonRect &rect, MenuAction expected)
         {
             auto &io = ImGui::GetIO();
             io.AddMousePosEvent((rect.min.x + rect.max.x) / 2, (rect.min.y + rect.max.y) / 2);
@@ -1667,13 +1693,17 @@ TEST_CASE("both edge navigation buttons remain clickable with information open",
             io.AddMouseButtonEvent(0, true);
             CHECK(context.frame() == MenuAction::none);
             io.AddMouseButtonEvent(0, false);
-            return context.frame();
+            const auto action = context.frame();
+            const auto &g = *ImGui::GetCurrentContext();
+            const auto &navigation = context.viewer.navigation();
+            CAPTURE(expected, action, io.MousePos.x, io.MousePos.y, g.ActiveId,
+                    (g.HoveredWindow ? g.HoveredWindow->Name : "<none>"), navigation.can_previous, navigation.can_next);
+            CHECK(action == expected);
         };
-        CHECK(click(arrows.next) == MenuAction::next);
+        click(arrows.next, MenuAction::next);
         context.viewer.open(context.source.path);
-        context.settle();
-        context.frame();
-        CHECK(click(arrows.previous) == MenuAction::previous);
+        prepare_click(true);
+        click(arrows.previous, MenuAction::previous);
         CHECK(context.shell.image_info_open());
     }
 }
