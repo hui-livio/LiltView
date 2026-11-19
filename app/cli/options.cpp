@@ -15,7 +15,7 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     app.allow_windows_style_options(false);
     app.set_version_flag("--version", "LiltView " LILTVIEW_VERSION);
     app.footer(
-        "Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF (first page). Large static JPEG/PNG/BMP/TIFF support regional detail.");
+        "Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF, and static AVIF. Large static JPEG/PNG/BMP/TIFF support regional detail.");
 
     bool licenses = false;
     app.add_flag("--licenses", licenses, "Print embedded licenses and third-party notices");
@@ -25,7 +25,7 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     app.add_option("--config-dir", options.config_directory, "Use a separate settings.yaml directory")->type_name("PATH");
     auto *smoke = app.add_flag("--smoke-test", options.smoke_test, "Exercise the window and exit")->disable_flag_override();
     app.add_option("--screenshot", options.screenshot, "Save a PPM during --smoke-test")->type_name("PATH")->needs(smoke);
-    app.add_option("image", options.image_path, "Image to open (JPEG, PNG, SVG, WebP, BMP, GIF, TIFF)")->type_name("PATH");
+    app.add_option("image", options.image_path, "Image to open (JPEG, PNG, SVG, WebP, BMP, GIF, TIFF, AVIF)")->type_name("PATH");
 
     try
     {
