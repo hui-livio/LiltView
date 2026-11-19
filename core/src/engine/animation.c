@@ -104,7 +104,7 @@ void lv_animation_decode(lv_core *core, lv_request *r, lv_error_info *error)
 {
     if (!r->animation_action)
     {
-        uint8_t signature[8] = {0};
+        uint8_t signature[12] = {0};
         lv_file_version version;
         uint32_t code = 0;
         FILE *file = lv_file_open(r->path, &version, &code);
@@ -115,14 +115,18 @@ void lv_animation_decode(lv_core *core, lv_request *r, lv_error_info *error)
             r->bytes_read += got;
             lv_file_close(file);
         }
-        if (file && got == sizeof signature && !memcmp(signature, "\x89PNG\r\n\x1a\n", sizeof signature))
+        if (file && got >= 8 && !memcmp(signature, "\x89PNG\r\n\x1a\n", 8))
             lv_apng_animation_run(core, r, error);
+        else if (file && got == sizeof signature && !memcmp(signature, "RIFF", 4) && !memcmp(signature + 8, "WEBP", 4))
+            lv_webp_animation_run(core, r, error);
         else
             lv_gif_animation_run(core, r, error);
         return;
     }
     if (r->animation->decoder_kind == 2)
         lv_apng_animation_run(core, r, error);
+    else if (r->animation->decoder_kind == 3)
+        lv_webp_animation_run(core, r, error);
     else
         lv_gif_animation_run(core, r, error);
 }
@@ -152,6 +156,8 @@ bool lv_animation_cleanup(lv_core *core)
     mtx_unlock(&core->mutex);
     if (s->decoder_kind == 2)
         lv_apng_animation_destroy(core, s);
+    else if (s->decoder_kind == 3)
+        lv_webp_animation_destroy(core, s);
     else
         lv_gif_animation_destroy(core, s);
     mtx_lock(&core->mutex);

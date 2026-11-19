@@ -26,6 +26,7 @@ typedef struct lv_request lv_request;
 typedef struct lv_animation lv_animation;
 typedef struct lv_gif_animation lv_gif_animation;
 typedef struct lv_apng_animation lv_apng_animation;
+typedef struct lv_webp_animation lv_webp_animation;
 typedef struct lv_cache_entry lv_cache_entry;
 
 struct lv_animation
@@ -178,4 +179,6 @@ void lv_gif_animation_run(lv_core *, lv_request *, lv_error_info *);
 void lv_gif_animation_destroy(lv_core *, lv_animation *);
 void lv_apng_animation_run(lv_core *, lv_request *, lv_error_info *);
 void lv_apng_animation_destroy(lv_core *, lv_animation *);
+void lv_webp_animation_run(lv_core *, lv_request *, lv_error_info *);
+void lv_webp_animation_destroy(lv_core *, lv_animation *);
 #endif
