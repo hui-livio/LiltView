@@ -260,6 +260,31 @@ TEST_CASE("TIFF byte orders BigTIFF and common compressions decode first page", 
             }
 }
 
+TEST_CASE("TIFF page selection reports the selected directory and decodes the requested page", "[formats][tiff][pages]")
+{
+    Files files;
+    const auto bytes = tiff_fixture({.multipage = true});
+    const auto path  = files.write("multipage.tiff", bytes);
+    Engine engine;
+    lv_request_desc request;
+    lv_request_desc_init(&request);
+    request.path = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+    request.target.as.fit_bounds = {100, 100};
+    request.selection = {.kind = LV_SELECTION_TIFF_PAGE, .reserved = 0, .index = 1};
+    lv_request_id id = 0;
+    REQUIRE(lv_core_submit(engine.core, &request, &id) == LV_OK);
+    const auto result = collect(engine);
+    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+    CHECK(result.info.format == LV_FORMAT_TIFF);
+    CHECK(result.info.flags & LV_INFO_SELECTION_KNOWN);
+    CHECK(result.info.flags & LV_INFO_SELECTION_COUNT_KNOWN);
+    CHECK(result.info.selection.kind == LV_SELECTION_TIFF_PAGE);
+    CHECK(result.info.selection.index == 1);
+    CHECK(result.info.selection_count == 2);
+    CHECK(result.pixels[0] == 0);
+    CHECK(result.pixels[2] == 255);
+}
+
 TEST_CASE("TIFF tile edges separate planes 16-bit and explicit alpha become straight RGBA", "[formats][tiff][alpha]")
 {
     for (bool tiled : {false, true})
