@@ -77,4 +77,5 @@ void lv_decode_bmp(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_svg(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_gif(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_tiff(lv_core *, lv_request *, lv_input *, lv_error_info *);
+void lv_decode_qoi(lv_core *, lv_request *, lv_input *, lv_error_info *);
 #endif

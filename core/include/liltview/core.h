@@ -107,7 +107,8 @@ enum
     LV_FORMAT_WEBP    = 4,
     LV_FORMAT_BMP     = 5,
     LV_FORMAT_GIF     = 6,
-    LV_FORMAT_TIFF    = 7
+    LV_FORMAT_TIFF    = 7,
+    LV_FORMAT_QOI     = 8
 };
 
 typedef uint64_t lv_capabilities;
