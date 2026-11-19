@@ -62,6 +62,13 @@ Bytes qoi_solid(std::uint32_t width, std::uint32_t height, std::array<unsigned c
     return qoi(width, height, 4, 0, std::move(operations));
 }
 
+Bytes fixture_bytes(const char *name)
+{
+    const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" / name;
+    std::ifstream input(path, std::ios::binary);
+    return Bytes(std::istreambuf_iterator<char>(input), {});
+}
+
 Bytes ico_dib(std::array<unsigned char, 4> pixel, unsigned width = 2, unsigned height = 2)
 {
     const unsigned xor_stride  = width * 4;
@@ -431,6 +438,28 @@ TEST_CASE("ICO and CUR malformed directories and unsupported entries fail cleanl
     }
 }
 
+TEST_CASE("JPEG 2000 JP2 and raw J2K decode 8-bit RGB", "[formats][jpeg2000]")
+{
+    for (const auto *name : {"red.jp2", "red.j2k"})
+    {
+        const auto result = decode(fixture_bytes(name));
+        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+        CHECK(result.info.format == LV_FORMAT_JPEG2000);
+        CHECK(result.info.source_size.width == 7);
+        CHECK(result.info.source_size.height == 5);
+        REQUIRE_FALSE(result.pixels.empty());
+        CHECK(result.pixels[0] >= 245);
+        CHECK(result.pixels[1] <= 10);
+        CHECK(result.pixels[2] <= 10);
+        CHECK(result.pixels[3] >= 245);
+    }
+    auto truncated = fixture_bytes("red.jp2");
+    truncated.resize(truncated.size() / 2);
+    const auto bad = decode(truncated);
+    REQUIRE(bad.terminal == LV_EVENT_ERROR);
+    CHECK(bad.error.code == LV_ERROR_CORRUPT_DATA);
+}
+
 TEST_CASE("WebP lossy lossless and alpha use decoder-scaled FIT", "[formats][webp]")
 {
     for (bool lossless : {false, true})
@@ -591,7 +620,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_CUR; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_JPEG2000; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);
