@@ -148,6 +148,13 @@ Bytes apng()
     bytes.insert(bytes.end(), end.begin(), end.end());
     return bytes;
 }
+
+Bytes animated_webp_fixture()
+{
+    const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures" / "red-blue.webp";
+    std::ifstream input(path, std::ios::binary);
+    return Bytes(std::istreambuf_iterator<char>(input), {});
+}
 struct Job
 {
     lv_event_type terminal = 0;
@@ -328,6 +335,39 @@ TEST_CASE("APNG sessions reject truncated containers without publishing frames",
     REQUIRE(result.terminal == LV_EVENT_ERROR);
     CHECK(result.error.code == LV_ERROR_CORRUPT_DATA);
     CHECK(result.pixels.empty());
+}
+
+TEST_CASE("animated WebP sessions decode full canvases with timing and loop metadata", "[animation][webp]")
+{
+    Files files;
+    Engine engine;
+    const auto [id, request] = open(engine, files.write("webp-input", animated_webp_fixture()), {96, 64});
+    (void)request;
+    const auto opened = drain(engine, {96, 64});
+    REQUIRE(opened.terminal == LV_EVENT_COMPLETE);
+    CHECK(opened.info.image.format == LV_FORMAT_WEBP);
+    CHECK(opened.info.image.capabilities == LV_CAP_ANIMATION);
+
+    const auto first = next(engine, id, {96, 64});
+    REQUIRE(first.terminal == LV_EVENT_COMPLETE);
+    CHECK(first.frame.key.frame_index == 0);
+    CHECK(first.frame.source_duration_ns == 100000000);
+    CHECK(first.pixels[0] == 255);
+    CHECK(first.pixels[2] == 0);
+
+    const auto second = next(engine, id, {96, 64});
+    REQUIRE(second.terminal == LV_EVENT_COMPLETE);
+    CHECK(second.frame.key.frame_index == 1);
+    CHECK(second.frame.source_pts_ns == 100000000);
+    CHECK(second.pixels[0] == 0);
+    CHECK(second.pixels[2] == 255);
+
+    const auto end = next(engine, id, {96, 64});
+    REQUIRE(end.terminal == LV_EVENT_COMPLETE);
+    CHECK(end.end);
+    CHECK(end.info.frame_count == 2);
+    CHECK(end.info.total_plays == 0);
+    REQUIRE(lv_core_close_animation(engine.core, id) == LV_OK);
 }
 
 TEST_CASE("animation GIF disposal background previous transparency interlace and local palettes", "[animation][composition]")
