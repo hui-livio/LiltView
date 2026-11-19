@@ -108,7 +108,9 @@ enum
     LV_FORMAT_BMP     = 5,
     LV_FORMAT_GIF     = 6,
     LV_FORMAT_TIFF    = 7,
-    LV_FORMAT_QOI     = 8
+    LV_FORMAT_QOI     = 8,
+    LV_FORMAT_ICO     = 9,
+    LV_FORMAT_CUR     = 10
 };
 
 typedef uint64_t lv_capabilities;

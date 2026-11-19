@@ -11,7 +11,7 @@ find_package(Threads REQUIRED)
 add_library(liltview_core STATIC src/api/memory.c src/api/config.c src/api/engine.c src/api/animation.c
     src/engine/objects.c src/engine/worker.c src/engine/animation.c src/engine/cache.c
     src/codecs/raster.c src/codecs/image.c src/codecs/jpeg.c src/codecs/png.c src/codecs/webp.c src/codecs/bmp.c src/codecs/svg.c
-    src/codecs/gif.c src/codecs/gif_animation.c src/codecs/tiff.c src/codecs/qoi.c
+    src/codecs/gif.c src/codecs/gif_animation.c src/codecs/tiff.c src/codecs/qoi.c src/codecs/ico.c
     ${liltview_file_adapter})
 add_library(LiltView::core ALIAS liltview_core)
 target_include_directories(liltview_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

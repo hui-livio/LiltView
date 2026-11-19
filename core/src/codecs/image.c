@@ -21,6 +21,10 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_tiff;
     if (size >= 4 && !memcmp(data, "qoif", 4))
         return lv_decode_qoi;
+    if (size >= 4 && data[0] == 0 && data[1] == 0 && data[2] == 1 && data[3] == 0)
+        return lv_decode_ico;
+    if (size >= 4 && data[0] == 0 && data[1] == 0 && data[2] == 2 && data[3] == 0)
+        return lv_decode_ico;
     size_t at = size >= 3 && !memcmp(data, "\xef\xbb\xbf", 3) ? 3 : 0;
     while (at < size && (data[at] == ' ' || data[at] == '\t' || data[at] == '\n' || data[at] == '\r'))
         ++at;
