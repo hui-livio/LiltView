@@ -52,6 +52,8 @@ const char *format_name(lv_format format)
         return "ICO";
     case LV_FORMAT_CUR:
         return "CUR";
+    case LV_FORMAT_JPEG2000:
+        return "JPEG 2000";
     default:
         return nullptr;
     }

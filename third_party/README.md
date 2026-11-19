@@ -23,6 +23,7 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `SDL/` | release-3.4.0 | `a962f40bbba175e9716557a25d5d7965f134a3d3` | submodule、窗口 / 输入 |
 | `giflib/` | 6.1.3 | `edff4aed17f857442ab0cac31566572ba08f93d3` | submodule、静态解码库，编码库仅测试 |
 | `libtiff/` | v4.7.2 | `d01a94be176f5f6a87f7ee1c0b32e65416aa2b4d` | submodule、裁剪版静态库 |
+| `openjpeg/` | v2.5.4 | `bbbe3a092256511ec9056a7ad204f9db42a87264` | 固定源码、裁剪版静态库 |
 | `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
 | `lz4/` | v1.10.0 | `ebb370ca83af193212df4dcbadcc5d87bc0de2f0` | submodule、仅 lz4.c / xxhash.c 静态库 |
 | `dav1d-ref/` | 引用生命周期受控子集 | `39834d7f71c85a9c555f2ddd7a7add6d671750de` | C11 头文件抽取 / 改编，BSD-2-Clause；非完整 decoder |
@@ -32,7 +33,7 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 
 libjpeg-turbo 使用本地 ExternalProject 独立构建 jpeg-static，因为上游不支持 add_subdirectory。关闭 shared、TurboJPEG API、tools 和 tests；安装附 LICENSE.md / README.ijg，不安装 JPEG 动态库。x86 SIMD 需要 NASM，没有时上游回退标量。
 
-PNG 使用本地 libpng / zlib 静态 target；WebP 应用仅链接 decoder，测试才构建编码器。
+PNG 使用本地 libpng / zlib 静态 target；WebP 应用仅链接 decoder，测试才构建编码器。OpenJPEG 关闭 shared、codec 工具、JPIP、viewer、Java、测试和文档，仅构建 `openjp2` 静态库。
 PlutoSVG / PlutoVG 关闭示例、FreeType 集成和系统字体缓存读取，按固定嵌套源码构建，不探测系统 PlutoVG。安装同时保留 PlutoVG bundled stb 的 MIT 署名、FreeType FTL 和原始版权声明，汇总在 `PlutoVG-NOTICES.txt`。
 SVG 当前只使用上述 PlutoSVG / PlutoVG 基础静态 profile，复杂 SVG 不支持。没有新增 SVG 后端、Rust 工具链或浏览器运行时；后续选型受轻量 C/C++、无重型框架及无 V8 约束，见[技术决策](../docs/开发计划与未实现设计.md#7-复杂-svg-范围与技术决策)。
 编译型依赖保持上游源码原样；纯头文件 iguana 的受控补丁见下文及其来源清单。BMP 由项目 C23 实现。功能边界与验证见[格式说明](../docs/图片格式兼容表.md)。

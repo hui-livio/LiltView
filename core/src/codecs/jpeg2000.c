@@ -11,6 +11,55 @@ typedef struct jpeg2000_source
     lv_error_code failure;
 } jpeg2000_source;
 
+static OPJ_SIZE_T j2k_read(void *buffer, OPJ_SIZE_T bytes, void *userdata)
+{
+    jpeg2000_source *source = userdata;
+    if (lv_stopped(source->core, source->request))
+        return (OPJ_SIZE_T)-1;
+    if (!bytes)
+        return (OPJ_SIZE_T)-1;
+    const uint64_t remaining = source->input->version.bytes - source->position;
+    const size_t wanted       = bytes < remaining ? (size_t)bytes : (size_t)remaining;
+    const size_t got          = fread(buffer, 1, wanted, source->input->file);
+    source->position += got;
+    source->request->bytes_read += got;
+    return got;
+}
+
+static OPJ_OFF_T j2k_skip(OPJ_OFF_T bytes, void *userdata)
+{
+    jpeg2000_source *source = userdata;
+    if (lv_stopped(source->core, source->request))
+        return (OPJ_OFF_T)-1;
+    if (bytes < 0)
+    {
+        const uint64_t backward = (uint64_t)(-(bytes + 1)) + 1;
+        if (backward > source->position)
+            return (OPJ_OFF_T)-1;
+        source->position -= backward;
+    }
+    else
+    {
+        if ((uint64_t)bytes > source->input->version.bytes - source->position)
+            return (OPJ_OFF_T)-1;
+        source->position += (size_t)bytes;
+    }
+    if (!lv_file_seek(source->input->file, source->position))
+        return (OPJ_OFF_T)-1;
+    return bytes;
+}
+
+static OPJ_BOOL j2k_seek(OPJ_OFF_T position, void *userdata)
+{
+    jpeg2000_source *source = userdata;
+    if (position < 0 || (uint64_t)position > source->input->version.bytes || lv_stopped(source->core, source->request))
+        return OPJ_FALSE;
+    if (!lv_file_seek(source->input->file, (uint64_t)position))
+        return OPJ_FALSE;
+    source->position = (uint64_t)position;
+    return OPJ_TRUE;
+}
+
 static void j2k_error(const char *message, void *userdata)
 {
     (void)message;
