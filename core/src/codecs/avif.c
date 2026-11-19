@@ -55,7 +55,7 @@ void lv_decode_avif(lv_core *core, lv_request *request, lv_input *input, lv_erro
         goto done;
     }
     decoder->maxThreads      = 1;
-    decoder->imageCountLimit = 1;
+    decoder->imageCountLimit = 2;
     decoder->imageContentToDecode = AVIF_IMAGE_CONTENT_COLOR_AND_ALPHA;
     avifResult result = avifDecoderSetIOMemory(decoder, data, bytes);
     if (result != AVIF_RESULT_OK)
