@@ -68,6 +68,16 @@ def main():
     png += chunk(b"IEND", b"")
     (folder / "red-alpha.png").write_bytes(png)
 
+    qoi = bytearray(b"qoif" + struct.pack(">II", width, height) + bytes((4, 0)))
+    qoi += bytes((0xff, 255, 0, 0, 128))
+    remaining = width * height - 1
+    while remaining:
+        count = min(remaining, 62)
+        qoi.append(0xc0 | (count - 1))
+        remaining -= count
+    qoi += bytes((0, 0, 0, 0, 0, 0, 0, 1))
+    (folder / "red-alpha.qoi").write_bytes(qoi)
+
     bgr = bytes((0, 0, 255)) * width * height
     bmp = b"BM" + struct.pack("<IHHI", 54 + len(bgr), 0, 0, 54)
     bmp += struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(bgr), 0, 0, 0, 0) + bgr

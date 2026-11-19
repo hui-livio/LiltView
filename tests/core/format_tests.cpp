@@ -24,6 +24,43 @@ void put32(Bytes &out, std::size_t at, std::uint32_t value)
     put16(out, at + 2, value >> 16);
 }
 
+void put32be(Bytes &out, std::size_t at, std::uint32_t value)
+{
+    out.at(at)     = static_cast<unsigned char>(value >> 24);
+    out.at(at + 1) = static_cast<unsigned char>(value >> 16);
+    out.at(at + 2) = static_cast<unsigned char>(value >> 8);
+    out.at(at + 3) = static_cast<unsigned char>(value);
+}
+
+Bytes qoi(std::uint32_t width, std::uint32_t height, unsigned channels, unsigned colorspace, Bytes operations)
+{
+    Bytes output(14, 0);
+    output[0] = 'q';
+    output[1] = 'o';
+    output[2] = 'i';
+    output[3] = 'f';
+    put32be(output, 4, width);
+    put32be(output, 8, height);
+    output[12] = static_cast<unsigned char>(channels);
+    output[13] = static_cast<unsigned char>(colorspace);
+    output.insert(output.end(), operations.begin(), operations.end());
+    output.insert(output.end(), {0, 0, 0, 0, 0, 0, 0, 1});
+    return output;
+}
+
+Bytes qoi_solid(std::uint32_t width, std::uint32_t height, std::array<unsigned char, 4> pixel)
+{
+    Bytes operations{0xff, pixel[0], pixel[1], pixel[2], pixel[3]};
+    std::size_t remaining = static_cast<std::size_t>(width) * height - 1;
+    while (remaining)
+    {
+        const auto count = std::min<std::size_t>(remaining, 62);
+        operations.push_back(static_cast<unsigned char>(0xc0u | (count - 1)));
+        remaining -= count;
+    }
+    return qoi(width, height, 4, 0, std::move(operations));
+}
+
 Bytes png(bool interlaced = false, int depth = 8, bool indexed = false, bool gray = false, bool alpha_edge = false)
 {
     Bytes output;
@@ -238,6 +275,68 @@ TEST_CASE("PNG normal Adam7 palette transparency and 16-bit decode to straight R
     }
 }
 
+TEST_CASE("QOI RGB and RGBA decode all pixel opcodes", "[formats][qoi]")
+{
+    const auto image = qoi(7, 1, 4, 0,
+                           {0xfe, 10, 20, 30, // RGB
+                            0x7e,             // DIFF: +1, +1, 0
+                            0xa4, 0x77,      // LUMA: dg +4, dr-dg -1, db-dg -1
+                            0xff, 100, 110, 120, 64, // RGBA
+                            0x1a,             // INDEX for RGBA(100, 110, 120, 64)
+                            0xc1});           // RUN for two more pixels
+    const auto result = decode(image);
+    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+    CHECK(result.info.format == LV_FORMAT_QOI);
+    CHECK(result.info.source_size.width == 7);
+    CHECK(result.info.source_size.height == 1);
+    const std::array<std::array<unsigned char, 4>, 7> expected{{
+        {10, 20, 30, 255}, {11, 21, 30, 255}, {14, 25, 33, 255}, {100, 110, 120, 64},
+        {100, 110, 120, 64}, {100, 110, 120, 64}, {100, 110, 120, 64}}};
+    for (std::size_t i = 0; i < expected.size(); ++i)
+        for (std::size_t channel = 0; channel < 4; ++channel)
+            CHECK(result.pixels[i * 4 + channel] == expected[i][channel]);
+
+    const auto native = decode_native(image);
+    REQUIRE(native.terminal == LV_EVENT_COMPLETE);
+    CHECK(native.info.canvas.width == 7);
+    CHECK(native.info.canvas.height == 1);
+    CHECK(native.pixels == result.pixels);
+
+    auto rgb = decode(qoi(2, 1, 3, 1, {0xfe, 255, 0, 0, 0xc0}));
+    REQUIRE(rgb.terminal == LV_EVENT_COMPLETE);
+    CHECK(rgb.info.format == LV_FORMAT_QOI);
+    CHECK(rgb.pixels == Bytes{255, 0, 0, 255, 255, 0, 0, 255});
+}
+
+TEST_CASE("QOI FIT preserves dimensions and rejects malformed sources", "[formats][qoi][errors]")
+{
+    auto fitted = decode(qoi_solid(7, 5, {255, 0, 0, 128}), {3, 3});
+    REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+    CHECK(fitted.info.canvas.width == 3);
+    CHECK(fitted.info.canvas.height == 2);
+    red_alpha(fitted);
+
+    auto invalid_channels = qoi(1, 1, 2, 0, {0xfe, 1, 2, 3});
+    auto invalid_colorspace = qoi(1, 1, 4, 2, {0xff, 1, 2, 3, 4});
+    auto truncated = qoi(1, 1, 4, 0, {0xff, 1, 2, 3, 4});
+    truncated.pop_back();
+    auto trailing = qoi(1, 1, 4, 0, {0xff, 1, 2, 3, 4});
+    trailing.push_back(0);
+    auto overrun = qoi(1, 1, 4, 0, {0xc1});
+    auto zero = qoi(0, 1, 4, 0, {0xff, 1, 2, 3, 4});
+    for (const auto &source : {invalid_channels, invalid_colorspace, truncated, trailing, overrun})
+    {
+        const auto result = decode(source);
+        REQUIRE(result.terminal == LV_EVENT_ERROR);
+        CHECK(result.error.code == (source == invalid_channels || source == invalid_colorspace ?
+                                        LV_ERROR_FORMAT_UNSUPPORTED :
+                                        LV_ERROR_CORRUPT_DATA));
+    }
+    const auto zero_result = decode(zero);
+    REQUIRE(zero_result.terminal == LV_EVENT_ERROR);
+    CHECK(zero_result.error.code == LV_ERROR_DIMENSION_LIMIT);
+}
+
 TEST_CASE("WebP lossy lossless and alpha use decoder-scaled FIT", "[formats][webp]")
 {
     for (bool lossless : {false, true})
@@ -398,7 +497,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_BMP; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_QOI; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);
@@ -411,7 +510,7 @@ TEST_CASE("all formats report capabilities and enforce output or original pixel 
     larger_bmp.resize(54 + 128 * 128 * 3, 0);
     put32(larger_bmp, 18, 128);
     put32(larger_bmp, 22, 128);
-    const std::vector<Bytes> images{png(), webp(false), larger_bmp, red_svg()};
+    const std::vector<Bytes> images{png(), webp(false), larger_bmp, red_svg(), qoi_solid(128, 128, {255, 0, 0, 255})};
     for (const auto &image : images)
     {
         Engine limited(1, 12 * 1024);
@@ -427,7 +526,7 @@ TEST_CASE("all formats report capabilities and enforce output or original pixel 
 
 TEST_CASE("new formats detect mutation and cancellation after metadata", "[formats][source][cancel]")
 {
-    for (const auto &image : std::vector<Bytes>{png(), webp(false), bmp(), red_svg()})
+    for (const auto &image : std::vector<Bytes>{png(), webp(false), bmp(), red_svg(), qoi_solid(7, 5, {255, 0, 0, 255})})
         for (bool cancel : {false, true})
         {
             Files files;

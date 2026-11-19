@@ -753,7 +753,7 @@ TEST_CASE("existing static codec outputs all participate in content caching", "[
     Files files;
     const auto fixtures = std::filesystem::path(__FILE__).parent_path().parent_path() / "fixtures";
     std::vector<std::string> paths{image(files, "cached.jpg")};
-    for (const auto *name : {"red.bmp", "red-alpha.png", "red-alpha.webp", "red-alpha.svg", "red-first-frame.gif", "red.tiff"})
+    for (const auto *name : {"red.bmp", "red-alpha.png", "red-alpha.webp", "red-alpha.qoi", "red-alpha.svg", "red-first-frame.gif", "red.tiff"})
         paths.push_back((fixtures / name).string());
     CachedEngine engine(4 * mib, 48 * mib);
     for (const auto &path : paths)
