@@ -34,7 +34,7 @@ Image information, the status bar, and both themes. Both screenshots display the
 | Format | Supported today | Limits |
 | --- | --- | --- |
 | JPEG (`.jpg` / `.jpeg`) | Common 8-bit RGB and grayscale images, including progressive JPEG and EXIF orientation | No CMYK / YCCK, 12-bit JPEG, or progressive scan previews |
-| PNG (`.png`) | Color, grayscale, indexed color, transparency, and Adam7 interlacing | 16-bit input is converted to 8-bit display; APNG is not supported |
+| PNG (`.png`) | Color, grayscale, indexed color, transparency, Adam7 interlacing, and APNG animation | 16-bit input is converted to 8-bit display; APNG uses the animation session path |
 | WebP (`.webp`) | Static lossy / lossless images and transparency | Animated WebP is not supported |
 | BMP (`.bmp`) | Palettes, common true-color layouts, bitfields, and RLE4 / RLE8 | No embedded JPEG / PNG or some extended compression variants |
 | SVG (`.svg`) | Basic static paths, geometry, gradients, transforms, and transparency | Complex SVG is not supported; zooming reuses rasterized pixels rather than providing unlimited vector sharpness |

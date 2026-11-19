@@ -43,7 +43,7 @@ void Viewer::pump_neighbors()
                 const auto format = prefetch_->observed_format(*path);
                 // A full NATIVE working set can fail before INFO even though a
                 // bounded animation FIT is valid. OPEN remains the classifier.
-                if (!format || *format == LV_FORMAT_GIF)
+                if (!format || *format == LV_FORMAT_GIF || *format == LV_FORMAT_PNG)
                     animations.push_back(*path);
             }
     const auto bounds = animation_bounds();

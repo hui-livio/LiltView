@@ -80,6 +80,23 @@ def main():
     (folder / "red.ico").write_bytes(icon_container(png, width, height, 1))
     (folder / "red.cur").write_bytes(icon_container(png, width, height, 2, (width // 2, height // 2)))
 
+    def apng_frame(red, green, blue, alpha=255):
+        raw = b"".join(b"\0" + bytes((red, green, blue, alpha)) * width for _ in range(height))
+        return zlib.compress(raw)
+
+    def apng_control(sequence):
+        return struct.pack(">IIIIIHHBB", sequence, width, height, 0, 0, 1, 10, 0, 0)
+
+    apng = b"\x89PNG\r\n\x1a\n"
+    apng += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+    apng += chunk(b"acTL", struct.pack(">II", 2, 0))
+    apng += chunk(b"fcTL", apng_control(0))
+    apng += chunk(b"IDAT", apng_frame(255, 0, 0))
+    apng += chunk(b"fcTL", apng_control(1))
+    apng += chunk(b"fdAT", struct.pack(">I", 2) + apng_frame(0, 0, 255))
+    apng += chunk(b"IEND", b"")
+    (folder / "red-blue.apng").write_bytes(apng)
+
     qoi = bytearray(b"qoif" + struct.pack(">II", width, height) + bytes((4, 0)))
     qoi += bytes((0xff, 255, 0, 0, 128))
     remaining = width * height - 1
