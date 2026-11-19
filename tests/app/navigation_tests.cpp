@@ -114,9 +114,9 @@ TEST_CASE("directory navigation filters only provided formats and regular files"
     // Special files need a native filesystem: WSL Windows mounts cannot create FIFOs.
     Directory directory(std::filesystem::temp_directory_path());
     const auto selected = directory.file("a.JPG");
-    for (const auto *name : {"b.JpEg", "c.PNG", "d.svg", "e.webp", "f.bmp", "g.GIF", "h.tif", "i.TIFF", "j.QOI", "k.ICO", "l.CUR", ".hidden.png"})
+    for (const auto *name : {"b.JpEg", "c.PNG", "d.svg", "e.webp", "f.bmp", "g.GIF", "h.tif", "i.TIFF", "j.QOI", "k.ICO", "l.CUR", "m.AVIF", ".hidden.png"})
         directory.file(name);
-    directory.file("unsupported.avif");
+    directory.file("unsupported.xyz");
     directory.file("notes.txt");
     std::filesystem::create_directory(directory.path / "folder.png");
     std::filesystem::create_symlink("a.JPG", directory.path / "linked.png");
@@ -124,18 +124,19 @@ TEST_CASE("directory navigation filters only provided formats and regular files"
 #if defined(__linux__)
     REQUIRE(mkfifo((directory.path / "pipe.png").c_str(), 0600) == 0);
 #endif
-    DirectoryNavigation navigation({"jpg", ".JPEG", "png", "svg", "webp", "bmp", "gif", "tif", "tiff", "qoi", "ico", "cur", "PNG", ""});
+    DirectoryNavigation navigation({"jpg", ".JPEG", "png", "svg", "webp", "bmp", "gif", "tif", "tiff", "qoi", "ico", "cur", "avif", "PNG", ""});
     navigation.select(selected);
     settle(navigation);
     REQUIRE_FALSE(navigation.snapshot().error);
-    CHECK(navigation.snapshot().total == 14);
+    CHECK(navigation.snapshot().total == 15);
     CHECK(navigation.snapshot().current == 2); // Hidden regular image precedes a.JPG.
     while (navigation.step(-1))
     {
     }
     const auto names = forward(navigation);
     CHECK(std::find(names.begin(), names.end(), "linked.png") != names.end());
-    CHECK(std::find(names.begin(), names.end(), "unsupported.avif") == names.end());
+    CHECK(std::find(names.begin(), names.end(), "m.AVIF") != names.end());
+    CHECK(std::find(names.begin(), names.end(), "unsupported.xyz") == names.end());
     CHECK(std::find(names.begin(), names.end(), "folder.png") == names.end());
     CHECK(std::find(names.begin(), names.end(), "broken.png") == names.end());
     CHECK(std::find(names.begin(), names.end(), "pipe.png") == names.end());

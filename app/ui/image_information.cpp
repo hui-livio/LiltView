@@ -54,6 +54,8 @@ const char *format_name(lv_format format)
         return "CUR";
     case LV_FORMAT_JPEG2000:
         return "JPEG 2000";
+    case LV_FORMAT_AVIF:
+        return "AVIF";
     default:
         return nullptr;
     }

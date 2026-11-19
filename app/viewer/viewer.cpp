@@ -33,7 +33,8 @@ std::vector<std::string> image_extensions(lv_core *core)
                                      {LV_FORMAT_WEBP, {".webp"}},         {LV_FORMAT_BMP, {".bmp"}}, {LV_FORMAT_GIF, {".gif"}},
                                      {LV_FORMAT_TIFF, {".tif", ".tiff"}}, {LV_FORMAT_QOI, {".qoi"}},
                                      {LV_FORMAT_ICO, {".ico"}}, {LV_FORMAT_CUR, {".cur"}},
-                                     {LV_FORMAT_JPEG2000, {".jp2", ".j2k", ".j2c", ".jpf"}}};
+                                     {LV_FORMAT_JPEG2000, {".jp2", ".j2k", ".j2c", ".jpf"}},
+                                     {LV_FORMAT_AVIF, {".avif"}}};
     std::vector<std::string> extensions;
     for (const auto &format : formats)
     {

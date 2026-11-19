@@ -661,7 +661,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_JPEG2000; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_AVIF; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);

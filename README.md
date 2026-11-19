@@ -44,6 +44,7 @@ Image information, the status bar, and both themes. Both screenshots display the
 | ICO (`.ico`) | PNG and common DIB icon entries with deterministic size selection and alpha / mask composition | No icon editing; CUR hotspot is validated but not shown in image information |
 | CUR (`.cur`) | PNG and common DIB cursor entries with alpha / mask composition | No cursor editing; hotspot is validated but not shown in image information |
 | JPEG 2000 (`.jp2` / `.j2k` / `.j2c` / `.jpf`) | Static 8-bit unsigned RGB and grayscale JP2 / J2K images | No signed, non-8-bit, CMYK, HDR, animation, or region decode |
+| AVIF (`.avif`) | Static 8-bit RGB / grayscale images, lossless or lossy, with transparency, decoded to RGBA8 | No animation, high-bit-depth, HDR, ICC, transform metadata, or region decode; requires a configured dav1d decoder |
 
 **Supporting a format does not mean supporting every encoding variant.** Files are identified by their contents; folder browsing filters by the extensions listed above. See the [format compatibility table](docs/图片格式兼容表.md) for bit depths, transparency, orientation, and resource limits.
 
