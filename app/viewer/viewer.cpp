@@ -31,7 +31,7 @@ std::vector<std::string> image_extensions(lv_core *core)
     };
     const FormatExtensions formats[]{{LV_FORMAT_JPEG, {".jpg", ".jpeg"}}, {LV_FORMAT_PNG, {".png"}}, {LV_FORMAT_SVG, {".svg"}},
                                      {LV_FORMAT_WEBP, {".webp"}},         {LV_FORMAT_BMP, {".bmp"}}, {LV_FORMAT_GIF, {".gif"}},
-                                     {LV_FORMAT_TIFF, {".tif", ".tiff"}}};
+                                     {LV_FORMAT_TIFF, {".tif", ".tiff"}}, {LV_FORMAT_QOI, {".qoi"}}};
     std::vector<std::string> extensions;
     for (const auto &format : formats)
     {

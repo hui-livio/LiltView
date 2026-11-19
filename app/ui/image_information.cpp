@@ -46,6 +46,8 @@ const char *format_name(lv_format format)
         return "GIF";
     case LV_FORMAT_TIFF:
         return "TIFF";
+    case LV_FORMAT_QOI:
+        return "QOI";
     default:
         return nullptr;
     }

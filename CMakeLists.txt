@@ -67,7 +67,7 @@ endif()
 
 message(STATUS "LiltView ${PROJECT_VERSION}: C${LILTVIEW_C_STANDARD} core / C++${LILTVIEW_CXX_STANDARD} consumers")
 message(STATUS "Dependencies: local third_party sources; app components=${LILTVIEW_BUILD_APP_COMPONENTS}; Catch2=${LILTVIEW_BUILD_UNIT_TESTS}")
-message(STATUS "JPEG/PNG/SVG/WebP/BMP/GIF/TIFF DISPLAY/FIT enabled; renderer backend=${LILTVIEW_RENDERER_BACKEND}; native tiled streaming / cached camera transforms")
+message(STATUS "JPEG/PNG/SVG/WebP/BMP/GIF/TIFF/QOI DISPLAY/FIT enabled; renderer backend=${LILTVIEW_RENDERER_BACKEND}; native tiled streaming / cached camera transforms")
 
 if(LILTVIEW_RELEASE_PACKAGING AND LILTVIEW_BUILD_APP_COMPONENTS)
     include(cmake/LiltViewPackaging.cmake)
