@@ -688,7 +688,7 @@ TEST_CASE("PREFETCH configuration preserves ABI and rejects disabled or unimplem
     config.disk_cache_budget_bytes = mib;
     CHECK(lv_core_create(&config, &core) == LV_UNSUPPORTED);
     CHECK(core == nullptr);
-    CHECK(lv_core_abi_version() == 2);
+    CHECK(lv_core_abi_version() == 3);
 }
 
 TEST_CASE("queued foreground requests run before earlier queued PREFETCH", "[cache][prefetch][priority]")
