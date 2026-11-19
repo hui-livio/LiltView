@@ -91,6 +91,7 @@ struct lv_request
     uint64_t sequence, started_ns, final_tiles, bytes_read, reservation;
     uint64_t workspace;
     bool partial;
+    lv_selection selection;
     lv_animation *animation;
     uint32_t animation_action; /* 0 = OPEN; otherwise NEXT / RESET. */
     bool animation_end, deferred_info;

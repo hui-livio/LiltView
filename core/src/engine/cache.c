@@ -15,6 +15,7 @@ struct lv_cache_entry
     lv_source *source;
     lv_file_version version;
     lv_target target;
+    lv_selection selection;
     lv_image_info info;
     uint64_t bytes, metadata;
     size_t count, captured;
@@ -34,6 +35,11 @@ static bool same_target(const lv_target *a, const lv_target *b)
     return a->as.region.canvas.width == b->as.region.canvas.width && a->as.region.canvas.height == b->as.region.canvas.height &&
         a->as.region.rect.x == b->as.region.rect.x && a->as.region.rect.y == b->as.region.rect.y &&
         a->as.region.rect.width == b->as.region.rect.width && a->as.region.rect.height == b->as.region.rect.height;
+}
+
+static bool same_selection(const lv_selection *a, const lv_selection *b)
+{
+    return a->kind == b->kind && a->index == b->index;
 }
 
 static void drop_entry(lv_core *core, lv_cache_entry *entry)
@@ -135,6 +141,7 @@ bool lv_cache_begin_locked(lv_core *core, lv_request *r, const lv_image_info *in
     *entry = (lv_cache_entry){.source   = source,
                               .version  = *version,
                               .target   = r->desc.target,
+                              .selection = r->desc.selection,
                               .info     = *info,
                               .bytes    = metadata,
                               .metadata = metadata,
@@ -230,7 +237,8 @@ bool lv_cache_replay(lv_core *core, lv_request *r, FILE *file, const lv_file_ver
             remove_entry(core, link);
             continue;
         }
-        if (!memcmp(&candidate->version, version, sizeof *version) && same_target(&candidate->target, &r->desc.target))
+        if (!memcmp(&candidate->version, version, sizeof *version) && same_target(&candidate->target, &r->desc.target) &&
+            same_selection(&candidate->selection, &r->desc.selection))
         {
             entry             = candidate;
             *link             = entry->next;

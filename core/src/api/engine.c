@@ -13,6 +13,12 @@ static bool config_valid(const lv_core_config *c)
         !c->animation.reserved && c->animation.resident_budget_bytes <= c->cpu_budget_bytes;
 }
 
+static bool selection_valid(const lv_selection *selection)
+{
+    return selection->reserved == 0 &&
+        (selection->kind == LV_SELECTION_NONE || selection->kind == LV_SELECTION_TIFF_PAGE);
+}
+
 lv_status LV_CALL lv_core_create(const lv_core_config *config, lv_core **out)
 {
     if (!out)
@@ -148,6 +154,8 @@ lv_status lv_validate_request(const lv_request_desc *r)
     if (r->path.encoding != LV_PATH_UTF8 && r->path.encoding != LV_PATH_POSIX_BYTES)
         return LV_INVALID_ARGUMENT;
     if (!r->path.data || !r->path.byte_count)
+        return LV_INVALID_ARGUMENT;
+    if (!selection_valid(&r->selection))
         return LV_INVALID_ARGUMENT;
     if (r->path.byte_count == SIZE_MAX)
         return LV_LIMIT_REACHED;

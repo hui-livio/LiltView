@@ -60,6 +60,8 @@ void lv_decode_image(lv_core *core, lv_request *r, lv_error_info *error)
         error->code = LV_ERROR_CORRUPT_DATA;
     else if (!decode)
         error->code = LV_ERROR_FORMAT_UNSUPPORTED;
+    else if (r->desc.selection.kind != LV_SELECTION_NONE && decode != lv_decode_tiff)
+        error->code = LV_ERROR_FORMAT_UNSUPPORTED;
     else if (r->desc.target.kind == LV_TARGET_REGION && !regional)
         error->code = LV_ERROR_TARGET_UNSUPPORTED;
     else if (!regional && input.version.bytes > UINT64_C(64) * 1024 * 1024)
@@ -191,7 +193,8 @@ bool lv_frame_prepare(lv_frame *f, lv_size_u32 source, lv_size_u32 canvas, lv_fo
                                                                    LV_LOAD_INCREMENTAL,
                                               .canvas       = canvas,
                                               .region       = region,
-                                              .tile_edge    = (uint32_t)edge};
+                                              .tile_edge    = (uint32_t)edge,
+                                              .selection    = f->request->desc.selection};
     if (tiled)
     {
         f->tile_count   = (size_t)count;

@@ -20,7 +20,7 @@ static_assert(sizeof(lv_animation_id) == 8);
 static_assert(offsetof(lv_core_config, abi_version) == 0);
 static_assert(offsetof(lv_event_view, as) >= sizeof(lv_request_id) * 3);
 
-static_assert(LV_CORE_ABI_VERSION == 2);
+static_assert(LV_CORE_ABI_VERSION == 3);
 
 
 int main()

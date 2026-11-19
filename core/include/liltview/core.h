@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define LV_CORE_ABI_VERSION UINT32_C(2)
+#define LV_CORE_ABI_VERSION UINT32_C(3)
 #define LV_REQUEST_NONE UINT64_C(0)
 
 typedef struct lv_core lv_core;
@@ -166,6 +166,20 @@ typedef struct lv_target
     } as;
 } lv_target;
 
+typedef uint32_t lv_selection_kind;
+enum
+{
+    LV_SELECTION_NONE      = 0,
+    LV_SELECTION_TIFF_PAGE = 1
+};
+
+typedef struct lv_selection
+{
+    lv_selection_kind kind;
+    uint32_t reserved;
+    uint64_t index;
+} lv_selection;
+
 typedef uint32_t lv_load_mode;
 enum
 {
@@ -265,13 +279,16 @@ typedef struct lv_request_desc
     uint64_t user_tag; /* Echoed unchanged; core never interprets it. */
     lv_path path;      /* Copied on success; no file I/O in submit. */
     lv_target target;  /* Immutable; a new view uses a new request ID. */
+    lv_selection selection; /* ABI 3: explicit container item selection. */
 } lv_request_desc;
 
 typedef uint32_t lv_info_flags;
 enum
 {
     LV_INFO_SOURCE_SIZE_KNOWN = 1u << 0,
-    LV_INFO_FILE_BYTES_KNOWN  = 1u << 1
+    LV_INFO_FILE_BYTES_KNOWN  = 1u << 1,
+    LV_INFO_SELECTION_KNOWN   = 1u << 2,
+    LV_INFO_SELECTION_COUNT_KNOWN = 1u << 3
 };
 
 typedef struct lv_image_info
@@ -287,6 +304,8 @@ typedef struct lv_image_info
     lv_size_u32 canvas; /* Unrotated output size for this request. */
     lv_rect_u32 region; /* Entire requested coverage, in canvas pixels. */
     uint32_t tile_edge;
+    lv_selection selection;
+    uint64_t selection_count;
 } lv_image_info;
 
 typedef uint32_t lv_region_flags;

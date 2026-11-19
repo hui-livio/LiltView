@@ -46,6 +46,7 @@ void LV_CALL lv_request_desc_init(lv_request_desc *out_request)
     out_request->kind        = LV_REQUEST_DISPLAY;
     out_request->priority    = LV_PRIORITY_CURRENT;
     out_request->target.kind = LV_TARGET_FIT;
+    out_request->selection.kind = LV_SELECTION_NONE;
 }
 
 
