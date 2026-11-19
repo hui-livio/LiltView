@@ -501,7 +501,8 @@ bool AnimationWarmup::consume(const lv_event_view &view)
         {
             valid = node.stage == State::Stage::opening && !node.info_received &&
                 view.as.animation.animation_id == node.session && view.as.animation.epoch != 0 &&
-                (view.as.animation.image.format == LV_FORMAT_GIF || view.as.animation.image.format == LV_FORMAT_PNG);
+                (view.as.animation.image.format == LV_FORMAT_GIF || view.as.animation.image.format == LV_FORMAT_PNG ||
+                 view.as.animation.image.format == LV_FORMAT_WEBP);
             if (valid)
             {
                 node.info          = view.as.animation;

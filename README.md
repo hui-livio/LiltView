@@ -35,7 +35,7 @@ Image information, the status bar, and both themes. Both screenshots display the
 | --- | --- | --- |
 | JPEG (`.jpg` / `.jpeg`) | Common 8-bit RGB and grayscale images, including progressive JPEG and EXIF orientation | No CMYK / YCCK, 12-bit JPEG, or progressive scan previews |
 | PNG (`.png`) | Color, grayscale, indexed color, transparency, Adam7 interlacing, and APNG animation | 16-bit input is converted to 8-bit display; APNG uses the animation session path |
-| WebP (`.webp`) | Static lossy / lossless images and transparency | Animated WebP is not supported |
+| WebP (`.webp`) | Static lossy / lossless images, transparency, and animated WebP playback | Static API rejects animated containers; animation uses the session path |
 | BMP (`.bmp`) | Palettes, common true-color layouts, bitfields, and RLE4 / RLE8 | No embedded JPEG / PNG or some extended compression variants |
 | SVG (`.svg`) | Basic static paths, geometry, gradients, transforms, and transparency | Complex SVG is not supported; zooming reuses rasterized pixels rather than providing unlimited vector sharpness |
 | GIF (`.gif`) | Automatic playback of ordinary-size GIFs, including transparency, compositing, and loops | No oversized animations, manual pause, frame stepping, or seeking |

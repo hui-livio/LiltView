@@ -622,7 +622,7 @@ def test_jpeg_render(executable, folder):
 def test_formats_render(executable, folder):
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     (folder / "settings.yaml").write_text("log_level: info\nlanguage: en-US\n")
-    for filename in ("red-alpha.png", "red-blue.apng", "red-alpha.webp", "red-alpha.qoi", "red.ico", "red.cur", "red.bmp", "red-alpha.svg", "red-first-frame.gif", "red.tiff"):
+    for filename in ("red-alpha.png", "red-blue.apng", "red-alpha.webp", "red-blue.webp", "red-alpha.qoi", "red.ico", "red.cur", "red.bmp", "red-alpha.svg", "red-first-frame.gif", "red.tiff"):
         screenshot = folder / (filename + ".ppm")
         result = subprocess.run([str(executable), "--smoke-test", "--config-dir", str(folder), "--screenshot",
                                  str(screenshot), str(fixtures / filename)], text=True, capture_output=True, timeout=15)
