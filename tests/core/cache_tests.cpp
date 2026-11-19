@@ -1,4 +1,4 @@
-// Reviewed ABI 2 contract: cache_budget_bytes bounds complete immutable static
+// Reviewed ABI 3 contract: cache_budget_bytes bounds complete immutable static
 // results. The key is the opened file version plus active target fields, never
 // request kind, priority, tag or union padding. DISPLAY may bypass caching;
 // PREFETCH must decode and retain a complete result or report a budget error.

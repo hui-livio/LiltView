@@ -283,6 +283,13 @@ TEST_CASE("TIFF page selection reports the selected directory and decodes the re
     CHECK(result.info.selection_count == 2);
     CHECK(result.pixels[0] == 0);
     CHECK(result.pixels[2] == 255);
+
+    request.selection.index = 2;
+    lv_request_id invalid = 0;
+    REQUIRE(lv_core_submit(engine.core, &request, &invalid) == LV_OK);
+    const auto invalid_result = collect(engine);
+    REQUIRE(invalid_result.terminal == LV_EVENT_ERROR);
+    CHECK(invalid_result.error.code == LV_ERROR_TARGET_UNSUPPORTED);
 }
 
 TEST_CASE("TIFF tile edges separate planes 16-bit and explicit alpha become straight RGBA", "[formats][tiff][alpha]")

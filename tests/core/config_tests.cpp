@@ -2,7 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("ABI 2 rejects version 1 before reading new animation configuration", "[config][animation]")
+TEST_CASE("ABI 3 rejects version 1 before reading new animation configuration", "[config][animation]")
 {
     lv_core_config config;
     lv_core_config_init(&config);
