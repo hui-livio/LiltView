@@ -84,6 +84,13 @@
       "version": "v1.10.0",
       "commit": "ebb370ca83af193212df4dcbadcc5d87bc0de2f0",
       "release": "https://github.com/lz4/lz4/releases/tag/v1.10.0"
+    },
+    "openjpeg": {
+      "path": "third_party/openjpeg",
+      "url": "https://github.com/uclouvain/openjpeg.git",
+      "version": "v2.5.4",
+      "commit": "bbbe3a092256511ec9056a7ad204f9db42a87264",
+      "release": "https://github.com/uclouvain/openjpeg/releases/tag/v2.5.4"
     }
   },
   "vendored_headers": [

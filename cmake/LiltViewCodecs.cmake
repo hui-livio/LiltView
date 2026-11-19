@@ -31,6 +31,24 @@ add_subdirectory("${webp_source}" "${PROJECT_BINARY_DIR}/third_party/libwebp" EX
 # The decoder-only upstream target does not export src/, unlike webp.
 target_include_directories(webpdecoder SYSTEM INTERFACE "$<BUILD_INTERFACE:${webp_source}/src>")
 
+liltview_dependency_source(openjpeg CMakeLists.txt openjpeg_source)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(BUILD_CODEC OFF CACHE BOOL "" FORCE)
+set(BUILD_DOC OFF CACHE BOOL "" FORCE)
+set(BUILD_JPIP OFF CACHE BOOL "" FORCE)
+set(BUILD_VIEWER OFF CACHE BOOL "" FORCE)
+set(BUILD_JAVA OFF CACHE BOOL "" FORCE)
+set(BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(BUILD_LUTS_GENERATOR OFF CACHE BOOL "" FORCE)
+set(OPENJPEG_EMBEDDED ON CACHE BOOL "" FORCE)
+add_subdirectory("${openjpeg_source}" "${PROJECT_BINARY_DIR}/third_party/openjpeg" EXCLUDE_FROM_ALL SYSTEM)
+set(BUILD_TESTING ON CACHE BOOL "" FORCE)
+target_include_directories(openjp2 SYSTEM PUBLIC
+    "$<BUILD_INTERFACE:${openjpeg_source}/src/lib/openjp2>"
+    "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/third_party/openjpeg/src/lib/openjp2>")
+
 liltview_dependency_source(plutosvg CMakeLists.txt svg_source)
 if(NOT EXISTS "${svg_source}/plutovg/CMakeLists.txt")
     message(FATAL_ERROR "Missing PlutoSVG's pinned PlutoVG: git submodule update --init --recursive")
