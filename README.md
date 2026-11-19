@@ -39,7 +39,7 @@ Image information, the status bar, and both themes. Both screenshots display the
 | BMP (`.bmp`) | Palettes, common true-color layouts, bitfields, and RLE4 / RLE8 | No embedded JPEG / PNG or some extended compression variants |
 | SVG (`.svg`) | Basic static paths, geometry, gradients, transforms, and transparency | Complex SVG is not supported; zooming reuses rasterized pixels rather than providing unlimited vector sharpness |
 | GIF (`.gif`) | Automatic playback of ordinary-size GIFs, including transparency, compositing, and loops | No oversized animations, manual pause, frame stepping, or seeking |
-| TIFF (`.tif` / `.tiff`) | First page of Classic TIFF / BigTIFF, with common compression, orientation, and transparency | First page only; no page selection, floating-point, or CMYK images |
+| TIFF (`.tif` / `.tiff`) | Classic / BigTIFF pages with common compression, orientation, transparency, and Core page selection | App page picker is not wired yet; no floating-point or CMYK images |
 | QOI (`.qoi`) | Lossless RGB / RGBA images | No animation, metadata handling, or region decode |
 | ICO (`.ico`) | PNG and common DIB icon entries with deterministic size selection and alpha / mask composition | No icon editing; CUR hotspot is validated but not shown in image information |
 | CUR (`.cur`) | PNG and common DIB cursor entries with alpha / mask composition | No cursor editing; hotspot is validated but not shown in image information |
