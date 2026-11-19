@@ -91,6 +91,13 @@
       "version": "v2.5.4",
       "commit": "bbbe3a092256511ec9056a7ad204f9db42a87264",
       "release": "https://github.com/uclouvain/openjpeg/releases/tag/v2.5.4"
+    },
+    "dav1d": {
+      "path": "third_party/dav1d",
+      "url": "https://code.videolan.org/videolan/dav1d.git",
+      "version": "1.5.3",
+      "commit": "b546257f770768b2c88258c533da38b91a06f737",
+      "release": "https://code.videolan.org/videolan/dav1d/-/tags/1.5.3"
     }
   },
   "vendored_headers": [

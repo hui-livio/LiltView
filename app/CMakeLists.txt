@@ -209,6 +209,8 @@ install(FILES "${PROJECT_SOURCE_DIR}/third_party/libtiff/LICENSE.md"
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libavif/LICENSE"
     "${PROJECT_SOURCE_DIR}/third_party/libavif/source.json"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/libavif")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/dav1d/COPYING"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/dav1d")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/LICENSE"
     "${PROJECT_SOURCE_DIR}/third_party/plutosvg/plutovg/source/FTL.TXT"
     "${PROJECT_SOURCE_DIR}/third_party/PlutoVG-NOTICES.txt"

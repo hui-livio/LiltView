@@ -49,24 +49,29 @@ target_include_directories(openjp2 SYSTEM PUBLIC
     "$<BUILD_INTERFACE:${openjpeg_source}/src/lib/openjp2>"
     "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/third_party/openjpeg/src/lib/openjp2>")
 
-# libavif is vendored as a source snapshot. Its AV1 decoder is an explicit
-# host dependency because the repository does not contain the full dav1d
-# decoder. Never let libavif's LOCAL mode fetch sources during configure.
-set(LILTVIEW_AVIF_DAV1D_ROOT "" CACHE PATH "Optional dav1d installation prefix for AVIF decoding")
-find_path(LILTVIEW_AVIF_DAV1D_INCLUDE_DIR
-    NAMES dav1d/dav1d.h
-    HINTS "${LILTVIEW_AVIF_DAV1D_ROOT}/include")
-find_library(LILTVIEW_AVIF_DAV1D_LIBRARY
-    NAMES dav1d
-    HINTS "${LILTVIEW_AVIF_DAV1D_ROOT}/lib" "${LILTVIEW_AVIF_DAV1D_ROOT}/lib64")
-if(NOT LILTVIEW_AVIF_DAV1D_INCLUDE_DIR OR NOT LILTVIEW_AVIF_DAV1D_LIBRARY)
-    message(FATAL_ERROR
-        "AVIF decoding requires dav1d. Set LILTVIEW_AVIF_DAV1D_ROOT or install dav1d with dav1d/dav1d.h and libdav1d.")
-endif()
-add_library(dav1d::dav1d UNKNOWN IMPORTED GLOBAL)
+# libavif is vendored as a source snapshot. Build the pinned full dav1d
+# decoder from the local submodule, and never let libavif fetch sources.
+liltview_dependency_source(dav1d meson.build dav1d_source)
+find_program(LILTVIEW_MESON_EXECUTABLE NAMES meson REQUIRED)
+find_program(LILTVIEW_NINJA_EXECUTABLE NAMES ninja ninja-build REQUIRED)
+set(dav1d_binary "${PROJECT_BINARY_DIR}/third_party/dav1d")
+set(dav1d_install "${PROJECT_BINARY_DIR}/third_party/dav1d-install")
+set(dav1d_library "${dav1d_install}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}dav1d${CMAKE_STATIC_LIBRARY_SUFFIX}")
+file(MAKE_DIRECTORY "${dav1d_install}/include")
+ExternalProject_Add(liltview_dav1d_build
+    SOURCE_DIR "${dav1d_source}" BINARY_DIR "${dav1d_binary}" INSTALL_DIR "${dav1d_install}"
+    DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND ""
+    CONFIGURE_COMMAND "${LILTVIEW_MESON_EXECUTABLE}" setup --buildtype=release --default-library=static
+        --prefix=<INSTALL_DIR> --libdir=lib -Denable_asm=true -Denable_tools=false
+        -Denable_examples=false -Denable_tests=false <BINARY_DIR> <SOURCE_DIR>
+    BUILD_COMMAND "${LILTVIEW_NINJA_EXECUTABLE}" -C <BINARY_DIR>
+    INSTALL_COMMAND "${LILTVIEW_NINJA_EXECUTABLE}" -C <BINARY_DIR> install
+    BUILD_BYPRODUCTS "${dav1d_library}")
+add_library(dav1d::dav1d STATIC IMPORTED GLOBAL)
 set_target_properties(dav1d::dav1d PROPERTIES
-    IMPORTED_LOCATION "${LILTVIEW_AVIF_DAV1D_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${LILTVIEW_AVIF_DAV1D_INCLUDE_DIR}")
+    IMPORTED_LOCATION "${dav1d_library}"
+    INTERFACE_INCLUDE_DIRECTORIES "${dav1d_install}/include")
+add_dependencies(dav1d::dav1d liltview_dav1d_build)
 
 set(liltview_avif_source "${PROJECT_SOURCE_DIR}/third_party/libavif")
 if(NOT EXISTS "${liltview_avif_source}/CMakeLists.txt")

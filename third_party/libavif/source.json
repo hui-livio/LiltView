@@ -5,5 +5,5 @@
   "source_revision": "v1.4.2",
   "license": "BSD-2-Clause",
   "tree_sha256": "e0a49cd081cb8a15d3627672307ba2a01664398d50791d4b3362637944a0b821",
-  "notes": "Unmodified upstream source tree. AV1 decoding is supplied by the explicitly configured dav1d installation; libavif CMake fetch modes are disabled."
+  "notes": "Unmodified upstream source tree. AV1 decoding is supplied by the pinned local dav1d submodule; libavif CMake fetch modes are disabled."
 }
