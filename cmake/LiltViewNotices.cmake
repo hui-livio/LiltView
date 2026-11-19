@@ -21,6 +21,7 @@ set(liltview_notice_files
     "third_party/libwebp/PATENTS"
     "third_party/giflib/COPYING"
     "third_party/libtiff/LICENSE.md"
+    "third_party/libavif/LICENSE"
     "third_party/plutosvg/plutovg/LICENSE"
     "third_party/plutosvg/plutovg/source/FTL.TXT"
     "third_party/PlutoVG-NOTICES.txt"

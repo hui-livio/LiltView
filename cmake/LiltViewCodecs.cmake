@@ -49,6 +49,46 @@ target_include_directories(openjp2 SYSTEM PUBLIC
     "$<BUILD_INTERFACE:${openjpeg_source}/src/lib/openjp2>"
     "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/third_party/openjpeg/src/lib/openjp2>")
 
+# libavif is vendored as a source snapshot. Its AV1 decoder is an explicit
+# host dependency because the repository does not contain the full dav1d
+# decoder. Never let libavif's LOCAL mode fetch sources during configure.
+set(LILTVIEW_AVIF_DAV1D_ROOT "" CACHE PATH "Optional dav1d installation prefix for AVIF decoding")
+find_path(LILTVIEW_AVIF_DAV1D_INCLUDE_DIR
+    NAMES dav1d/dav1d.h
+    HINTS "${LILTVIEW_AVIF_DAV1D_ROOT}/include")
+find_library(LILTVIEW_AVIF_DAV1D_LIBRARY
+    NAMES dav1d
+    HINTS "${LILTVIEW_AVIF_DAV1D_ROOT}/lib" "${LILTVIEW_AVIF_DAV1D_ROOT}/lib64")
+if(NOT LILTVIEW_AVIF_DAV1D_INCLUDE_DIR OR NOT LILTVIEW_AVIF_DAV1D_LIBRARY)
+    message(FATAL_ERROR
+        "AVIF decoding requires dav1d. Set LILTVIEW_AVIF_DAV1D_ROOT or install dav1d with dav1d/dav1d.h and libdav1d.")
+endif()
+add_library(dav1d::dav1d UNKNOWN IMPORTED GLOBAL)
+set_target_properties(dav1d::dav1d PROPERTIES
+    IMPORTED_LOCATION "${LILTVIEW_AVIF_DAV1D_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LILTVIEW_AVIF_DAV1D_INCLUDE_DIR}")
+
+set(liltview_avif_source "${PROJECT_SOURCE_DIR}/third_party/libavif")
+if(NOT EXISTS "${liltview_avif_source}/CMakeLists.txt")
+    message(FATAL_ERROR "Missing libavif source tree: third_party/libavif/CMakeLists.txt")
+endif()
+set(liltview_avif_saved_shared_libs "${BUILD_SHARED_LIBS}")
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(AVIF_CODEC_AOM OFF CACHE STRING "" FORCE)
+set(AVIF_CODEC_DAV1D SYSTEM CACHE STRING "" FORCE)
+set(AVIF_CODEC_LIBGAV1 OFF CACHE STRING "" FORCE)
+set(AVIF_CODEC_RAV1E OFF CACHE STRING "" FORCE)
+set(AVIF_CODEC_SVT OFF CACHE STRING "" FORCE)
+set(AVIF_CODEC_AVM OFF CACHE STRING "" FORCE)
+set(AVIF_LIBYUV OFF CACHE STRING "" FORCE)
+set(AVIF_LIBSHARPYUV OFF CACHE STRING "" FORCE)
+set(AVIF_BUILD_APPS OFF CACHE BOOL "" FORCE)
+set(AVIF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(AVIF_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(AVIF_BUILD_MAN_PAGES OFF CACHE BOOL "" FORCE)
+add_subdirectory("${liltview_avif_source}" "${PROJECT_BINARY_DIR}/third_party/libavif" EXCLUDE_FROM_ALL SYSTEM)
+set(BUILD_SHARED_LIBS "${liltview_avif_saved_shared_libs}" CACHE BOOL "" FORCE)
+
 liltview_dependency_source(plutosvg CMakeLists.txt svg_source)
 if(NOT EXISTS "${svg_source}/plutovg/CMakeLists.txt")
     message(FATAL_ERROR "Missing PlutoSVG's pinned PlutoVG: git submodule update --init --recursive")
