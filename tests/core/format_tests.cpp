@@ -5,6 +5,7 @@
 #include <iterator>
 #include <png.h>
 #include <string>
+#include <tuple>
 #include <webp/encode.h>
 #include <zlib.h>
 
@@ -59,6 +60,54 @@ Bytes qoi_solid(std::uint32_t width, std::uint32_t height, std::array<unsigned c
         remaining -= count;
     }
     return qoi(width, height, 4, 0, std::move(operations));
+}
+
+Bytes ico_dib(std::array<unsigned char, 4> pixel, unsigned width = 2, unsigned height = 2)
+{
+    const unsigned xor_stride  = width * 4;
+    const unsigned mask_stride = ((width + 31) / 32) * 4;
+    Bytes output(40 + xor_stride * height + mask_stride * height, 0);
+    put32(output, 0, 40);
+    put32(output, 4, width);
+    put32(output, 8, height * 2);
+    put16(output, 12, 1);
+    put16(output, 14, 32);
+    put32(output, 20, xor_stride * height);
+    for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x)
+        {
+            const auto at = 40 + y * xor_stride + x * 4;
+            output[at]     = pixel[2];
+            output[at + 1] = pixel[1];
+            output[at + 2] = pixel[0];
+            output[at + 3] = pixel[3];
+        }
+    return output;
+}
+
+Bytes ico(unsigned type, std::vector<std::tuple<unsigned, unsigned, Bytes, unsigned, unsigned>> entries)
+{
+    Bytes output(6 + entries.size() * 16, 0);
+    put16(output, 2, type);
+    put16(output, 4, static_cast<unsigned>(entries.size()));
+    unsigned offset = static_cast<unsigned>(output.size());
+    for (std::size_t i = 0; i < entries.size(); ++i)
+    {
+        const auto &[width, height, payload, hotspot_x, hotspot_y] = entries[i];
+        const auto at = 6 + i * 16;
+        output[at]     = width == 256 ? 0 : static_cast<unsigned char>(width);
+        output[at + 1] = height == 256 ? 0 : static_cast<unsigned char>(height);
+        if (type == 2)
+        {
+            put16(output, at + 4, hotspot_x);
+            put16(output, at + 6, hotspot_y);
+        }
+        put32(output, at + 8, static_cast<std::uint32_t>(payload.size()));
+        put32(output, at + 12, offset);
+        output.insert(output.end(), payload.begin(), payload.end());
+        offset += static_cast<unsigned>(payload.size());
+    }
+    return output;
 }
 
 Bytes png(bool interlaced = false, int depth = 8, bool indexed = false, bool gray = false, bool alpha_edge = false)
@@ -337,6 +386,51 @@ TEST_CASE("QOI FIT preserves dimensions and rejects malformed sources", "[format
     CHECK(zero_result.error.code == LV_ERROR_DIMENSION_LIMIT);
 }
 
+TEST_CASE("ICO and CUR select entries and decode PNG and DIB payloads", "[formats][ico][cur]")
+{
+    const auto png_entry = png();
+    auto icon = ico(1, {{7, 5, png_entry, 0, 0}});
+    auto result = decode(icon);
+    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+    CHECK(result.info.format == LV_FORMAT_ICO);
+    CHECK(result.info.source_size.width == 7);
+    CHECK(result.info.source_size.height == 5);
+    red_alpha(result);
+
+    const auto dib_entry = ico_dib({255, 0, 0, 128});
+    auto cursor = ico(2, {{2, 2, dib_entry, 1, 1}});
+    auto cur_result = decode(cursor);
+    REQUIRE(cur_result.terminal == LV_EVENT_COMPLETE);
+    CHECK(cur_result.info.format == LV_FORMAT_CUR);
+    CHECK(cur_result.info.source_size.width == 2);
+    CHECK(cur_result.info.source_size.height == 2);
+    red_alpha(cur_result);
+
+    auto multiple = ico(1, {{2, 2, dib_entry, 0, 0}, {7, 5, png_entry, 0, 0}});
+    auto large = decode(multiple, {3, 3});
+    REQUIRE(large.terminal == LV_EVENT_COMPLETE);
+    CHECK(large.info.source_size.width == 7);
+    CHECK(large.info.source_size.height == 5);
+    auto small = decode(multiple, {1, 1});
+    REQUIRE(small.terminal == LV_EVENT_COMPLETE);
+    CHECK(small.info.source_size.width == 2);
+    CHECK(small.info.source_size.height == 2);
+}
+
+TEST_CASE("ICO and CUR malformed directories and unsupported entries fail cleanly", "[formats][ico][cur][errors]")
+{
+    auto bad_count = Bytes{0, 0, 1, 0, 1, 0};
+    bad_count.resize(6 + 16, 0);
+    auto bad_payload = ico(1, {{2, 2, Bytes{'x', 'x'}, 0, 0}});
+    auto bad_cursor = ico(2, {{2, 2, ico_dib({255, 0, 0, 255}), 2, 2}});
+    for (const auto &source : {bad_count, bad_payload, bad_cursor})
+    {
+        const auto result = decode(source);
+        REQUIRE(result.terminal == LV_EVENT_ERROR);
+        CHECK((result.error.code == LV_ERROR_CORRUPT_DATA || result.error.code == LV_ERROR_FORMAT_UNSUPPORTED));
+    }
+}
+
 TEST_CASE("WebP lossy lossless and alpha use decoder-scaled FIT", "[formats][webp]")
 {
     for (bool lossless : {false, true})
@@ -497,7 +591,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_QOI; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_CUR; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);

@@ -53,6 +53,16 @@ def gif_tiff(folder, width, height):
     (folder / "red.tiff").write_bytes(data)
 
 
+def icon_container(payload, width, height, kind, hotspot=(0, 0)):
+    entry = bytes((width if width < 256 else 0, height if height < 256 else 0, 0, 0))
+    if kind == 2:
+        entry += struct.pack("<HH", *hotspot)
+    else:
+        entry += struct.pack("<HH", 1, 32)
+    entry += struct.pack("<II", len(payload), 22)
+    return b"\0\0" + struct.pack("<HH", kind, 1) + entry + payload
+
+
 def main():
     folder = Path(__file__).resolve().parent
     width, height = 96, 64
@@ -67,6 +77,8 @@ def main():
     png += chunk(b"IDAT", zlib.compress(b"".join(b"\0" + rgba[y * width * 4:(y + 1) * width * 4] for y in range(height))))
     png += chunk(b"IEND", b"")
     (folder / "red-alpha.png").write_bytes(png)
+    (folder / "red.ico").write_bytes(icon_container(png, width, height, 1))
+    (folder / "red.cur").write_bytes(icon_container(png, width, height, 2, (width // 2, height // 2)))
 
     qoi = bytearray(b"qoif" + struct.pack(">II", width, height) + bytes((4, 0)))
     qoi += bytes((0xff, 255, 0, 0, 128))
