@@ -29,6 +29,17 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_jpeg2000;
     if (size >= 4 && data[0] == 0xff && data[1] == 0x4f && data[2] == 0xff && data[3] == 0x51)
         return lv_decode_jpeg2000;
+    if (size >= 16 && !memcmp(data + 4, "ftyp", 4))
+    {
+        const bool avif_brand = !memcmp(data + 8, "avif", 4) || !memcmp(data + 8, "avis", 4);
+        if (avif_brand)
+            return lv_decode_avif;
+        const uint32_t box_size = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
+        if (box_size >= 16 && box_size <= size)
+            for (size_t at = 16; at + 4 <= box_size; at += 4)
+                if (!memcmp(data + at, "avif", 4) || !memcmp(data + at, "avis", 4))
+                    return lv_decode_avif;
+    }
     size_t at = size >= 3 && !memcmp(data, "\xef\xbb\xbf", 3) ? 3 : 0;
     while (at < size && (data[at] == ' ' || data[at] == '\t' || data[at] == '\n' || data[at] == '\r'))
         ++at;

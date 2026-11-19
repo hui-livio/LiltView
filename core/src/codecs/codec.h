@@ -80,4 +80,5 @@ void lv_decode_tiff(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_qoi(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_ico(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_jpeg2000(lv_core *, lv_request *, lv_input *, lv_error_info *);
+void lv_decode_avif(lv_core *, lv_request *, lv_input *, lv_error_info *);
 #endif
