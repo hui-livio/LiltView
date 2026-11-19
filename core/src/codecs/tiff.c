@@ -317,6 +317,22 @@ void lv_decode_tiff(lv_core *core, lv_request *r, lv_input *input, lv_error_info
     bool finished = false;
     if (!tif || source.failure)
         goto done;
+    const tdir_t directories = TIFFNumberOfDirectories(tif);
+    if (!directories || directories > 4096)
+    {
+        error->code = directories > 4096 ? LV_ERROR_DIMENSION_LIMIT : LV_ERROR_CORRUPT_DATA;
+        goto done;
+    }
+    uint64_t selected_page = 0;
+    if (r->desc.selection.kind == LV_SELECTION_TIFF_PAGE)
+    {
+        selected_page = r->desc.selection.index;
+        if (selected_page >= directories || !TIFFSetDirectory(tif, (tdir_t)selected_page))
+        {
+            error->code = LV_ERROR_TARGET_UNSUPPORTED;
+            goto done;
+        }
+    }
     lv_size_u32 size     = {0}, canvas;
     uint16_t orientation = 1, compression = 0;
     if (!tiff_header(core, tif, &size, &orientation, error) || !lv_target_canvas(r, size, orientation, &canvas, error))
@@ -351,6 +367,9 @@ void lv_decode_tiff(lv_core *core, lv_request *r, lv_input *input, lv_error_info
     if (!lv_frame_prepare(&frame, size, canvas, LV_FORMAT_TIFF, LV_CAP_REGION_DECODE, block_bytes + raw_bytes, error))
         goto done;
     frame.info.orientation = orientation;
+    frame.info.flags |= LV_INFO_SELECTION_KNOWN | LV_INFO_SELECTION_COUNT_KNOWN;
+    frame.info.selection = (lv_selection){.kind = LV_SELECTION_TIFF_PAGE, .index = selected_page};
+    frame.info.selection_count = directories;
     raster                 = lv_workspace_allocate(core, r, block_bytes);
     if (!raster)
     {
