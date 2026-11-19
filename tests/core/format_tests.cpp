@@ -460,6 +460,47 @@ TEST_CASE("JPEG 2000 JP2 and raw J2K decode 8-bit RGB", "[formats][jpeg2000]")
     CHECK(bad.error.code == LV_ERROR_CORRUPT_DATA);
 }
 
+TEST_CASE("AVIF static lossless and lossy images decode to RGBA8", "[formats][avif]")
+{
+    for (const auto *name : {"avif-red.avif", "avif-red-lossy.avif"})
+    {
+        const auto result = decode(fixture_bytes(name));
+        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+        CHECK(result.info.format == LV_FORMAT_AVIF);
+        CHECK(result.info.source_size.width == 96);
+        CHECK(result.info.source_size.height == 64);
+        CHECK(result.info.canvas.width == 96);
+        CHECK(result.info.canvas.height == 64);
+        REQUIRE(result.pixels.size() == 96 * 64 * 4);
+        for (std::size_t i = 0; i < result.pixels.size(); i += 4)
+        {
+            CHECK(result.pixels[i] >= 245);
+            CHECK(result.pixels[i + 1] <= 10);
+            CHECK(result.pixels[i + 2] <= 10);
+            CHECK(result.pixels[i + 3] >= 120);
+            CHECK(result.pixels[i + 3] <= 136);
+        }
+    }
+    const auto fitted = decode(fixture_bytes("avif-red.avif"), {24, 24});
+    REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+    CHECK(fitted.info.canvas.width == 24);
+    CHECK(fitted.info.canvas.height == 16);
+    CHECK(fitted.pixels.size() == 24 * 16 * 4);
+}
+
+TEST_CASE("AVIF rejects animation and truncation", "[formats][avif]")
+{
+    const auto animated = decode(fixture_bytes("avif-animated.avif"));
+    REQUIRE(animated.terminal == LV_EVENT_ERROR);
+    CHECK(animated.error.code == LV_ERROR_FORMAT_UNSUPPORTED);
+
+    auto truncated = fixture_bytes("avif-red.avif");
+    truncated.resize(truncated.size() / 2);
+    const auto damaged = decode(truncated);
+    REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+    CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
+}
+
 TEST_CASE("WebP lossy lossless and alpha use decoder-scaled FIT", "[formats][webp]")
 {
     for (bool lossless : {false, true})
