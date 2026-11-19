@@ -220,6 +220,7 @@ static void open_animation(lv_core *core, lv_request *r, lv_error_info *error)
     }
     *s               = (lv_gif_animation){.core = core, .request = r, .session = session};
     session->decoder = s;
+    session->decoder_kind = 1;
     uint32_t code    = 0;
     s->input.file    = lv_file_open(session->path, &s->input.version, &code);
     if (!s->input.file)

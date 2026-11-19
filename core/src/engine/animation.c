@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include "../internal.h"
 
 bool lv_animation_reserve(lv_core *core, lv_request *r, uint64_t bytes, lv_error_info *error)
@@ -101,7 +102,29 @@ void lv_animation_commit_locked(lv_core *core, lv_request *r, lv_event_type outc
 
 void lv_animation_decode(lv_core *core, lv_request *r, lv_error_info *error)
 {
-    lv_gif_animation_run(core, r, error);
+    if (!r->animation_action)
+    {
+        uint8_t signature[8] = {0};
+        lv_file_version version;
+        uint32_t code = 0;
+        FILE *file = lv_file_open(r->path, &version, &code);
+        size_t got = 0;
+        if (file)
+        {
+            got = fread(signature, 1, sizeof signature, file);
+            r->bytes_read += got;
+            lv_file_close(file);
+        }
+        if (file && got == sizeof signature && !memcmp(signature, "\x89PNG\r\n\x1a\n", sizeof signature))
+            lv_apng_animation_run(core, r, error);
+        else
+            lv_gif_animation_run(core, r, error);
+        return;
+    }
+    if (r->animation->decoder_kind == 2)
+        lv_apng_animation_run(core, r, error);
+    else
+        lv_gif_animation_run(core, r, error);
 }
 
 // Returns true if cleanup made progress. Never waits for externally borrowed
@@ -127,7 +150,10 @@ bool lv_animation_cleanup(lv_core *core)
     }
     s->cleaning = true;
     mtx_unlock(&core->mutex);
-    lv_gif_animation_destroy(core, s);
+    if (s->decoder_kind == 2)
+        lv_apng_animation_destroy(core, s);
+    else
+        lv_gif_animation_destroy(core, s);
     mtx_lock(&core->mutex);
     if (s->source)
     {

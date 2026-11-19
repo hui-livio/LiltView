@@ -25,6 +25,7 @@ typedef struct lv_source
 typedef struct lv_request lv_request;
 typedef struct lv_animation lv_animation;
 typedef struct lv_gif_animation lv_gif_animation;
+typedef struct lv_apng_animation lv_apng_animation;
 typedef struct lv_cache_entry lv_cache_entry;
 
 struct lv_animation
@@ -36,7 +37,8 @@ struct lv_animation
     lv_animation_info info;
     lv_request *busy;
     lv_source *source;
-    lv_gif_animation *decoder;
+    void *decoder;
+    uint32_t decoder_kind;
     uint64_t resident, reservation;
     enum
     {
@@ -174,4 +176,6 @@ void *lv_animation_allocate(lv_core *, lv_animation *, size_t);
 void lv_animation_deallocate(lv_core *, lv_animation *, void *, size_t);
 void lv_gif_animation_run(lv_core *, lv_request *, lv_error_info *);
 void lv_gif_animation_destroy(lv_core *, lv_animation *);
+void lv_apng_animation_run(lv_core *, lv_request *, lv_error_info *);
+void lv_apng_animation_destroy(lv_core *, lv_animation *);
 #endif
