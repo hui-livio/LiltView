@@ -48,6 +48,10 @@ const char *format_name(lv_format format)
         return "TIFF";
     case LV_FORMAT_QOI:
         return "QOI";
+    case LV_FORMAT_ICO:
+        return "ICO";
+    case LV_FORMAT_CUR:
+        return "CUR";
     default:
         return nullptr;
     }

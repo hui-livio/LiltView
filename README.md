@@ -41,6 +41,8 @@ Image information, the status bar, and both themes. Both screenshots display the
 | GIF (`.gif`) | Automatic playback of ordinary-size GIFs, including transparency, compositing, and loops | No oversized animations, manual pause, frame stepping, or seeking |
 | TIFF (`.tif` / `.tiff`) | First page of Classic TIFF / BigTIFF, with common compression, orientation, and transparency | First page only; no page selection, floating-point, or CMYK images |
 | QOI (`.qoi`) | Lossless RGB / RGBA images | No animation, metadata handling, or region decode |
+| ICO (`.ico`) | PNG and common DIB icon entries with deterministic size selection and alpha / mask composition | No icon editing; CUR hotspot is validated but not shown in image information |
+| CUR (`.cur`) | PNG and common DIB cursor entries with alpha / mask composition | No cursor editing; hotspot is validated but not shown in image information |
 
 **Supporting a format does not mean supporting every encoding variant.** Files are identified by their contents; folder browsing filters by the extensions listed above. See the [format compatibility table](docs/图片格式兼容表.md) for bit depths, transparency, orientation, and resource limits.
 
