@@ -1,4 +1,6 @@
 #include <gif_lib.h>
+#include <png.h>
+#include <zlib.h>
 #include "support.hpp"
 
 namespace
@@ -56,6 +58,94 @@ Bytes animation(const std::vector<Frame> &frames, int repeat = -1)
     }
     REQUIRE(EGifCloseFile(gif, &error) == GIF_OK);
     GifFreeMapObject(map);
+    return bytes;
+}
+
+void be32(Bytes &out, std::uint32_t value)
+{
+    out.push_back(static_cast<unsigned char>(value >> 24));
+    out.push_back(static_cast<unsigned char>(value >> 16));
+    out.push_back(static_cast<unsigned char>(value >> 8));
+    out.push_back(static_cast<unsigned char>(value));
+}
+
+Bytes png_chunk(const char type[4], const Bytes &payload)
+{
+    Bytes output;
+    be32(output, static_cast<std::uint32_t>(payload.size()));
+    output.insert(output.end(), type, type + 4);
+    output.insert(output.end(), payload.begin(), payload.end());
+    const auto crc = crc32(0, output.data() + 4, static_cast<uInt>(output.size() - 4));
+    be32(output, static_cast<std::uint32_t>(crc));
+    return output;
+}
+
+Bytes apng()
+{
+    constexpr unsigned width = 7, height = 5;
+    const auto compressed = [](unsigned char red, unsigned char blue)
+    {
+        Bytes raw;
+        for (unsigned y = 0; y < height; ++y)
+        {
+            raw.push_back(0);
+            for (unsigned x = 0; x < width; ++x)
+            {
+                raw.push_back(red);
+                raw.push_back(0);
+                raw.push_back(blue);
+                raw.push_back(255);
+            }
+        }
+        uLongf size = compressBound(raw.size());
+        Bytes output(size);
+        REQUIRE(compress(output.data(), &size, raw.data(), raw.size()) == Z_OK);
+        output.resize(size);
+        return output;
+    };
+    auto control = [](unsigned sequence, unsigned delay)
+    {
+        Bytes output;
+        be32(output, sequence);
+        be32(output, width);
+        be32(output, height);
+        be32(output, 0);
+        be32(output, 0);
+        output.push_back(0);
+        output.push_back(1);
+        output.push_back(0);
+        output.push_back(10);
+        output.push_back(0);
+        output.push_back(0);
+        (void)delay;
+        return output;
+    };
+    Bytes bytes{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    Bytes header;
+    be32(header, width);
+    be32(header, height);
+    header.insert(header.end(), {8, 6, 0, 0, 0});
+    auto header_chunk = png_chunk("IHDR", header);
+    bytes.insert(bytes.end(), header_chunk.begin(), header_chunk.end());
+    Bytes actl;
+    be32(actl, 2);
+    be32(actl, 0);
+    auto chunk = png_chunk("acTL", actl);
+    bytes.insert(bytes.end(), chunk.begin(), chunk.end());
+    auto first_control = png_chunk("fcTL", control(0, 1));
+    bytes.insert(bytes.end(), first_control.begin(), first_control.end());
+    auto first = png_chunk("IDAT", compressed(255, 0));
+    bytes.insert(bytes.end(), first.begin(), first.end());
+    auto second_control = png_chunk("fcTL", control(1, 1));
+    bytes.insert(bytes.end(), second_control.begin(), second_control.end());
+    Bytes second_data;
+    be32(second_data, 2);
+    auto second_compressed = compressed(0, 255);
+    second_data.insert(second_data.end(), second_compressed.begin(), second_compressed.end());
+    auto second = png_chunk("fdAT", second_data);
+    bytes.insert(bytes.end(), second.begin(), second.end());
+    auto end = png_chunk("IEND", {});
+    bytes.insert(bytes.end(), end.begin(), end.end());
     return bytes;
 }
 struct Job
@@ -116,12 +206,12 @@ Job drain(Engine &engine, lv_size_u32 canvas = {4, 3})
         }
     }
 }
-std::pair<lv_animation_id, lv_request_id> open(Engine &engine, const std::string &path)
+std::pair<lv_animation_id, lv_request_id> open(Engine &engine, const std::string &path, lv_size_u32 bounds = {100, 100})
 {
     lv_animation_open_desc desc;
     lv_animation_open_desc_init(&desc);
     desc.path                 = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
-    desc.target.as.fit_bounds = {100, 100};
+    desc.target.as.fit_bounds = bounds;
     desc.user_tag             = 11;
     lv_animation_id id        = 0;
     lv_request_id request     = 0;
@@ -143,10 +233,10 @@ lv_status submit(Engine &engine, lv_animation_id id, lv_animation_action action 
         CHECK(out == 0);
     return status;
 }
-Job next(Engine &engine, lv_animation_id id)
+Job next(Engine &engine, lv_animation_id id, lv_size_u32 canvas = {4, 3})
 {
     REQUIRE(submit(engine, id) == LV_OK);
-    return drain(engine);
+    return drain(engine, canvas);
 }
 } // namespace
 
@@ -189,6 +279,55 @@ TEST_CASE("animation sessions pull one frame with timing then END and reset epoc
     CHECK(again.frame.key.frame_index == 0);
     CHECK(again.pixels == first.pixels);
     REQUIRE(lv_core_close_animation(engine.core, id) == LV_OK);
+}
+
+TEST_CASE("APNG sessions compose frames, preserve timing, and finish with loop metadata", "[animation][apng]")
+{
+    Files files;
+    Engine engine;
+    const auto [id, request] = open(engine, files.write("apng-input", apng()), {7, 5});
+    (void)request;
+    const auto opened = drain(engine);
+    REQUIRE(opened.terminal == LV_EVENT_COMPLETE);
+    CHECK(opened.info.image.format == LV_FORMAT_PNG);
+    CHECK(opened.info.image.capabilities == LV_CAP_ANIMATION);
+
+    const auto first = next(engine, id, {7, 5});
+    REQUIRE(first.terminal == LV_EVENT_COMPLETE);
+    CHECK(first.frame.key.frame_index == 0);
+    CHECK(first.frame.source_duration_ns == 100000000);
+    CHECK(first.pixels[0] == 255);
+    CHECK(first.pixels[2] == 0);
+
+    const auto second = next(engine, id, {7, 5});
+    REQUIRE(second.terminal == LV_EVENT_COMPLETE);
+    CHECK(second.frame.key.frame_index == 1);
+    CHECK(second.frame.source_pts_ns == 100000000);
+    CHECK(second.pixels[0] == 0);
+    CHECK(second.pixels[2] == 255);
+
+    const auto end = next(engine, id, {7, 5});
+    REQUIRE(end.terminal == LV_EVENT_COMPLETE);
+    CHECK(end.end);
+    CHECK(end.info.frame_count == 2);
+    CHECK(end.info.total_plays == 0);
+    CHECK(end.info.duration_ns == 200000000);
+    REQUIRE(lv_core_close_animation(engine.core, id) == LV_OK);
+}
+
+TEST_CASE("APNG sessions reject truncated containers without publishing frames", "[animation][apng][errors]")
+{
+    Files files;
+    Engine engine;
+    auto bytes = apng();
+    bytes.pop_back();
+    const auto [id, request] = open(engine, files.write("bad-apng", bytes), {7, 5});
+    (void)id;
+    (void)request;
+    const auto result = drain(engine, {7, 5});
+    REQUIRE(result.terminal == LV_EVENT_ERROR);
+    CHECK(result.error.code == LV_ERROR_CORRUPT_DATA);
+    CHECK(result.pixels.empty());
 }
 
 TEST_CASE("animation GIF disposal background previous transparency interlace and local palettes", "[animation][composition]")

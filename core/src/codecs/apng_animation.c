@@ -121,7 +121,7 @@ static bool parse_frames(lv_apng_animation *s, lv_error_info *error)
         at += (size_t)length + 12;
         if (!memcmp(type, "IEND", 4))
         {
-            if (at + (size_t)length + 12 != s->data_bytes)
+            if (at != s->data_bytes)
             {
                 error->code = LV_ERROR_CORRUPT_DATA;
                 return false;
@@ -130,7 +130,12 @@ static bool parse_frames(lv_apng_animation *s, lv_error_info *error)
             break;
         }
     }
-    if (!seen_ihdr || !seen_actl || !seen_iend || !declared)
+    if (!seen_ihdr || !seen_iend)
+    {
+        error->code = LV_ERROR_CORRUPT_DATA;
+        return false;
+    }
+    if (!seen_actl || !declared)
     {
         error->code = LV_ERROR_FORMAT_UNSUPPORTED;
         return false;
