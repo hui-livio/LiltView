@@ -34,7 +34,8 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
         (layout->byte_order != LV_RAW_BYTE_NATIVE && layout->byte_order != LV_RAW_BYTE_LITTLE &&
          layout->byte_order != LV_RAW_BYTE_BIG) ||
         (layout->alpha != LV_RAW_ALPHA_NONE && layout->alpha != LV_RAW_ALPHA_OPAQUE &&
-         layout->alpha != LV_RAW_ALPHA_STRAIGHT) || !layout->plane_count || layout->plane_count > LV_RAW_MAX_PLANES)
+         layout->alpha != LV_RAW_ALPHA_STRAIGHT) || !layout->plane_count || layout->plane_count > LV_RAW_MAX_PLANES ||
+        layout->reserved)
         return false;
     uint64_t minimum_row = 0;
     uint32_t expected_planes = 1;
@@ -47,6 +48,7 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
     case LV_RAW_LAYOUT_RGBA8:
     case LV_RAW_LAYOUT_BGRA8:
         if (!mul_u64(layout->size.width, 4, &minimum_row)) return false;
+        if (layout->alpha == LV_RAW_ALPHA_NONE) return false;
         break;
     case LV_RAW_LAYOUT_GRAY8:
     case LV_RAW_LAYOUT_BAYER8:
@@ -80,8 +82,8 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
             ? layout->size.height / 2 : layout->size.height;
         const uint64_t expected_row = (layout->layout == LV_RAW_LAYOUT_I420 || layout->layout == LV_RAW_LAYOUT_YV12) && i > 0
             ? layout->size.width / 2 : minimum_row;
-        if (plane->height != expected_height || plane->row_bytes < expected_row || plane->row_bytes > SIZE_MAX ||
-            plane->stride < plane->row_bytes)
+        if (plane->reserved || plane->height != expected_height || plane->row_bytes < expected_row ||
+            plane->row_bytes > SIZE_MAX || plane->stride < plane->row_bytes)
             return false;
         uint64_t rows = plane->height ? plane->height - 1 : 0;
         uint64_t end = 0, span = 0;
@@ -102,7 +104,8 @@ static bool raw_processing_valid(const lv_raw_processing *processing)
         processing->primaries > LV_RAW_PRIMARIES_BT709 || processing->transfer > LV_RAW_TRANSFER_SRGB ||
         processing->cfa > LV_RAW_CFA_GBRG)
         return false;
-    if (processing->white_level <= processing->black_level)
+    if (processing->white_level <= processing->black_level || processing->reserved[0] || processing->reserved[1] ||
+        processing->reserved[2] || processing->reserved[3])
         return false;
     return processing->red_gain_q16 && processing->green_red_gain_q16 && processing->green_blue_gain_q16 &&
         processing->blue_gain_q16;
@@ -111,7 +114,7 @@ static bool raw_processing_valid(const lv_raw_processing *processing)
 static bool raw_output_valid(const lv_raw_output *output)
 {
     return output->struct_size == sizeof *output && output->pixel_format == LV_PIXEL_RGBA8 && output->allow_conversion == 1 &&
-        output->color_space <= LV_COLOR_SRGB;
+        output->color_space <= LV_COLOR_SRGB && output->reserved[0] == 0 && output->reserved[1] == 0;
 }
 
 uint64_t lv_raw_identity(const lv_raw_image_desc *image)
@@ -126,11 +129,13 @@ lv_status lv_validate_raw_request(const lv_raw_request_desc *request)
 {
     if (!request || request->struct_size != sizeof *request || request->abi_version != LV_RAW_ABI_VERSION)
         return LV_ABI_MISMATCH;
+    if (request->image.struct_size != sizeof request->image || request->image.layout.struct_size != sizeof request->image.layout ||
+        request->image.processing.struct_size != sizeof request->image.processing ||
+        request->image.output.struct_size != sizeof request->image.output)
+        return LV_ABI_MISMATCH;
     if (!raw_layout_valid(&request->image.layout) || !raw_processing_valid(&request->image.processing) ||
         !raw_output_valid(&request->image.output))
         return LV_INVALID_ARGUMENT;
-    if (request->image.struct_size != sizeof request->image)
-        return LV_ABI_MISMATCH;
     lv_request_desc base;
     lv_request_desc_init(&base);
     base.kind = request->kind;
@@ -138,7 +143,10 @@ lv_status lv_validate_raw_request(const lv_raw_request_desc *request)
     base.user_tag = request->user_tag;
     base.path = request->path;
     base.target = request->target;
-    return lv_validate_request(&base);
+    const lv_status status = lv_validate_request(&base);
+    if (status != LV_OK)
+        return status;
+    return base.target.kind == LV_TARGET_REGION ? LV_UNSUPPORTED : LV_OK;
 }
 
 uint32_t LV_CALL lv_raw_abi_version(void)

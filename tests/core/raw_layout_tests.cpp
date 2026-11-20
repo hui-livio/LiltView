@@ -110,6 +110,23 @@ TEST_CASE("raw layout validation rejects ambiguous and unsafe descriptions", "[r
     request.image.layout.planes[0].offset = UINT64_MAX;
     CHECK(lv_core_submit_raw(engine.core, &request, &id) == LV_INVALID_ARGUMENT);
     CHECK(id == 0);
+
+    request = valid_request(path);
+    request.image.layout.struct_size -= 1;
+    CHECK(lv_core_submit_raw(engine.core, &request, &id) == LV_ABI_MISMATCH);
+    CHECK(id == 0);
+
+    request = valid_request(path);
+    request.image.layout.planes[0].reserved = 1;
+    CHECK(lv_core_submit_raw(engine.core, &request, &id) == LV_INVALID_ARGUMENT);
+    CHECK(id == 0);
+
+    request = valid_request(path);
+    request.target.kind = LV_TARGET_REGION;
+    request.target.as.region.canvas = {3, 2};
+    request.target.as.region.rect = {0, 0, 3, 2};
+    CHECK(lv_core_submit_raw(engine.core, &request, &id) == LV_UNSUPPORTED);
+    CHECK(id == 0);
 }
 
 TEST_CASE("raw RGB and grayscale layouts decode to RGBA8", "[raw-layout][rgb]")

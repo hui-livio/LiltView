@@ -95,7 +95,13 @@ void lv_decode_raw_layout(lv_core *core, lv_request *request, lv_input *input, l
     lv_size_u32 canvas = request->desc.target.kind == LV_TARGET_NATIVE ? source :
         lv_fit_size(source, request->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
     lv_frame frame = {.core = core, .request = request, .input = input};
-    const uint64_t row_workspace = (uint64_t)source.width * 8 + plane->row_bytes;
+    const uint64_t width_workspace = (uint64_t)source.width * 8;
+    if (plane->row_bytes > UINT64_MAX - width_workspace)
+    {
+        error->code = LV_ERROR_MEMORY_BUDGET;
+        goto done;
+    }
+    const uint64_t row_workspace = width_workspace + plane->row_bytes;
     if (row_workspace > SIZE_MAX ||
         !lv_frame_prepare(&frame, source, canvas, LV_FORMAT_RAW_LAYOUT, 0, row_workspace, error) ||
         !lv_frame_info(&frame, error))
