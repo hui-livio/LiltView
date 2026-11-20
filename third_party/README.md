@@ -75,7 +75,7 @@ ctest --preset dev
 
 通常不使用 `git submodule update --remote`，以免绕过主仓库锁定版本。CMake 只读取本地源码，不自动执行 Git、下载或修改依赖。
 
-HEIF/HEIC 尚未接入。已固定 libheif v1.23.7 与 libde265 v1.1.3，仍需完成 LGPL-3 静态发布方案、源码提供和替换链接审查。系统库不能作为正式构建依赖。详细门禁见[HEIF 依赖与许可证门禁](../docs/HEIF依赖与许可证门禁.md)。
+HEIF/HEIC 已接入固定 libheif v1.23.7 与 libde265 v1.1.3 的静态 built-in 解码路径，当前支持单主图 HEVC、8-bit RGB / RGBA、可选 alpha、NATIVE / FIT，并拒绝 sequence、多图、thumbnail、depth、非 alpha auxiliary、高位深、ICC、HDR 和 REGION。发行前仍需完成 LGPL-3 静态发布方案、源码提供和替换链接审查。系统库不能作为正式构建依赖。详细门禁见[HEIF 依赖与许可证门禁](../docs/HEIF依赖与许可证门禁.md)。
 JPEG XL 尚未接入。系统 libjxl 不能作为可复现发布依赖直接使用。首版接入前需要固定 libjxl、Highway、Brotli、CMS 组件和 C++ 静态链接边界。libjxl 本体为 BSD-3-Clause，依赖组合和发行包体积仍需单独验收。
 OpenEXR 尚未接入。系统 OpenEXR 与 Imath 不能作为可复现发布依赖直接使用。首版固定 OpenEXR v3.5.4、Imath v3.2.3，使用 OpenEXR 源码内的 deflate、zstd 和 OpenJPH，关闭自动下载、工具、示例和测试。OpenEXR / Imath 使用 BSD-3-Clause，内置组件的原始许可证需要随发行包保留，详细门禁见[OpenEXR 依赖与许可证门禁](../docs/OpenEXR依赖与许可证门禁.md)。
 

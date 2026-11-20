@@ -1,6 +1,6 @@
 # HEIF / HEIC 依赖与许可证门禁
 
-HEIF 首版固定使用仓库内源码，不使用系统 libheif 或系统 libde265。当前阶段只完成依赖锁定与发行门禁，未把 HEIF / HEIC 标记为应用支持。
+HEIF 首版固定使用仓库内源码，不使用系统 libheif 或系统 libde265。当前分支已完成静态 built-in 解码器、Core、应用入口和测试接入，支持范围以[图片格式兼容表](图片格式兼容表.md)为准。发行前仍需完成 LGPL-3.0-or-later 的源码提供和替换链接审查。
 
 ## 固定源码
 
@@ -13,10 +13,10 @@ libheif 构建必须关闭 shared、plugin loading、所有插件形式和未使
 
 ## 许可证与发行义务
 
-libheif library 和 libde265 使用 LGPL-3.0-or-later。libheif 的示例与 C++ / Go wrapper 使用 MIT，但首版只链接 library。发行包必须同时提供 LGPL 文本、两套对应源码或完整对应源码获取方式、构建配置和替换链接所需信息。静态链接发布前必须完成 LGPL-3 合规审查，当前不提交应用入口和 Core decoder。
+libheif library 和 libde265 使用 LGPL-3.0-or-later。libheif 的示例与 C++ / Go wrapper 使用 MIT，但首版只链接 library。发行包必须同时提供 LGPL 文本、两套对应源码或完整对应源码获取方式、构建配置和替换链接所需信息。当前构建已安装两份 COPYING 并纳入 notices 检查，静态发布仍需在发行批次完成最终 LGPL-3 合规审查。
 
 ## 首版范围
 
-计划支持单主图、HEVC、8-bit RGB / RGBA 输出。必须拒绝 sequence、multi-image、auxiliary / depth / thumbnail、10/12-bit、高动态范围、ICC 颜色管理和 REGION。主图选择、解码尺寸、方向 / 镜像变换和损坏输入分别验收。方向元数据若无法通过公开 C API 稳定报告，必须明确记录为已应用变换或未知，不能猜测原始方向。
+当前支持单主图、HEVC、8-bit RGB / RGBA 输出和可选 alpha。必须拒绝 sequence、multi-image、thumbnail、depth、非 alpha auxiliary、10/12-bit、高动态范围、ICC 颜色管理和 REGION。主图选择、解码尺寸、方向 / 镜像变换和损坏输入分别验收。方向元数据若无法通过公开 C API 稳定报告，必须明确记录为已应用变换或未知，不能猜测原始方向。
 
-系统 libheif / libde265 只能用于审查或生成 fixture，不能作为正式构建成功证据。下一批才进入 CMake target 绑定和 Core 内容识别。
+系统 libheif / libde265 只能用于审查或生成 fixture，不能作为正式构建依赖或应用支持证据。正式构建使用仓库内固定 gitlink 和 built-in libde265 target。
