@@ -29,6 +29,8 @@ set(liltview_notice_files
     "third_party/openexr/external/deflate/COPYING"
     "third_party/openexr/external/zstd/LICENSE"
     "third_party/openexr/external/OpenJPH/LICENSE"
+    "third_party/libheif/COPYING"
+    "third_party/libde265/COPYING"
     "third_party/plutosvg/plutovg/LICENSE"
     "third_party/plutosvg/plutovg/source/FTL.TXT"
     "third_party/PlutoVG-NOTICES.txt"

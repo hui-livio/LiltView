@@ -215,6 +215,10 @@ install(FILES "${PROJECT_SOURCE_DIR}/third_party/openexr/LICENSE.md"
     "${PROJECT_SOURCE_DIR}/third_party/openexr/external/zstd/LICENSE"
     "${PROJECT_SOURCE_DIR}/third_party/openexr/external/OpenJPH/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/OpenEXR")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/libheif/COPYING"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/libheif")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/libde265/COPYING"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/libde265")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/dav1d/COPYING"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/dav1d")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libjxl/LICENSE"

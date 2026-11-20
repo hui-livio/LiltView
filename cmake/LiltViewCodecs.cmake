@@ -134,6 +134,49 @@ else()
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 endif()
 
+# HEIF is kept behind a reproducible LGPL-3 dependency boundary. Build the
+# pinned libde265 target first, then force libheif to use it as a built-in
+# decoder. Every other codec, plugin, example and system discovery path is
+# disabled so the static target cannot silently gain unrelated dependencies.
+liltview_dependency_source(libde265 CMakeLists.txt libde265_source)
+set(liltview_heif_saved_shared_libs "${BUILD_SHARED_LIBS}")
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ENABLE_SDL OFF CACHE BOOL "" FORCE)
+set(ENABLE_DECODER ON CACHE BOOL "" FORCE)
+set(ENABLE_ENCODER OFF CACHE BOOL "" FORCE)
+set(ENABLE_INTERNAL_TOOLS OFF CACHE BOOL "" FORCE)
+set(ENABLE_SHERLOCK265 OFF CACHE BOOL "" FORCE)
+add_subdirectory("${libde265_source}" "${PROJECT_BINARY_DIR}/third_party/libde265" EXCLUDE_FROM_ALL SYSTEM)
+target_include_directories(de265 SYSTEM PUBLIC
+    "$<BUILD_INTERFACE:${libde265_source}/libde265>"
+    "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/third_party/libde265/libde265>")
+
+liltview_dependency_source(libheif CMakeLists.txt libheif_source)
+set(ENABLE_PLUGIN_LOADING OFF CACHE BOOL "" FORCE)
+set(WITH_LIBDE265 ON CACHE BOOL "" FORCE)
+set(WITH_LIBDE265_PLUGIN OFF CACHE BOOL "" FORCE)
+foreach(codec X265 KVAZAAR UVG266 VVDEC VVENC AOM_DECODER AOM_ENCODER SvtEnc RAV1E
+                FFMPEG_DECODER JPEG_DECODER JPEG_ENCODER OpenJPEG_DECODER OpenJPEG_ENCODER
+                OPENJPH_ENCODER X264 OpenH264_DECODER OpenH264_ENCODER DAV1D)
+    set(WITH_${codec} OFF CACHE BOOL "" FORCE)
+    set(WITH_${codec}_PLUGIN OFF CACHE BOOL "" FORCE)
+endforeach()
+set(WITH_UNCOMPRESSED_CODEC OFF CACHE BOOL "" FORCE)
+set(WITH_WEBCODECS OFF CACHE BOOL "" FORCE)
+set(WITH_LIBSHARPYUV OFF CACHE BOOL "" FORCE)
+set(WITH_LIBSHARPYUV_INTERNAL OFF CACHE BOOL "" FORCE)
+set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WITH_EXAMPLE_HEIF_THUMB OFF CACHE BOOL "" FORCE)
+set(WITH_EXAMPLE_HEIF_VIEW OFF CACHE BOOL "" FORCE)
+set(WITH_GDK_PIXBUF OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(LIBDE265_FOUND TRUE CACHE BOOL "" FORCE)
+set(LIBDE265_INCLUDE_DIRS
+    "${libde265_source}/libde265;${PROJECT_BINARY_DIR}/third_party/libde265/libde265" CACHE STRING "" FORCE)
+set(LIBDE265_LIBRARIES de265 CACHE STRING "" FORCE)
+add_subdirectory("${libheif_source}" "${PROJECT_BINARY_DIR}/third_party/libheif" EXCLUDE_FROM_ALL SYSTEM)
+set(BUILD_SHARED_LIBS "${liltview_heif_saved_shared_libs}" CACHE BOOL "" FORCE)
+
 set(liltview_avif_source "${PROJECT_SOURCE_DIR}/third_party/libavif")
 if(NOT EXISTS "${liltview_avif_source}/CMakeLists.txt")
     message(FATAL_ERROR "Missing libavif source tree: third_party/libavif/CMakeLists.txt")
