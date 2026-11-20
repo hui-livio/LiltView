@@ -46,6 +46,7 @@
 | JPEG 2000（`.jp2` / `.j2k` / `.j2c` / `.jpf`） | 静态 8 位无符号 RGB / 灰度 JP2 / J2K 图片 | 不支持有符号、非 8 位、CMYK、HDR、动画或区域解码 |
 | AVIF（`.avif`） | 静态 8 位 RGB / 灰度、有损或无损、含透明度的图片，输出 RGBA8 | 不支持动画、高位深、HDR、ICC、变换元数据或区域解码 |
 | JPEG XL（`.jxl`） | 静态 8 位 RGB / 灰度、有损或无损、可带透明度的图片，输出 RGBA8 | 不支持动画、高位深、HDR、额外通道或区域解码 |
+| HEIF / HEIC（`.heif` / `.heic`） | 静态单主图 HEVC 文件，必须只有一个主图，支持 8 位 RGB / RGBA、可选透明度，输出 RGBA8，支持 NATIVE / FIT | 不支持序列、多主图、缩略图、深度图或非透明辅助图、高位深、ICC profile、HDR 或区域解码 |
 | OpenEXR（`.exr`） | 单 part scanline HALF RGB / RGBA 图片，使用固定 SDR 边界映射输出 RGBA8，支持 NATIVE / FIT 与 data window 原点 | 不支持 deep、multi-part、tiled、FLOAT / UINT、额外通道、HDR 输出、ICC 或区域解码 |
 
 **支持某种格式不代表支持其所有编码变体。** 文件按实际内容识别；同目录浏览按上述后缀筛选。完整的位深、透明、方向和资源限制见[格式兼容表](docs/图片格式兼容表.md)。

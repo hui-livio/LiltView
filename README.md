@@ -46,6 +46,7 @@ Image information, the status bar, and both themes. Both screenshots display the
 | JPEG 2000 (`.jp2` / `.j2k` / `.j2c` / `.jpf`) | Static 8-bit unsigned RGB and grayscale JP2 / J2K images | No signed, non-8-bit, CMYK, HDR, animation, or region decode |
 | AVIF (`.avif`) | Static 8-bit RGB / grayscale images, lossless or lossy, with transparency, decoded to RGBA8 | No animation, high-bit-depth, HDR, ICC, transform metadata, or region decode |
 | JPEG XL (`.jxl`) | Static 8-bit RGB / grayscale images, lossless or lossy, with optional alpha, decoded to RGBA8 | No animation, high-bit-depth, HDR, extra channels, or region decode |
+| HEIF / HEIC (`.heif` / `.heic`) | Static single-image HEVC files with one primary image, 8-bit RGB / RGBA output, optional alpha, decoded to RGBA8 with NATIVE / FIT | No sequences, multiple top-level images, thumbnails, depth or non-alpha auxiliary images, high-bit-depth, ICC profiles, HDR, or region decode |
 | OpenEXR (`.exr`) | Single-part scanline HALF RGB / RGBA images, decoded to RGBA8 with fixed SDR clamping; supports NATIVE / FIT and data-window origins | No deep, multipart, tiled, FLOAT / UINT, extra channels, HDR output, ICC, or region decode |
 
 **Supporting a format does not mean supporting every encoding variant.** Files are identified by their contents; folder browsing filters by the extensions listed above. See the [format compatibility table](docs/图片格式兼容表.md) for bit depths, transparency, orientation, and resource limits.
