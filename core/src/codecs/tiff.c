@@ -127,6 +127,24 @@ static int tiff_warning(TIFF *tif, void *userdata, const char *module, const cha
     return 1;
 }
 
+static bool tiff_codec_supported(uint16_t compression)
+{
+    switch (compression)
+    {
+    case COMPRESSION_NONE:
+    case COMPRESSION_PACKBITS:
+    case COMPRESSION_LZW:
+    case COMPRESSION_ADOBE_DEFLATE:
+    case COMPRESSION_JPEG:
+    case COMPRESSION_CCITTRLE:
+    case COMPRESSION_CCITTFAX3:
+    case COMPRESSION_CCITTFAX4:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static TIFF *tiff_open(tiff_input *source, lv_error_info *error)
 {
     TIFFOpenOptions *options = TIFFOpenOptionsAlloc();
@@ -166,7 +184,7 @@ static bool tiff_header(lv_core *core, TIFF *tif, lv_size_u32 *size, uint16_t *o
     TIFFGetFieldDefaulted(tif, TIFFTAG_PHOTOMETRIC, &photo);
     TIFFGetFieldDefaulted(tif, TIFFTAG_ORIENTATION, orientation);
     if (!samples || samples > 4 || (depth != 1 && depth != 2 && depth != 4 && depth != 8 && depth != 16) ||
-        sample_format != SAMPLEFORMAT_UINT || !TIFFIsCODECConfigured(compression) ||
+        sample_format != SAMPLEFORMAT_UINT || !tiff_codec_supported(compression) || !TIFFIsCODECConfigured(compression) ||
         (photo != PHOTOMETRIC_MINISWHITE && photo != PHOTOMETRIC_MINISBLACK && photo != PHOTOMETRIC_RGB &&
          photo != PHOTOMETRIC_PALETTE && photo != PHOTOMETRIC_YCBCR))
     {

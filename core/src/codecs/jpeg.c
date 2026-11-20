@@ -32,7 +32,8 @@ static void jpeg_failure(j_common_ptr common)
     jpeg_state *s = common->client_data;
     if (common->err->msg_code == JERR_OUT_OF_MEMORY)
         s->failure = LV_ERROR_OUT_OF_MEMORY;
-    else if (common->err->msg_code == JERR_IMAGE_TOO_BIG || common->err->msg_code == JERR_WIDTH_OVERFLOW)
+    else if (common->err->msg_code == JERR_IMAGE_TOO_BIG || common->err->msg_code == JERR_WIDTH_OVERFLOW
+             || (s->reading_header && (s->decoder.image_width >= UINT16_MAX || s->decoder.image_height >= UINT16_MAX)))
         s->failure = LV_ERROR_DIMENSION_LIMIT;
     longjmp(s->escape, 1);
 }
