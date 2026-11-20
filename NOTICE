@@ -8,6 +8,7 @@ PNG decoding uses libpng and zlib. WebP decoding uses libwebp.
 SVG rasterization uses PlutoSVG and its pinned PlutoVG dependency.
 GIF first-frame decoding uses giflib. TIFF first-page decoding uses LibTIFF.
 AVIF decoding uses libavif and the bundled dav1d decoder.
+JPEG XL decoding uses libjxl and its bundled Highway/Brotli dependencies.
 Portions of this software are copyright (C) 1996-2020 The FreeType Project
 (www.freetype.org). All rights reserved.
 

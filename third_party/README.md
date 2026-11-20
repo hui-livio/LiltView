@@ -26,6 +26,7 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `openjpeg/` | v2.5.4 | `bbbe3a092256511ec9056a7ad204f9db42a87264` | 固定源码、裁剪版静态库 |
 | `libavif/` | v1.4.2 | `source.json` 中的 tag 与树哈希 | 固定源码、裁剪版静态库 |
 | `dav1d/` | 1.5.3 | `b546257f770768b2c88258c533da38b91a06f737` | submodule、Meson 静态 decoder |
+| `libjxl/` | v0.12.0 | `a7a9c787341cf703dede03c2009fa460cae5e5df` | submodule 及递归 Highway/Brotli/CMS、静态 decoder |
 | `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
 | `lz4/` | v1.10.0 | `ebb370ca83af193212df4dcbadcc5d87bc0de2f0` | submodule、仅 lz4.c / xxhash.c 静态库 |
 | `dav1d-ref/` | 引用生命周期受控子集 | `39834d7f71c85a9c555f2ddd7a7add6d671750de` | C11 头文件抽取 / 改编，BSD-2-Clause；非完整 decoder |

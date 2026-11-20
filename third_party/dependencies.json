@@ -98,6 +98,13 @@
       "version": "1.5.3",
       "commit": "b546257f770768b2c88258c533da38b91a06f737",
       "release": "https://code.videolan.org/videolan/dav1d/-/tags/1.5.3"
+    },
+    "libjxl": {
+      "path": "third_party/libjxl",
+      "url": "https://github.com/libjxl/libjxl.git",
+      "version": "v0.12.0",
+      "commit": "a7a9c787341cf703dede03c2009fa460cae5e5df",
+      "release": "https://github.com/libjxl/libjxl/releases/tag/v0.12.0"
     }
   },
   "vendored_headers": [

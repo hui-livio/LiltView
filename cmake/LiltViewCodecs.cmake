@@ -73,6 +73,28 @@ set_target_properties(dav1d::dav1d PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${dav1d_install}/include")
 add_dependencies(dav1d::dav1d liltview_dav1d_build)
 
+# JPEG XL is built from its pinned recursive source tree. Keep only the
+# decoder library and its local Highway/Brotli/CMS dependencies.
+liltview_dependency_source(libjxl CMakeLists.txt libjxl_source)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_DEVTOOLS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_JNI OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_SJPEG OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_PLUGINS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TRANSCODE_JPEG OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_BOXES ON CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "" FORCE)
+set(JPEGXL_BUNDLE_LIBPNG OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+add_subdirectory("${libjxl_source}" "${PROJECT_BINARY_DIR}/third_party/libjxl" EXCLUDE_FROM_ALL SYSTEM)
+
 set(liltview_avif_source "${PROJECT_SOURCE_DIR}/third_party/libavif")
 if(NOT EXISTS "${liltview_avif_source}/CMakeLists.txt")
     message(FATAL_ERROR "Missing libavif source tree: third_party/libavif/CMakeLists.txt")

@@ -14,6 +14,7 @@ set(liltview_notice_files
     "third_party/libjpeg-turbo/README.ijg"
     "third_party/dav1d-ref/LICENSE"
     "third_party/dav1d/COPYING"
+    "third_party/libjxl/LICENSE"
     "third_party/lz4/lib/LICENSE"
     "third_party/libpng/LICENSE"
     "third_party/zlib/LICENSE"
