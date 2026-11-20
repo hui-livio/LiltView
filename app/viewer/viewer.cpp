@@ -187,13 +187,28 @@ void Viewer::open(const std::filesystem::path &path)
 
 void Viewer::open_raw(const std::filesystem::path &path, const RawInputOptions &raw)
 {
-    if (closing_) return;
+    if (closing_)
+        return;
     ++generation_;
     load_started_ = std::chrono::steady_clock::now();
+    static_stats_ = {};
+    static_stats_.generation = generation_;
+    static_stats_.batch = static_mode_ == StaticUploadMode::batch;
+    loading_frame_submitted_ = static_frame_submitted_ = false;
     prepared_animation_.reset();
     close_animation();
     if (request_) lv_core_cancel(core_, request_);
+    if (!pending_scene_.empty())
+        pending_scene_.swap(retired_scene_);
     discard_pending();
+    playback_.reset();
+    playback_.suspend(suspended_, Playback::Clock::now());
+    try_animation_ = false;
+    reset_animation_ = false;
+    completed_plays_ = 0;
+    visible_pending_ = false;
+    viewport_.reset();
+    pending_raw_.reset();
     pending_raw_ = raw;
     pending_path_ = path;
     selected_path_ = path;

@@ -78,6 +78,8 @@ TEST_CASE("CLI11 rejects incomplete or malformed explicit raw descriptions", "[c
              {"liltview", "--raw-layout", "rgb24", "--raw-size", "640x480", "--raw-plane", "0,3,3", "frame.raw"},
              {"liltview", "--raw-layout", "rgb24", "--raw-size", "640x480", "--raw-plane", "0,3,3,1", "--raw-row-order",
               "sideways", "frame.raw"},
+             {"liltview", "--raw-layout", "i420", "--raw-size", "640x480", "--raw-plane", "0,640,640,480", "frame.yuv"},
+             {"liltview", "--raw-layout", "bayer8", "--raw-size", "640x480", "--raw-plane", "0,640,640,480", "frame.raw"},
          })
     {
         const auto parsed = parse(args);

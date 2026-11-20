@@ -37,6 +37,16 @@ bool valid_plane(std::string_view text)
     }
     return !std::getline(stream, item, ',') && values[1] >= values[2] && values[3] != 0;
 }
+
+bool is_yuv_layout(std::string_view layout)
+{
+    return layout == "i420" || layout == "yv12" || layout == "nv12" || layout == "nv21";
+}
+
+bool is_bayer_layout(std::string_view layout)
+{
+    return layout == "bayer8" || layout == "bayer16";
+}
 }
 
 CommandLineResult parse_command_line(int argc, const char *const *argv, std::ostream &out, std::ostream &error)
@@ -48,7 +58,7 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     app.allow_windows_style_options(false);
     app.set_version_flag("--version", "LiltView " LILTVIEW_VERSION);
     app.footer(
-        "Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF, static AVIF, static JPEG XL, static HEIF/HEIC, RAW/DNG previews, and OpenEXR. Large static JPEG/PNG/BMP/TIFF support regional detail.");
+        "Open JPEG, PNG, SVG, static WebP, BMP, animated GIF, TIFF, static AVIF, static JPEG XL, static HEIF/HEIC, RAW/DNG previews, OpenEXR, or explicitly described raw pixels. Large static JPEG/PNG/BMP/TIFF support regional detail.");
 
     bool licenses = false;
     app.add_flag("--licenses", licenses, "Print embedded licenses and third-party notices");
@@ -67,10 +77,10 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     app.add_option("--raw-row-order", raw.row_order, "Raw row order")->check(CLI::IsMember({"top-down", "bottom-up"}));
     app.add_option("--raw-byte-order", raw.byte_order, "Raw byte order")->check(CLI::IsMember({"native", "little", "big"}));
     app.add_option("--raw-alpha", raw.alpha, "Raw alpha mode")->check(CLI::IsMember({"none", "opaque", "straight"}));
-    app.add_option("--raw-matrix", raw.matrix, "YUV matrix");
-    app.add_option("--raw-range", raw.range, "YUV range");
-    app.add_option("--raw-siting", raw.siting, "YUV chroma siting");
-    app.add_option("--raw-cfa", raw.cfa, "Bayer CFA");
+    app.add_option("--raw-matrix", raw.matrix, "YUV matrix")->check(CLI::IsMember({"bt601", "bt709", "bt2020"}));
+    app.add_option("--raw-range", raw.range, "YUV range")->check(CLI::IsMember({"full", "limited"}));
+    app.add_option("--raw-siting", raw.siting, "YUV chroma siting")->check(CLI::IsMember({"center", "cosited"}));
+    app.add_option("--raw-cfa", raw.cfa, "Bayer CFA")->check(CLI::IsMember({"rggb", "bggr", "grbg", "gbrg"}));
     app.add_option("--raw-black-level", raw.black_level, "Bayer black level");
     app.add_option("--raw-white-level", raw.white_level, "Bayer white level");
     app.add_option("--raw-red-gain-q16", raw.red_gain_q16, "Bayer red gain Q16");
@@ -98,6 +108,16 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
                 throw CLI::ValidationError("--raw-layout, --raw-size and at least one --raw-plane are required");
             for (const auto &plane : raw.planes)
                 if (!valid_plane(plane)) throw CLI::ValidationError("--raw-plane must be OFFSET,STRIDE,ROW_BYTES,HEIGHT");
+            const std::size_t expected_planes = raw.layout == "i420" || raw.layout == "yv12" ? 3 :
+                is_yuv_layout(raw.layout) ? 2 : 1;
+            if (raw.planes.size() != expected_planes)
+                throw CLI::ValidationError("the selected raw layout requires a different number of --raw-plane options");
+            if (is_yuv_layout(raw.layout) && (raw.matrix.empty() || raw.range.empty() || raw.siting.empty()))
+                throw CLI::ValidationError("YUV raw layouts require --raw-matrix, --raw-range and --raw-siting");
+            if (is_bayer_layout(raw.layout) &&
+                (raw.cfa.empty() || raw.white_level <= raw.black_level || raw.red_gain_q16 == 0 ||
+                 raw.green_red_gain_q16 == 0 || raw.green_blue_gain_q16 == 0 || raw.blue_gain_q16 == 0))
+                throw CLI::ValidationError("Bayer raw layouts require CFA, white level above black level and nonzero gains");
             options.raw = raw;
         }
     } catch (const CLI::ParseError &failure)
