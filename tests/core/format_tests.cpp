@@ -822,7 +822,8 @@ TEST_CASE("all formats report capabilities and enforce output or original pixel 
     larger_bmp.resize(54 + 128 * 128 * 3, 0);
     put32(larger_bmp, 18, 128);
     put32(larger_bmp, 22, 128);
-    const std::vector<Bytes> images{png(), webp(false), larger_bmp, red_svg(), qoi_solid(128, 128, {255, 0, 0, 255})};
+    const std::vector<Bytes> images{png(), webp(false), larger_bmp, red_svg(), qoi_solid(128, 128, {255, 0, 0, 255}),
+                                   fixture_bytes("heif-red.heic")};
     for (const auto &image : images)
     {
         Engine limited(1, 12 * 1024);
@@ -838,7 +839,8 @@ TEST_CASE("all formats report capabilities and enforce output or original pixel 
 
 TEST_CASE("new formats detect mutation and cancellation after metadata", "[formats][source][cancel]")
 {
-    for (const auto &image : std::vector<Bytes>{png(), webp(false), bmp(), red_svg(), qoi_solid(7, 5, {255, 0, 0, 255})})
+    for (const auto &image : std::vector<Bytes>{png(), webp(false), bmp(), red_svg(), qoi_solid(7, 5, {255, 0, 0, 255}),
+                                                 fixture_bytes("heif-red.heic")})
         for (bool cancel : {false, true})
         {
             Files files;
