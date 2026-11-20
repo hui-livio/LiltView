@@ -189,11 +189,11 @@ inline Decoded collect(Engine &engine)
         }
     }
 }
-inline Decoded decode_native(const std::vector<unsigned char> &bytes)
+inline Decoded decode_native(const std::vector<unsigned char> &bytes, std::uint64_t memory = 64ULL * 1024 * 1024)
 {
     Files files;
     const auto path = files.write("native-input", bytes);
-    Engine engine;
+    Engine engine(1, memory);
     lv_request_desc request;
     lv_request_desc_init(&request);
     request.path                 = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
@@ -204,10 +204,11 @@ inline Decoded decode_native(const std::vector<unsigned char> &bytes)
     return collect(engine);
 }
 
-inline Decoded decode(const std::vector<unsigned char> &bytes, lv_size_u32 bounds = {100, 100})
+inline Decoded decode(const std::vector<unsigned char> &bytes, lv_size_u32 bounds = {100, 100},
+                     std::uint64_t memory = 64ULL * 1024 * 1024)
 {
     Files files;
-    Engine engine;
+    Engine engine(1, memory);
     engine.submit(files.write("图片.wrong-extension", bytes), bounds);
     return collect(engine);
 }

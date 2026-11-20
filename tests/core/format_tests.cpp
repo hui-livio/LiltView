@@ -560,7 +560,8 @@ TEST_CASE("RAW and DNG whitelist samples decode with native and FIT targets", "[
 {
     for (const auto *name : {"canon-eos5d3-lossy.dng", "canon-eos20d.cr2"})
     {
-        const auto result = decode(fixture_bytes(name));
+        CAPTURE(name);
+        const auto result = decode(fixture_bytes(name), {320, 240}, 128ULL * 1024 * 1024);
         REQUIRE(result.terminal == LV_EVENT_COMPLETE);
         CHECK(result.info.format == LV_FORMAT_RAW);
         CHECK(result.info.source_size.width > 1000);
@@ -570,14 +571,13 @@ TEST_CASE("RAW and DNG whitelist samples decode with native and FIT targets", "[
         REQUIRE(result.pixels.size() == static_cast<std::size_t>(result.info.canvas.width) * result.info.canvas.height * 4);
         CHECK(result.pixels[3] == 255);
 
-        const auto fitted = result;
-        REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
-        CHECK(fitted.info.format == LV_FORMAT_RAW);
-        CHECK(fitted.info.canvas.width <= 320);
-        CHECK(fitted.info.canvas.height <= 240);
-        CHECK(fitted.info.canvas.width > 0);
-        CHECK(fitted.info.canvas.height > 0);
-
+        const auto native = decode_native(fixture_bytes(name), 128ULL * 1024 * 1024);
+        REQUIRE(native.terminal == LV_EVENT_COMPLETE);
+        CHECK(native.info.format == LV_FORMAT_RAW);
+        CHECK(native.info.canvas.width == native.info.source_size.width);
+        CHECK(native.info.canvas.height == native.info.source_size.height);
+        REQUIRE(native.pixels.size() == static_cast<std::size_t>(native.info.canvas.width) * native.info.canvas.height * 4);
+        CHECK(native.pixels[3] == 255);
     }
 }
 
@@ -587,7 +587,7 @@ TEST_CASE("RAW and DNG reject truncation and honor source and memory guards", "[
     {
         auto truncated = fixture_bytes(name);
         truncated.resize(truncated.size() / 2);
-        const auto damaged = decode(truncated);
+        const auto damaged = decode(truncated, {100, 100}, 128ULL * 1024 * 1024);
         REQUIRE(damaged.terminal == LV_EVENT_ERROR);
         CHECK(damaged.error.code != 0);
     }
