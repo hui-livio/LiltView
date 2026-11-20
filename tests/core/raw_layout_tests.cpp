@@ -168,22 +168,13 @@ TEST_CASE("raw RGB layouts honor offset, stride, bottom-up rows, and FIT", "[raw
 
 TEST_CASE("raw RGB reports truncation and advertises its explicit format", "[raw-layout][rgb][errors]")
 {
-    lv_core *core = nullptr;
-    lv_core_config config;
-    lv_core_config_init(&config);
-    config.cpu_budget_bytes = 16ULL * 1024 * 1024;
-    config.queue_pixel_bytes = 64 * 1024;
-    REQUIRE(lv_core_create(&config, &core) == LV_OK);
+    Engine engine;
     lv_format_support support{};
-    REQUIRE(lv_core_query_format(core, LV_FORMAT_RAW_LAYOUT, &support) == LV_OK);
+    REQUIRE(lv_core_query_format(engine.core, LV_FORMAT_RAW_LAYOUT, &support) == LV_OK);
     CHECK(support.available == 1);
-    lv_core_begin_shutdown(core);
-    REQUIRE(lv_core_join(core, 5000) == LV_OK);
-    REQUIRE(lv_core_destroy(&core) == LV_OK);
 
     Files files;
     const auto path = files.write("truncated.rgb", {255, 0, 0, 0});
-    Engine engine;
     lv_raw_request_desc request = valid_request(path);
     lv_request_id id = 0;
     REQUIRE(lv_core_submit_raw(engine.core, &request, &id) == LV_OK);
@@ -203,8 +194,11 @@ TEST_CASE("raw RGB layouts reject truncation and report budget failures", "[raw-
     REQUIRE(damaged.terminal == LV_EVENT_ERROR);
     CHECK((damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_IO));
 
-    const auto budget = decode_raw(complete, LV_RAW_LAYOUT_RGB24, size, {0, 9, 9, 2}, LV_RAW_TOP_DOWN, true,
-                                   {100, 100}, LV_RAW_ALPHA_OPAQUE, 1024);
+    const lv_size_u32 budget_size{128, 128};
+    const Bytes budget_bytes(static_cast<std::size_t>(budget_size.width) * budget_size.height * 3, 0x7f);
+    const auto budget = decode_raw(budget_bytes, LV_RAW_LAYOUT_RGB24, budget_size,
+                                   {0, budget_size.width * 3, budget_size.width * 3, budget_size.height},
+                                   LV_RAW_TOP_DOWN, true, {100, 100}, LV_RAW_ALPHA_OPAQUE, 64ULL * 1024);
     REQUIRE(budget.terminal == LV_EVENT_ERROR);
     CHECK((budget.error.code == LV_ERROR_MEMORY_BUDGET || budget.error.code == LV_ERROR_OUT_OF_MEMORY));
 }
