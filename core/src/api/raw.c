@@ -32,7 +32,9 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
         layout->orientation != LV_ORIENTATION_NORMAL ||
         (layout->row_order != LV_RAW_TOP_DOWN && layout->row_order != LV_RAW_BOTTOM_UP) ||
         (layout->byte_order != LV_RAW_BYTE_NATIVE && layout->byte_order != LV_RAW_BYTE_LITTLE &&
-         layout->byte_order != LV_RAW_BYTE_BIG) || !layout->plane_count || layout->plane_count > LV_RAW_MAX_PLANES)
+         layout->byte_order != LV_RAW_BYTE_BIG) ||
+        (layout->alpha != LV_RAW_ALPHA_NONE && layout->alpha != LV_RAW_ALPHA_OPAQUE &&
+         layout->alpha != LV_RAW_ALPHA_STRAIGHT) || !layout->plane_count || layout->plane_count > LV_RAW_MAX_PLANES)
         return false;
     uint64_t minimum_row = 0;
     uint32_t expected_planes = 1;
@@ -78,7 +80,8 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
             ? layout->size.height / 2 : layout->size.height;
         const uint64_t expected_row = (layout->layout == LV_RAW_LAYOUT_I420 || layout->layout == LV_RAW_LAYOUT_YV12) && i > 0
             ? layout->size.width / 2 : minimum_row;
-        if (plane->height != expected_height || plane->row_bytes < expected_row || plane->stride < plane->row_bytes)
+        if (plane->height != expected_height || plane->row_bytes < expected_row || plane->row_bytes > SIZE_MAX ||
+            plane->stride < plane->row_bytes)
             return false;
         uint64_t rows = plane->height ? plane->height - 1 : 0;
         uint64_t end = 0, span = 0;

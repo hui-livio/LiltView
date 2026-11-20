@@ -201,10 +201,10 @@ TEST_CASE("raw RGB layouts reject truncation and report budget failures", "[raw-
 
     const auto damaged = decode_raw(Bytes(8, 0x7f), LV_RAW_LAYOUT_RGB24, size, {0, 9, 9, 2});
     REQUIRE(damaged.terminal == LV_EVENT_ERROR);
-    CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_IO);
+    CHECK((damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_IO));
 
     const auto budget = decode_raw(complete, LV_RAW_LAYOUT_RGB24, size, {0, 9, 9, 2}, LV_RAW_TOP_DOWN, true,
                                    {100, 100}, LV_RAW_ALPHA_OPAQUE, 1024);
     REQUIRE(budget.terminal == LV_EVENT_ERROR);
-    CHECK(budget.error.code == LV_ERROR_MEMORY_BUDGET || budget.error.code == LV_ERROR_OUT_OF_MEMORY);
+    CHECK((budget.error.code == LV_ERROR_MEMORY_BUDGET || budget.error.code == LV_ERROR_OUT_OF_MEMORY));
 }
