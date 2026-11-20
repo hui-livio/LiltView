@@ -147,6 +147,8 @@ void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error
         goto done;
     error->code = 0;
 done:
+    if (lv_stopped(core, request))
+        error->code = 0;
     if (native)
         lv_workspace_release(core, request, native, (size_t)native_bytes);
     if (image)
