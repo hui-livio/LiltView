@@ -70,6 +70,58 @@ Decoded decode_yuv(const Bytes &bytes, lv_raw_layout layout, lv_size_u32 size, c
     return collect(engine);
 }
 
+Decoded decode_bayer(const Bytes &bytes, lv_raw_cfa_pattern cfa, lv_size_u32 size, lv_raw_plane plane,
+                     uint32_t cfa_x_origin = 0, uint32_t cfa_y_origin = 0, uint32_t black_level = 0,
+                     uint32_t white_level = 255, uint32_t red_gain = 65536, uint32_t green_red_gain = 65536,
+                     uint32_t green_blue_gain = 65536, uint32_t blue_gain = 65536,
+                     lv_raw_row_order row_order = LV_RAW_TOP_DOWN, bool native = true,
+                     lv_size_u32 bounds = {100, 100}, std::uint64_t memory = 16ULL * 1024 * 1024,
+                     lv_raw_demosaic_quality demosaic = LV_RAW_DEMOSAIC_BILINEAR)
+{
+    Files files;
+    Engine engine(1, memory);
+    const auto path = files.write("raw-layout.bayer", bytes);
+    lv_raw_request_desc request;
+    lv_raw_request_desc_init(&request);
+    request.path = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+    request.target.kind = native ? LV_TARGET_NATIVE : LV_TARGET_FIT;
+    request.target.as.fit_bounds = bounds;
+    request.image.layout.layout = LV_RAW_LAYOUT_BAYER8;
+    request.image.layout.size = size;
+    request.image.layout.row_order = row_order;
+    request.image.layout.plane_count = 1;
+    request.image.layout.planes[0] = plane;
+    request.image.processing.cfa = cfa;
+    request.image.processing.cfa_x_origin = cfa_x_origin;
+    request.image.processing.cfa_y_origin = cfa_y_origin;
+    request.image.processing.black_level = black_level;
+    request.image.processing.white_level = white_level;
+    request.image.processing.red_gain_q16 = red_gain;
+    request.image.processing.green_red_gain_q16 = green_red_gain;
+    request.image.processing.green_blue_gain_q16 = green_blue_gain;
+    request.image.processing.blue_gain_q16 = blue_gain;
+    request.image.processing.demosaic = demosaic;
+    lv_request_id id = 0;
+    const auto submit_status = lv_core_submit_raw(engine.core, &request, &id);
+    REQUIRE(submit_status == LV_OK);
+    REQUIRE(id != 0);
+    return collect(engine);
+}
+
+unsigned bayer_test_color(lv_raw_cfa_pattern cfa, uint32_t x, uint32_t y)
+{
+    const bool odd_x = (x & 1u) != 0;
+    const bool odd_y = (y & 1u) != 0;
+    switch (cfa)
+    {
+    case LV_RAW_CFA_RGGB: return odd_y ? (odd_x ? 2u : 1u) : (odd_x ? 1u : 0u);
+    case LV_RAW_CFA_BGGR: return odd_y ? (odd_x ? 0u : 1u) : (odd_x ? 1u : 2u);
+    case LV_RAW_CFA_GRBG: return odd_y ? (odd_x ? 1u : 2u) : (odd_x ? 0u : 1u);
+    case LV_RAW_CFA_GBRG: return odd_y ? (odd_x ? 1u : 0u) : (odd_x ? 2u : 1u);
+    default: return 1u;
+    }
+}
+
 void check_pixel(const Decoded &result, std::uint32_t x, std::uint32_t y, std::array<unsigned, 3> expected,
                  unsigned tolerance = 0)
 {
@@ -443,4 +495,89 @@ TEST_CASE("raw YUV420 rejects unsupported color semantics and truncation", "[raw
     const auto truncated = decode_yuv(Bytes{128, 128, 128, 128}, LV_RAW_LAYOUT_I420, size, planes, 3);
     REQUIRE(truncated.terminal == LV_EVENT_ERROR);
     CHECK(truncated.error.code == LV_ERROR_CORRUPT_DATA);
+}
+
+TEST_CASE("raw Bayer8 decodes all CFA patterns with calibrated channels", "[raw-layout][bayer]")
+{
+    const lv_size_u32 size{4, 4};
+    for (const auto cfa : {LV_RAW_CFA_RGGB, LV_RAW_CFA_BGGR, LV_RAW_CFA_GRBG, LV_RAW_CFA_GBRG})
+    {
+        Bytes raw(static_cast<std::size_t>(size.width) * size.height, 0);
+        for (uint32_t y = 0; y < size.height; ++y)
+            for (uint32_t x = 0; x < size.width; ++x)
+            {
+                const unsigned channel = bayer_test_color(cfa, x, y);
+                raw[static_cast<std::size_t>(y) * size.width + x] = channel == 0 ? 220 : channel == 1 ? 128 : 36;
+            }
+        const auto result = decode_bayer(raw, cfa, size, {0, 4, 4, 4});
+        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+        check_pixel(result, 1, 1, {220, 128, 36}, 2);
+        check_pixel(result, 2, 2, {220, 128, 36}, 2);
+    }
+}
+
+TEST_CASE("raw Bayer8 applies black white levels gains origin and FIT", "[raw-layout][bayer][boundaries]")
+{
+    const lv_size_u32 size{4, 4};
+    Bytes raw(16, 100);
+    const auto calibrated = decode_bayer(raw, LV_RAW_CFA_RGGB, size, {0, 4, 4, 4}, 0, 0, 0, 255, 32768,
+                                                                       65536, 98304, 131072);
+    REQUIRE(calibrated.terminal == LV_EVENT_COMPLETE);
+    check_pixel(calibrated, 0, 0, {50, 125, 200}, 1);
+    check_pixel(calibrated, 1, 1, {50, 125, 200}, 1);
+
+    const auto shifted = decode_bayer(raw, LV_RAW_CFA_RGGB, size, {0, 4, 4, 4}, 1, 1, 0, 255);
+    REQUIRE(shifted.terminal == LV_EVENT_COMPLETE);
+    CHECK(shifted.info.canvas.width == 4);
+    CHECK(shifted.info.canvas.height == 4);
+
+    const auto fitted = decode_bayer(raw, LV_RAW_CFA_RGGB, size, {0, 4, 4, 4}, 0, 0, 0, 255, 65536, 65536,
+                                                                    65536, 65536, LV_RAW_TOP_DOWN, false, {2, 2});
+    REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+    CHECK(fitted.info.canvas.width == 2);
+    CHECK(fitted.info.canvas.height == 2);
+
+    const auto gained = decode_bayer(raw, LV_RAW_CFA_RGGB, size, {0, 4, 4, 4}, 0, 0, 0, 255, 2 * 65536,
+                                                                  65536, 3 * 65536, 4 * 65536);
+    REQUIRE(gained.terminal == LV_EVENT_COMPLETE);
+    CHECK(gained.pixels[0] == 200);
+    CHECK(gained.pixels[1] >= 150);
+    CHECK(gained.pixels[2] == 255);
+}
+
+TEST_CASE("raw Bayer8 honors offset stride bottom-up and rejects unsupported or damaged input", "[raw-layout][bayer][errors]")
+{
+    const lv_size_u32 size{3, 3};
+    Bytes storage(24, 0xaa);
+    for (uint32_t y = 0; y < size.height; ++y)
+        for (uint32_t x = 0; x < size.width; ++x)
+            storage[2 + static_cast<std::size_t>(y) * 6 + x] = 128;
+    const auto offset = decode_bayer(storage, LV_RAW_CFA_RGGB, size, {2, 6, 3, 3});
+    REQUIRE(offset.terminal == LV_EVENT_COMPLETE);
+    CHECK(offset.info.source_size.width == 3);
+    CHECK(offset.info.source_size.height == 3);
+
+    Bytes bottom_up(18, 0);
+    std::fill_n(bottom_up.begin(), 3, static_cast<unsigned char>(224));
+    std::fill_n(bottom_up.begin() + 6, 3, static_cast<unsigned char>(128));
+    std::fill_n(bottom_up.begin() + 12, 3, static_cast<unsigned char>(32));
+    const auto bottom = decode_bayer(bottom_up, LV_RAW_CFA_RGGB, size, {0, 6, 3, 3}, 0, 0, 0, 255, 65536,
+                                                                        65536, 65536, 65536, LV_RAW_BOTTOM_UP);
+    REQUIRE(bottom.terminal == LV_EVENT_COMPLETE);
+    CHECK(bottom.pixels[0] < bottom.pixels[24]);
+
+    const auto unsupported = decode_bayer(Bytes(16, 128), LV_RAW_CFA_NONE, {4, 4}, {0, 4, 4, 4});
+    REQUIRE(unsupported.terminal == LV_EVENT_ERROR);
+    CHECK(unsupported.error.code == LV_ERROR_FORMAT_UNSUPPORTED);
+
+    const auto damaged = decode_bayer(Bytes(8, 128), LV_RAW_CFA_RGGB, {4, 4}, {0, 4, 4, 4});
+    REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+    CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
+
+    const lv_size_u32 large{128, 128};
+    const auto budget = decode_bayer(Bytes(static_cast<std::size_t>(large.width) * large.height, 128), LV_RAW_CFA_RGGB,
+                                     large, {0, large.width, large.width, large.height}, 0, 0, 0, 255, 65536, 65536,
+                                     65536, 65536, LV_RAW_TOP_DOWN, true, {100, 100}, 64ULL * 1024);
+    REQUIRE(budget.terminal == LV_EVENT_ERROR);
+    CHECK((budget.error.code == LV_ERROR_MEMORY_BUDGET || budget.error.code == LV_ERROR_OUT_OF_MEMORY));
 }
