@@ -133,6 +133,13 @@
       "version": "v1.1.3",
       "commit": "ba62bf4cfb3242f3bf0a45617ff09e35236e4d82",
       "release": "https://github.com/strukturag/libde265/releases/tag/v1.1.3"
+    },
+    "libraw": {
+      "path": "third_party/libraw",
+      "url": "https://github.com/LibRaw/LibRaw.git",
+      "version": "0.22.3",
+      "commit": "cf02d66eb5c19d4e46df7aee0582e47a4918509a",
+      "release": "https://github.com/LibRaw/LibRaw/releases/tag/0.22.3"
     }
   },
   "vendored_headers": [

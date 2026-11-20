@@ -52,3 +52,6 @@
 [submodule "libde265"]
 	path = third_party/libde265
 	url = https://github.com/strukturag/libde265.git
+[submodule "libraw"]
+	path = third_party/libraw
+	url = https://github.com/LibRaw/LibRaw.git
