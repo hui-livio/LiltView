@@ -84,4 +84,5 @@ void lv_decode_avif(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_jpegxl(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_openexr(lv_core *, lv_request *, lv_input *, lv_error_info *);
 void lv_decode_heif(lv_core *, lv_request *, lv_input *, lv_error_info *);
+void lv_decode_raw(lv_core *, lv_request *, lv_input *, lv_error_info *);
 #endif

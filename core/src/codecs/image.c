@@ -57,6 +57,12 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_jpegxl;
     if (size >= 4 && data[0] == 0x76 && data[1] == 0x2f && data[2] == 0x31 && data[3] == 0x01)
         return lv_decode_openexr;
+    if (size >= 4 && !memcmp(data, "II*\0", 4))
+        for (size_t at = 8; at + 1 < size; ++at)
+            if (data[at] == 0xca && data[at + 1] == 0xc5) /* DNGVersion, TIFF tag 50706 */
+                return lv_decode_raw;
+    if (size >= 16 && !memcmp(data, "II", 2) && !memcmp(data + 8, "CR", 2))
+        return lv_decode_raw;
     size_t at = size >= 3 && !memcmp(data, "\xef\xbb\xbf", 3) ? 3 : 0;
     while (at < size && (data[at] == ' ' || data[at] == '\t' || data[at] == '\n' || data[at] == '\r'))
         ++at;
