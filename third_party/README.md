@@ -71,6 +71,7 @@ ctest --preset dev
 通常不使用 `git submodule update --remote`，以免绕过主仓库锁定版本。CMake 只读取本地源码，不自动执行 Git、下载或修改依赖。
 
 HEIF/HEIC 尚未接入。系统 libheif 不能作为可复现发布依赖直接使用。首版接入前需要固定 libheif、实际 HEVC decoder 和所有静态链接义务，明确 LGPL-3 对发布、源代码和替换链接的影响。
+JPEG XL 尚未接入。系统 libjxl 不能作为可复现发布依赖直接使用。首版接入前需要固定 libjxl、Highway、Brotli、CMS 组件和 C++ 静态链接边界。libjxl 本体为 BSD-3-Clause，依赖组合和发行包体积仍需单独验收。
 
 ## 纯头文件库规则
 
