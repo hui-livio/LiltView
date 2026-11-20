@@ -90,7 +90,14 @@ static uint32_t bayer_sample(const uint8_t *row, uint64_t row_bytes, uint32_t x,
     const uint64_t offset = (uint64_t)x * 2;
     if (offset > row_bytes || row_bytes - offset < 2)
         return 0;
-    const uint16_t value = layout->byte_order == LV_RAW_BYTE_BIG
+    #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    const bool native_big = true;
+    #else
+    const bool native_big = false;
+    #endif
+    const bool big_endian = layout->byte_order == LV_RAW_BYTE_BIG ||
+        (layout->byte_order == LV_RAW_BYTE_NATIVE && native_big);
+    const uint16_t value = big_endian
         ? (uint16_t)(((uint16_t)row[offset] << 8) | row[offset + 1])
         : (uint16_t)(((uint16_t)row[offset + 1] << 8) | row[offset]);
     return value;
