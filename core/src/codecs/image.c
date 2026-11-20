@@ -39,6 +39,17 @@ static decode_func detect_format(const uint8_t *data, size_t size)
             for (size_t at = 16; at + 4 <= box_size; at += 4)
                 if (!memcmp(data + at, "avif", 4) || !memcmp(data + at, "avis", 4))
                     return lv_decode_avif;
+        const bool heif_brand = !memcmp(data + 8, "heic", 4) || !memcmp(data + 8, "heix", 4) ||
+            !memcmp(data + 8, "hevc", 4) || !memcmp(data + 8, "heim", 4) || !memcmp(data + 8, "heis", 4) ||
+            !memcmp(data + 8, "mif1", 4) || !memcmp(data + 8, "msf1", 4);
+        if (heif_brand)
+            return lv_decode_heif;
+        if (box_size >= 16 && box_size <= size)
+            for (size_t at = 16; at + 4 <= box_size; at += 4)
+                if (!memcmp(data + at, "heic", 4) || !memcmp(data + at, "heix", 4) || !memcmp(data + at, "hevc", 4) ||
+                    !memcmp(data + at, "heim", 4) || !memcmp(data + at, "heis", 4) || !memcmp(data + at, "mif1", 4) ||
+                    !memcmp(data + at, "msf1", 4))
+                    return lv_decode_heif;
     }
     if (size >= 2 && data[0] == 0xff && data[1] == 0x0a)
         return lv_decode_jpegxl;
