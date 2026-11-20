@@ -49,6 +49,44 @@ TEST_CASE("CLI11 parses launch options and one positional image", "[cli]")
     CHECK(filename.command.options.image_path == "-photo.jpg");
 }
 
+TEST_CASE("CLI11 parses explicit raw layout options", "[cli][raw-layout]")
+{
+    const auto parsed = parse({"liltview", "--raw-layout", "i420", "--raw-size", "640x480", "--raw-plane",
+                               "0,640,640,480", "--raw-plane", "307200,320,320,240", "--raw-plane",
+                               "384000,320,320,240", "--raw-matrix", "bt601", "--raw-range", "limited",
+                               "--raw-siting", "center", "--raw-row-order", "bottom-up", "--raw-byte-order",
+                               "little", "frame.yuv"});
+    REQUIRE_FALSE(parsed.command.exit_code);
+    REQUIRE(parsed.command.options.raw);
+    CHECK(parsed.command.options.raw->layout == "i420");
+    CHECK(parsed.command.options.raw->size == "640x480");
+    REQUIRE(parsed.command.options.raw->planes.size() == 3);
+    CHECK(parsed.command.options.raw->planes[1] == "307200,320,320,240");
+    CHECK(parsed.command.options.raw->row_order == "bottom-up");
+    CHECK(parsed.command.options.raw->byte_order == "little");
+    CHECK(parsed.command.options.raw->matrix == "bt601");
+    CHECK(parsed.command.options.raw->range == "limited");
+    CHECK(parsed.command.options.raw->siting == "center");
+    CHECK(parsed.command.options.image_path == "frame.yuv");
+}
+
+TEST_CASE("CLI11 rejects incomplete or malformed explicit raw descriptions", "[cli][raw-layout]")
+{
+    for (const auto args : {
+             std::initializer_list<const char *> {"liltview", "--raw-layout", "rgb24", "frame.raw"},
+             {"liltview", "--raw-layout", "rgb24", "--raw-size", "640", "--raw-plane", "0,3,3,1", "frame.raw"},
+             {"liltview", "--raw-layout", "rgb24", "--raw-size", "640x480", "--raw-plane", "0,3,3", "frame.raw"},
+             {"liltview", "--raw-layout", "rgb24", "--raw-size", "640x480", "--raw-plane", "0,3,3,1", "--raw-row-order",
+              "sideways", "frame.raw"},
+         })
+    {
+        const auto parsed = parse(args);
+        REQUIRE(parsed.command.exit_code);
+        CHECK(*parsed.command.exit_code != 0);
+        CHECK_FALSE(parsed.error.empty());
+    }
+}
+
 TEST_CASE("CLI11 help and version exit before launching graphics", "[cli]")
 {
     for (const auto flag : {"--help", "-h", "--version"})
@@ -99,5 +137,34 @@ TEST_CASE("embedded redistribution notices are available without launching graph
     {
         CAPTURE(component);
         CHECK(parsed.output.find(component) != std::string::npos);
+    }
+}
+
+TEST_CASE("CLI parses explicit raw layout descriptors", "[cli][raw]")
+{
+    const auto parsed = parse({"liltview", "--raw-layout", "rgb24", "--raw-size", "640x480", "--raw-plane",
+                               "3,1920,1920,480", "--raw-row-order", "bottom-up", "--raw-byte-order", "little",
+                               "--raw-alpha", "opaque", "frame.raw"});
+    REQUIRE_FALSE(parsed.command.exit_code);
+    REQUIRE(parsed.command.options.raw);
+    CHECK(parsed.command.options.raw->layout == "rgb24");
+    CHECK(parsed.command.options.raw->size == "640x480");
+    CHECK(parsed.command.options.raw->planes == std::vector<std::string>{"3,1920,1920,480"});
+    CHECK(parsed.command.options.raw->row_order == "bottom-up");
+    CHECK(parsed.command.options.raw->byte_order == "little");
+    CHECK(parsed.command.options.image_path == "frame.raw");
+}
+
+TEST_CASE("CLI rejects incomplete or malformed raw descriptors", "[cli][raw]")
+{
+    for (const auto args : {std::initializer_list<const char *> {"liltview", "--raw-layout", "rgb24", "frame.raw"},
+                            {"liltview", "--raw-layout", "rgb24", "--raw-size", "640x480", "--raw-plane", "0,3,x,2", "frame.raw"},
+                            {"liltview", "--raw-layout", "rgb24", "--raw-size", "640", "--raw-plane", "0,3,3,480", "frame.raw"},
+                            {"liltview", "--raw-layout", "unknown", "--raw-size", "640x480", "--raw-plane", "0,3,3,480", "frame.raw"}})
+    {
+        const auto parsed = parse(args);
+        REQUIRE(parsed.command.exit_code);
+        CHECK(*parsed.command.exit_code != 0);
+        CHECK_FALSE(parsed.error.empty());
     }
 }

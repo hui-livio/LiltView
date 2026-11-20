@@ -148,6 +148,20 @@ TEST_CASE("directory navigation filters only provided formats and regular files"
     CHECK(std::find(names.begin(), names.end(), "pipe.png") == names.end());
 }
 
+TEST_CASE("directory navigation does not infer raw layouts from raw-looking suffixes", "[navigation][raw-layout]")
+{
+    Directory directory;
+    const auto selected = directory.file("frame.raw");
+    directory.file("next.raw");
+    directory.file("image.png");
+    DirectoryNavigation navigation({"png"});
+    navigation.select(selected);
+    settle(navigation);
+    CHECK_FALSE(navigation.snapshot().error);
+    CHECK(navigation.snapshot().total == 0);
+    CHECK_FALSE(navigation.step(1));
+}
+
 TEST_CASE("directory selection has exact boundaries and refreshes only explicit opens", "[navigation]")
 {
     Directory directory;
