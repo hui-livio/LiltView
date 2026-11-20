@@ -13,6 +13,7 @@ namespace liltview
 {
 struct RawInputOptions
 {
+    std::string file;
     std::string layout;
     std::string size;
     std::vector<std::string> planes;

@@ -70,6 +70,7 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
     app.add_option("--screenshot", options.screenshot, "Save a PPM during --smoke-test")->type_name("PATH")->needs(smoke);
     app.add_option("image", options.image_path, "Image to open (JPEG, PNG, SVG, WebP, BMP, GIF, TIFF, AVIF, JPEG XL, HEIF/HEIC, RAW/DNG, OpenEXR)")->type_name("PATH");
     RawInputOptions raw;
+    app.add_option("--raw-file", raw.file, "Data file for an explicit raw layout")->type_name("PATH");
     auto *raw_layout = app.add_option("--raw-layout", raw.layout, "Explicit raw layout: rgb24,bgr24,rgba8,bgra8,gray8,i420,yv12,nv12,nv21,bayer8,bayer16")
         ->check(CLI::IsMember({"rgb24", "bgr24", "rgba8", "bgra8", "gray8", "i420", "yv12", "nv12", "nv21", "bayer8", "bayer16"}));
     auto *raw_size = app.add_option("--raw-size", raw.size, "Raw dimensions WIDTHxHEIGHT");
@@ -99,13 +100,14 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
         }
         if (*language_option)
             options.language = parse_language(language);
-        if (*raw_layout || *raw_size || *raw_plane || raw.row_order != "top-down" || raw.byte_order != "native" ||
+        if (!raw.file.empty() || *raw_layout || *raw_size || *raw_plane || raw.row_order != "top-down" || raw.byte_order != "native" ||
             raw.alpha != "opaque" || !raw.matrix.empty() || !raw.range.empty() || !raw.siting.empty() || !raw.cfa.empty() ||
             raw.black_level || raw.white_level || raw.red_gain_q16 != 65536 || raw.green_red_gain_q16 != 65536 ||
             raw.green_blue_gain_q16 != 65536 || raw.blue_gain_q16 != 65536)
         {
-            if (!*raw_layout || !*raw_size || raw.planes.empty() || options.image_path.empty() || !parse_size(raw.size))
-                throw CLI::ValidationError("--raw-layout, --raw-size and at least one --raw-plane are required");
+            if (!*raw_layout || !*raw_size || raw.planes.empty() || (!options.image_path.empty() && !raw.file.empty()) ||
+                (options.image_path.empty() && raw.file.empty()) || !parse_size(raw.size))
+                throw CLI::ValidationError("explicit raw input requires one image path or --raw-file, plus --raw-layout, --raw-size and --raw-plane");
             for (const auto &plane : raw.planes)
                 if (!valid_plane(plane)) throw CLI::ValidationError("--raw-plane must be OFFSET,STRIDE,ROW_BYTES,HEIGHT");
             const std::size_t expected_planes = raw.layout == "i420" || raw.layout == "yv12" ? 3 :
@@ -118,6 +120,8 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
                 (raw.cfa.empty() || raw.white_level <= raw.black_level || raw.red_gain_q16 == 0 ||
                  raw.green_red_gain_q16 == 0 || raw.green_blue_gain_q16 == 0 || raw.blue_gain_q16 == 0))
                 throw CLI::ValidationError("Bayer raw layouts require CFA, white level above black level and nonzero gains");
+            if (!raw.file.empty())
+                options.image_path = raw.file;
             options.raw = raw;
         }
     } catch (const CLI::ParseError &failure)

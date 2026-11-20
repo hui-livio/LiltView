@@ -68,6 +68,12 @@ TEST_CASE("CLI11 parses explicit raw layout options", "[cli][raw-layout]")
     CHECK(parsed.command.options.raw->range == "limited");
     CHECK(parsed.command.options.raw->siting == "center");
     CHECK(parsed.command.options.image_path == "frame.yuv");
+
+    const auto explicit_file = parse({"liltview", "--raw-file", "frame.yuv", "--raw-layout", "i420", "--raw-size", "640x480",
+                                      "--raw-plane", "0,640,640,480", "--raw-plane", "307200,320,320,240", "--raw-plane",
+                                      "384000,320,320,240", "--raw-matrix", "bt601", "--raw-range", "limited", "--raw-siting", "center"});
+    REQUIRE_FALSE(explicit_file.command.exit_code);
+    CHECK(explicit_file.command.options.image_path == "frame.yuv");
 }
 
 TEST_CASE("CLI11 rejects incomplete or malformed explicit raw descriptions", "[cli][raw-layout]")
