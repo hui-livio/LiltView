@@ -112,7 +112,8 @@ enum
     LV_FORMAT_ICO     = 9,
     LV_FORMAT_CUR     = 10,
     LV_FORMAT_JPEG2000 = 11,
-    LV_FORMAT_AVIF      = 12
+    LV_FORMAT_AVIF      = 12,
+    LV_FORMAT_JPEGXL   = 13
 };
 
 typedef uint64_t lv_capabilities;
