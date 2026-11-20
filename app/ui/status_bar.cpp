@@ -49,8 +49,9 @@ StatusBarContent status_bar_content(Language language, Text status, const std::o
     const auto *format  = image_format_name(visible->image.format);
     const auto &size    = visible->image.source_size;
     const bool known    = (visible->image.flags & LV_INFO_SOURCE_SIZE_KNOWN) && size.width && size.height;
-    result.metadata     = format ? format : unknown;
-    result.metadata    += "  ·  " + (known ? std::to_string(size.width) + " × " + std::to_string(size.height) : unknown);
+    result.metadata = visible->raw_description.empty() ? std::string(format ? format : unknown) : visible->raw_description;
+    if (visible->raw_description.empty())
+        result.metadata += "  ·  " + (known ? std::to_string(size.width) + " × " + std::to_string(size.height) : unknown);
     std::ostringstream zoom;
     zoom.imbue(std::locale::classic());
     if (std::isfinite(visible->scale * 100) && visible->scale > 0)

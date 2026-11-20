@@ -107,6 +107,16 @@ TEST_CASE("status bar shows basename actual source format raw dimensions and phy
     }
 }
 
+TEST_CASE("status bar shows explicit raw assumptions", "[status_bar][raw-layout]")
+{
+    auto details = image();
+    details.image.format = LV_FORMAT_RAW_LAYOUT;
+    details.raw_description = "Raw rgb24 · 3x2 · planes=0,9,9,2 · top-down · native";
+    details.scale = 1;
+    const auto content = status_bar_content(Language::english, Text::ready, details, "", {});
+    CHECK(content.metadata == details.raw_description + "  ·  100%");
+}
+
 TEST_CASE("status bar failures show the requested basename without stale image parameters or full paths", "[status_bar][error]")
 {
     const auto details = image();
