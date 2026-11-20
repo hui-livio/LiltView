@@ -61,6 +61,42 @@ function(liltview_try_system_package package version target output)
     endif()
 endfunction()
 
+function(liltview_try_system_pkg_config module output)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"
+       OR LILTVIEW_LINUX_DEPENDENCY_MODE STREQUAL "FETCH")
+        set(${output} "" PARENT_SCOPE)
+        return()
+    endif()
+
+    find_package(PkgConfig QUIET)
+    if(NOT PkgConfig_FOUND)
+        set(${output} "" PARENT_SCOPE)
+        return()
+    endif()
+
+    string(MAKE_C_IDENTIFIER "${module}" identifier)
+    set(result_name "LILTVIEW_PKG_${identifier}")
+    pkg_check_modules(${result_name} QUIET IMPORTED_TARGET "${module}")
+    if(${result_name}_FOUND AND TARGET PkgConfig::${result_name})
+        set(${output} "PkgConfig::${result_name}" PARENT_SCOPE)
+    else()
+        set(${output} "" PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(liltview_dependency_source_or_fetch name marker output)
+    set(vendored_source "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/${name}")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+       AND NOT LILTVIEW_LINUX_DEPENDENCY_MODE STREQUAL "SYSTEM"
+       AND NOT EXISTS "${vendored_source}/${marker}")
+        liltview_fetch_dependency_source("${name}" "${marker}" fetched_source)
+        set(${output} "${fetched_source}" PARENT_SCOPE)
+        return()
+    endif()
+    liltview_dependency_source("${name}" "${marker}" local_source)
+    set(${output} "${local_source}" PARENT_SCOPE)
+endfunction()
+
 # Populate a fixed dependency into the build tree without adding a submodule
 # or mutating third_party/. The caller still owns add_subdirectory and all
 # upstream feature switches so Windows keeps its existing source path.
