@@ -30,7 +30,7 @@ static lv_error_code raw_error(int result)
     }
 }
 
-static int raw_progress(enum LibRaw_progress stage, int iteration, int expected, void *userdata)
+static int raw_progress(void *userdata, enum LibRaw_progress stage, int iteration, int expected)
 {
     (void)stage;
     (void)iteration;
