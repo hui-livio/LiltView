@@ -29,7 +29,7 @@ static uint64_t raw_hash_bytes(uint64_t hash, const void *data, size_t size)
 static bool raw_layout_valid(const lv_raw_layout_desc *layout)
 {
     if (layout->struct_size != sizeof *layout || !layout->size.width || !layout->size.height ||
-        (layout->orientation < LV_ORIENTATION_NORMAL || layout->orientation > LV_ORIENTATION_ROTATE_270_CW) ||
+        layout->orientation != LV_ORIENTATION_NORMAL ||
         (layout->row_order != LV_RAW_TOP_DOWN && layout->row_order != LV_RAW_BOTTOM_UP) ||
         (layout->byte_order != LV_RAW_BYTE_NATIVE && layout->byte_order != LV_RAW_BYTE_LITTLE &&
          layout->byte_order != LV_RAW_BYTE_BIG) || !layout->plane_count || layout->plane_count > LV_RAW_MAX_PLANES)
@@ -208,5 +208,33 @@ lv_status LV_CALL lv_core_submit_raw(lv_core *core, const lv_raw_request_desc *r
     const lv_status status = lv_validate_raw_request(request);
     if (status != LV_OK)
         return status;
-    return LV_UNSUPPORTED;
+    lv_request_desc base;
+    lv_request_desc_init(&base);
+    base.kind = request->kind;
+    base.priority = request->priority;
+    base.user_tag = request->user_tag;
+    base.path = request->path;
+    base.target = request->target;
+    mtx_lock(&core->mutex);
+    if (core->closing)
+    {
+        mtx_unlock(&core->mutex);
+        return LV_CLOSING;
+    }
+    lv_status accepted = lv_accept_locked(core, &base, nullptr, 0, out_request_id);
+    if (accepted == LV_OK)
+    {
+        lv_request *stored = nullptr;
+        for (uint32_t i = 0; i < core->config.max_requests; ++i)
+            if (core->requests[i].id == *out_request_id)
+                stored = &core->requests[i];
+        if (stored)
+        {
+            stored->raw_input = true;
+            stored->raw_identity = lv_raw_identity(&request->image);
+            stored->raw_image = request->image;
+        }
+    }
+    mtx_unlock(&core->mutex);
+    return accepted;
 }

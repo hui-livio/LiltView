@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include "../internal.h"
+#include "../codecs/codec.h"
 
 void lv_discard_tiles_locked(lv_core *core, lv_request_id id)
 {
@@ -145,6 +146,23 @@ int lv_worker_main(void *data)
         {
             if (r->animation)
                 lv_animation_decode(core, r, &error);
+            else if (r->raw_input)
+            {
+                lv_input input = {0};
+                uint32_t code = 0;
+                input.file = lv_file_open(r->path, &input.version, &code);
+                if (!input.file)
+                {
+                    error.code = LV_ERROR_IO;
+                    error.system_domain = LV_FILE_SYSTEM_DOMAIN;
+                    error.system_code = code;
+                }
+                else
+                {
+                    lv_decode_raw_layout(core, r, &input, &error);
+                    lv_file_close(input.file);
+                }
+            }
             else
                 lv_decode_image(core, r, &error);
         }

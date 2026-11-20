@@ -107,7 +107,7 @@ void lv_cache_clear_locked(lv_core *core)
 bool lv_cache_begin_locked(lv_core *core, lv_request *r, const lv_image_info *info, const lv_file_version *version,
                            lv_source *source)
 {
-    if (r->animation || r->replay || !core->config.cache_budget_bytes)
+    if (r->animation || r->raw_input || r->replay || !core->config.cache_budget_bytes)
         return true;
     const uint64_t edge    = info->tile_edge;
     const lv_rect_u32 rect = info->region;

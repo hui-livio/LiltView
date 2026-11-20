@@ -116,7 +116,8 @@ enum
     LV_FORMAT_JPEGXL   = 13,
     LV_FORMAT_OPENEXR   = 14,
     LV_FORMAT_HEIF      = 15,
-    LV_FORMAT_RAW       = 16
+    LV_FORMAT_RAW       = 16,
+    LV_FORMAT_RAW_LAYOUT = 17
 };
 
 typedef uint64_t lv_capabilities;
