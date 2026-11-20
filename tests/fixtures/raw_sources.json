@@ -1,0 +1,16 @@
+[
+  {
+    "file": "canon-eos5d3-lossy.dng",
+    "source": "https://raw.pixls.us/data/Adobe%20DNG%20Converter/Canon%20EOS%205D%20Mark%20III/5G4A9395-compressed-lossy.DNG",
+    "license": "CC0",
+    "camera": "Canon EOS 5D Mark III",
+    "sha256": "b22f1e36331f679abb8b13e433b9bbde3988723adf10fee7aa0dda6381016a98"
+  },
+  {
+    "file": "canon-eos20d.cr2",
+    "source": "https://raw.pixls.us/data/Canon/EOS%2020D/IMG_3893.CR2",
+    "license": "CC0",
+    "camera": "Canon EOS 20D",
+    "sha256": "db78660d48589130d99e0bc621424851eb0f84df052634fb5bc89c7a02fe7033"
+  }
+]
