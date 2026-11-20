@@ -15,10 +15,6 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_bmp;
     if (size >= 6 && (!memcmp(data, "GIF87a", 6) || !memcmp(data, "GIF89a", 6)))
         return lv_decode_gif;
-    if (size >= 4 &&
-        ((!memcmp(data, "II", 2) && (data[2] == 42 || data[2] == 43) && !data[3]) ||
-         (!memcmp(data, "MM", 2) && !data[2] && (data[3] == 42 || data[3] == 43))))
-        return lv_decode_tiff;
     if (size >= 4 && !memcmp(data, "qoif", 4))
         return lv_decode_qoi;
     if (size >= 4 && data[0] == 0 && data[1] == 0 && data[2] == 1 && data[3] == 0)
@@ -57,24 +53,16 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_jpegxl;
     if (size >= 4 && data[0] == 0x76 && data[1] == 0x2f && data[2] == 0x31 && data[3] == 0x01)
         return lv_decode_openexr;
-    if (size >= 12 && !memcmp(data, "II*\0", 4) && data[8] >= 1 && data[8] <= 4)
-    {
-        const uint32_t ifd = data[4] | (uint32_t)data[5] << 8 | (uint32_t)data[6] << 16 | (uint32_t)data[7] << 24;
-        if (ifd <= size - 2)
-        {
-            const uint16_t count = data[ifd] | (uint16_t)data[ifd + 1] << 8;
-            if ((uint64_t)ifd + 2 + (uint64_t)count * 12 <= size)
-                for (uint16_t index = 0; index < count; ++index)
-                {
-                    const size_t entry = ifd + 2 + (size_t)index * 12;
-                    const uint16_t tag = data[entry] | (uint16_t)data[entry + 1] << 8;
-                    if (tag == 50706)
-                        return lv_decode_raw;
-                }
-        }
-    }
+    if (size >= 12 && !memcmp(data, "II*\0", 4))
+        for (size_t at = 0; at + 1 < size; ++at)
+            if (data[at] == 0xca && data[at + 1] == 0xc5)
+                return lv_decode_raw;
     if (size >= 12 && !memcmp(data, "II", 2) && data[8] == 'C' && data[9] == 'R' && data[10] == 2 && data[11] == 0)
         return lv_decode_raw;
+    if (size >= 4 &&
+        ((!memcmp(data, "II", 2) && (data[2] == 42 || data[2] == 43) && !data[3]) ||
+         (!memcmp(data, "MM", 2) && !data[2] && (data[3] == 42 || data[3] == 43))))
+        return lv_decode_tiff;
     size_t at = size >= 3 && !memcmp(data, "\xef\xbb\xbf", 3) ? 3 : 0;
     while (at < size && (data[at] == ' ' || data[at] == '\t' || data[at] == '\n' || data[at] == '\r'))
         ++at;
