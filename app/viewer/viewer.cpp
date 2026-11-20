@@ -395,7 +395,8 @@ void Viewer::submit_raw_pending()
     request.image.processing.chroma_siting = raw.siting == "cosited" ? LV_RAW_CHROMA_COSITED : LV_RAW_CHROMA_CENTER;
     const std::string cfas[] = {"none", "rggb", "bggr", "grbg", "gbrg"};
     const auto cfa_it = std::find(std::begin(cfas), std::end(cfas), raw.cfa);
-    request.image.processing.cfa = cfa_it == std::end(cfas) ? LV_RAW_CFA_NONE : static_cast<lv_raw_cfa_pattern>(std::distance(std::begin(cfas), cfa_it));
+    request.image.processing.cfa = cfa_it == std::end(cfas) ? static_cast<lv_raw_cfa_pattern>(LV_RAW_CFA_NONE) :
+        static_cast<lv_raw_cfa_pattern>(std::distance(std::begin(cfas), cfa_it));
     request.image.processing.black_level = raw.black_level;
     request.image.processing.white_level = raw.white_level ? raw.white_level : request.image.layout.layout == LV_RAW_LAYOUT_BAYER16 ? 65535 : 255;
     request.image.processing.red_gain_q16 = raw.red_gain_q16;
