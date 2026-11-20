@@ -1,6 +1,7 @@
 #include "support.hpp"
 
 #include <liltview/raw.h>
+#include <utility>
 
 namespace
 {
@@ -33,6 +34,53 @@ Decoded decode_raw(const Bytes &bytes, lv_raw_layout layout, lv_size_u32 size, l
     REQUIRE(lv_core_submit_raw(engine.core, &request, &id) == LV_OK);
     REQUIRE(id != 0);
     return collect(engine);
+}
+
+Decoded decode_yuv(const Bytes &bytes, lv_raw_layout layout, lv_size_u32 size, const std::array<lv_raw_plane, 3> &planes,
+                   std::uint32_t plane_count, lv_raw_color_range range = LV_RAW_RANGE_FULL,
+                   bool native = true, lv_size_u32 bounds = {100, 100},
+                   lv_raw_color_matrix matrix = LV_RAW_MATRIX_BT601,
+                   lv_raw_chroma_siting siting = LV_RAW_CHROMA_CENTER,
+                   lv_raw_row_order row_order = LV_RAW_TOP_DOWN)
+{
+    Files files;
+    Engine engine;
+    const auto path = files.write("raw-layout.yuv", bytes);
+    lv_raw_request_desc request;
+    lv_raw_request_desc_init(&request);
+    request.path = {LV_PATH_POSIX_BYTES, path.data(), path.size()};
+    request.target.kind = native ? LV_TARGET_NATIVE : LV_TARGET_FIT;
+    request.target.as.fit_bounds = bounds;
+    request.image.layout.layout = layout;
+    request.image.layout.size = size;
+    request.image.layout.row_order = row_order;
+    request.image.layout.plane_count = plane_count;
+    for (std::uint32_t i = 0; i < plane_count; ++i)
+        request.image.layout.planes[i] = planes[i];
+    request.image.processing.matrix = matrix;
+    request.image.processing.range = range;
+    request.image.processing.chroma_siting = siting;
+    request.image.processing.cfa = LV_RAW_CFA_NONE;
+    request.image.processing.black_level = 0;
+    request.image.processing.white_level = 255;
+    lv_request_id id = 0;
+    const auto submit_status = lv_core_submit_raw(engine.core, &request, &id);
+    REQUIRE(submit_status == LV_OK);
+    REQUIRE(id != 0);
+    return collect(engine);
+}
+
+void check_pixel(const Decoded &result, std::uint32_t x, std::uint32_t y, std::array<unsigned, 3> expected,
+                 unsigned tolerance = 0)
+{
+    const std::size_t offset = (static_cast<std::size_t>(y) * result.info.canvas.width + x) * 4;
+    for (unsigned channel = 0; channel < 3; ++channel)
+    {
+        CAPTURE(x, y, channel);
+        CHECK(std::abs(static_cast<int>(result.pixels[offset + channel]) - static_cast<int>(expected[channel])) <=
+              static_cast<int>(tolerance));
+    }
+    CHECK(result.pixels[offset + 3] == 255);
 }
 
 void require_native(const char *label, const Decoded &result, lv_size_u32 size, const Bytes &expected)
@@ -262,4 +310,125 @@ TEST_CASE("raw RGB detects cancellation and source changes after metadata", "[ra
             CHECK(result.error.has_partial_output == 0);
         }
     }
+}
+
+TEST_CASE("raw YUV420 layouts decode I420 YV12 NV12 and NV21", "[raw-layout][yuv]")
+{
+    const lv_size_u32 size{4, 2};
+    const std::array<unsigned char, 8> y{128, 128, 128, 128, 128, 128, 128, 128};
+    const std::array<unsigned char, 2> u{128, 128};
+    const std::array<unsigned char, 2> v{128, 128};
+    const std::array<lv_raw_plane, 3> planes{{{0, 4, 4, 2, 0}, {8, 2, 2, 1, 0}, {10, 2, 2, 1, 0}}};
+    Bytes i420;
+    i420.insert(i420.end(), y.begin(), y.end());
+    i420.insert(i420.end(), u.begin(), u.end());
+    i420.insert(i420.end(), v.begin(), v.end());
+    const auto i420_result = decode_yuv(i420, LV_RAW_LAYOUT_I420, size, planes, 3);
+    REQUIRE(i420_result.terminal == LV_EVENT_COMPLETE);
+    check_pixel(i420_result, 0, 0, {128, 128, 128});
+    check_pixel(i420_result, 3, 1, {128, 128, 128});
+
+    Bytes yv12;
+    yv12.insert(yv12.end(), y.begin(), y.end());
+    yv12.insert(yv12.end(), v.begin(), v.end());
+    yv12.insert(yv12.end(), u.begin(), u.end());
+    const auto yv12_result = decode_yuv(yv12, LV_RAW_LAYOUT_YV12, size, planes, 3);
+    REQUIRE(yv12_result.terminal == LV_EVENT_COMPLETE);
+    check_pixel(yv12_result, 1, 0, {128, 128, 128});
+
+    const std::array<lv_raw_plane, 3> nv_planes{{{0, 4, 4, 2, 0}, {8, 4, 4, 1, 0}, {0, 0, 0, 0, 0}}};
+    Bytes nv12;
+    nv12.insert(nv12.end(), y.begin(), y.end());
+    nv12.insert(nv12.end(), {128, 128, 128, 128});
+    const auto nv12_result = decode_yuv(nv12, LV_RAW_LAYOUT_NV12, size, nv_planes, 2);
+    REQUIRE(nv12_result.terminal == LV_EVENT_COMPLETE);
+    check_pixel(nv12_result, 2, 1, {128, 128, 128});
+
+    Bytes nv21;
+    nv21.insert(nv21.end(), y.begin(), y.end());
+    nv21.insert(nv21.end(), {128, 128, 128, 128});
+    const auto nv21_result = decode_yuv(nv21, LV_RAW_LAYOUT_NV21, size, nv_planes, 2);
+    REQUIRE(nv21_result.terminal == LV_EVENT_COMPLETE);
+    check_pixel(nv21_result, 0, 1, {128, 128, 128});
+}
+
+TEST_CASE("raw YUV420 applies BT.601 full and limited range", "[raw-layout][yuv][color]")
+{
+    const lv_size_u32 size{2, 2};
+    const std::array<lv_raw_plane, 3> planes{{{0, 2, 2, 2, 0}, {4, 1, 1, 1, 0}, {5, 1, 1, 1, 0}}};
+    const Bytes full{128, 128, 128, 128, 128, 128};
+    const auto full_result = decode_yuv(full, LV_RAW_LAYOUT_I420, size, planes, 3, LV_RAW_RANGE_FULL);
+    REQUIRE(full_result.terminal == LV_EVENT_COMPLETE);
+    check_pixel(full_result, 0, 0, {128, 128, 128});
+
+    const Bytes limited_black{16, 16, 16, 16, 128, 128};
+    const auto black = decode_yuv(limited_black, LV_RAW_LAYOUT_I420, size, planes, 3, LV_RAW_RANGE_LIMITED);
+    REQUIRE(black.terminal == LV_EVENT_COMPLETE);
+    check_pixel(black, 0, 0, {0, 0, 0});
+
+    const Bytes limited_white{235, 235, 235, 235, 128, 128};
+    const auto white = decode_yuv(limited_white, LV_RAW_LAYOUT_I420, size, planes, 3, LV_RAW_RANGE_LIMITED);
+    REQUIRE(white.terminal == LV_EVENT_COMPLETE);
+    check_pixel(white, 1, 1, {255, 255, 255});
+}
+
+TEST_CASE("raw YUV420 honors plane offsets strides FIT and bottom-up rows", "[raw-layout][yuv][boundaries]")
+{
+    const lv_size_u32 size{4, 2};
+    Bytes storage(32, 0xaa);
+    const std::array<unsigned char, 8> y{128, 128, 128, 128, 128, 128, 128, 128};
+    std::copy(y.begin(), y.end(), storage.begin() + 3);
+    storage[15] = 128;
+    storage[16] = 128;
+    storage[21] = 128;
+    storage[22] = 128;
+    const std::array<lv_raw_plane, 3> planes{{{3, 6, 4, 2, 0}, {15, 3, 2, 1, 0}, {21, 3, 2, 1, 0}}};
+    const auto native = decode_yuv(storage, LV_RAW_LAYOUT_I420, size, planes, 3);
+    REQUIRE(native.terminal == LV_EVENT_COMPLETE);
+    CHECK(native.info.canvas.width == 4);
+    CHECK(native.info.canvas.height == 2);
+    const auto fitted = decode_yuv(storage, LV_RAW_LAYOUT_I420, size, planes, 3, LV_RAW_RANGE_FULL, false, {2, 1});
+    REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+    CHECK(fitted.info.canvas.width == 2);
+    CHECK(fitted.info.canvas.height == 1);
+
+    Bytes bottom_up(32, 0xaa);
+    const std::array<unsigned char, 4> bottom_row{16, 16, 16, 16};
+    const std::array<unsigned char, 4> top_row{235, 235, 235, 235};
+    std::copy(bottom_row.begin(), bottom_row.end(), bottom_up.begin());
+    std::copy(top_row.begin(), top_row.end(), bottom_up.begin() + 6);
+    bottom_up[15] = bottom_up[16] = bottom_up[21] = bottom_up[22] = 128;
+    const std::array<lv_raw_plane, 3> bottom_planes{{{0, 6, 4, 2, 0}, {15, 2, 2, 1, 0}, {21, 2, 2, 1, 0}}};
+    const auto bottom = decode_yuv(bottom_up, LV_RAW_LAYOUT_I420, size, bottom_planes, 3, LV_RAW_RANGE_LIMITED,
+                                   true, {100, 100}, LV_RAW_MATRIX_BT601, LV_RAW_CHROMA_CENTER, LV_RAW_BOTTOM_UP);
+    REQUIRE(bottom.terminal == LV_EVENT_COMPLETE);
+    check_pixel(bottom, 0, 0, {255, 255, 255});
+    check_pixel(bottom, 0, 1, {0, 0, 0});
+}
+
+TEST_CASE("raw YUV420 rejects unsupported color semantics and truncation", "[raw-layout][yuv][errors]")
+{
+    const lv_size_u32 size{2, 2};
+    const std::array<lv_raw_plane, 3> planes{{{0, 2, 2, 2, 0}, {4, 1, 1, 1, 0}, {5, 1, 1, 1, 0}}};
+    const Bytes bytes{128, 128, 128, 128, 128, 128};
+
+    for (const auto &semantics : {
+             std::pair{LV_RAW_MATRIX_BT709, LV_RAW_RANGE_FULL},
+             std::pair{LV_RAW_MATRIX_BT601, LV_RAW_RANGE_UNKNOWN},
+         })
+    {
+        const auto result = decode_yuv(bytes, LV_RAW_LAYOUT_I420, size, planes, 3, semantics.second, true, {100, 100},
+                                       semantics.first);
+        REQUIRE(result.terminal == LV_EVENT_ERROR);
+        CHECK(result.error.code == LV_ERROR_FORMAT_UNSUPPORTED);
+    }
+
+    const auto cosited = decode_yuv(bytes, LV_RAW_LAYOUT_I420, size, planes, 3, LV_RAW_RANGE_FULL, true, {100, 100},
+                                    LV_RAW_MATRIX_BT601, LV_RAW_CHROMA_COSITED);
+    REQUIRE(cosited.terminal == LV_EVENT_ERROR);
+    CHECK(cosited.error.code == LV_ERROR_FORMAT_UNSUPPORTED);
+
+    const auto truncated = decode_yuv(Bytes{128, 128, 128, 128}, LV_RAW_LAYOUT_I420, size, planes, 3);
+    REQUIRE(truncated.terminal == LV_EVENT_ERROR);
+    CHECK(truncated.error.code == LV_ERROR_CORRUPT_DATA);
 }
