@@ -86,14 +86,15 @@ void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error
         goto done;
     const uint64_t pixels = (uint64_t)source.width * source.height;
     const uint64_t native_bytes = pixels * 4;
-    if (native_bytes > SIZE_MAX)
+    const uint64_t decoded_rgb_bytes = pixels * 3;
+    if (native_bytes > SIZE_MAX || decoded_rgb_bytes > SIZE_MAX || bytes > UINT64_MAX - native_bytes - decoded_rgb_bytes)
     {
         error->code = LV_ERROR_DIMENSION_LIMIT;
         goto done;
     }
     const lv_size_u32 canvas = request->desc.target.kind == LV_TARGET_NATIVE ?
         source : lv_fit_size(source, request->desc.target.as.fit_bounds, LV_ORIENTATION_NORMAL);
-    if (!lv_frame_prepare(&frame, source, canvas, LV_FORMAT_RAW, 0, native_bytes + bytes, error) ||
+    if (!lv_frame_prepare(&frame, source, canvas, LV_FORMAT_RAW, 0, native_bytes + decoded_rgb_bytes + bytes, error) ||
         !lv_frame_info(&frame, error))
         goto done;
     if (lv_stopped(core, request))
