@@ -9,10 +9,11 @@ using Bytes = std::vector<unsigned char>;
 
 Decoded decode_raw(const Bytes &bytes, lv_raw_layout layout, lv_size_u32 size, lv_raw_plane plane,
                    lv_raw_row_order order = LV_RAW_TOP_DOWN, bool native = true,
-                   lv_size_u32 bounds = {100, 100}, lv_raw_alpha_mode alpha = LV_RAW_ALPHA_OPAQUE)
+                   lv_size_u32 bounds = {100, 100}, lv_raw_alpha_mode alpha = LV_RAW_ALPHA_OPAQUE,
+                   std::uint64_t memory = 16ULL * 1024 * 1024)
 {
     Files files;
-    Engine engine(1, 16ULL * 1024 * 1024);
+    Engine engine(1, memory);
     const auto path = files.write("raw-layout.data", bytes);
     lv_raw_request_desc request;
     lv_raw_request_desc_init(&request);
@@ -163,4 +164,47 @@ TEST_CASE("raw RGB layouts honor offset, stride, bottom-up rows, and FIT", "[raw
     CHECK(fitted.info.canvas.width == 1);
     CHECK(fitted.info.canvas.height == 1);
     CHECK(fitted.pixels.size() == 4);
+}
+
+TEST_CASE("raw RGB reports truncation and advertises its explicit format", "[raw-layout][rgb][errors]")
+{
+    lv_core *core = nullptr;
+    lv_core_config config;
+    lv_core_config_init(&config);
+    config.cpu_budget_bytes = 16ULL * 1024 * 1024;
+    config.queue_pixel_bytes = 64 * 1024;
+    REQUIRE(lv_core_create(&config, &core) == LV_OK);
+    lv_format_support support{};
+    REQUIRE(lv_core_query_format(core, LV_FORMAT_RAW_LAYOUT, &support) == LV_OK);
+    CHECK(support.available == 1);
+    lv_core_begin_shutdown(core);
+    REQUIRE(lv_core_join(core, 5000) == LV_OK);
+    REQUIRE(lv_core_destroy(&core) == LV_OK);
+
+    Files files;
+    const auto path = files.write("truncated.rgb", {255, 0, 0, 0});
+    Engine engine;
+    lv_raw_request_desc request = valid_request(path);
+    lv_request_id id = 0;
+    REQUIRE(lv_core_submit_raw(engine.core, &request, &id) == LV_OK);
+    const auto result = collect(engine);
+    REQUIRE(result.terminal == LV_EVENT_ERROR);
+    CHECK(result.error.code == LV_ERROR_CORRUPT_DATA);
+}
+
+TEST_CASE("raw RGB layouts reject truncation and report budget failures", "[raw-layout][errors]")
+{
+    const lv_size_u32 size{3, 2};
+    const Bytes complete(18, 0x7f);
+    const auto truncated = decode_raw(complete, LV_RAW_LAYOUT_RGB24, size, {0, 9, 9, 2});
+    REQUIRE(truncated.terminal == LV_EVENT_COMPLETE);
+
+    const auto damaged = decode_raw(Bytes(8, 0x7f), LV_RAW_LAYOUT_RGB24, size, {0, 9, 9, 2});
+    REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+    CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_IO);
+
+    const auto budget = decode_raw(complete, LV_RAW_LAYOUT_RGB24, size, {0, 9, 9, 2}, LV_RAW_TOP_DOWN, true,
+                                   {100, 100}, LV_RAW_ALPHA_OPAQUE, 1024);
+    REQUIRE(budget.terminal == LV_EVENT_ERROR);
+    CHECK(budget.error.code == LV_ERROR_MEMORY_BUDGET || budget.error.code == LV_ERROR_OUT_OF_MEMORY);
 }
