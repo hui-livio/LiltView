@@ -219,3 +219,47 @@ TEST_CASE("raw RGB layouts reject truncation and report budget failures", "[raw-
     REQUIRE(budget.terminal == LV_EVENT_ERROR);
     CHECK((budget.error.code == LV_ERROR_MEMORY_BUDGET || budget.error.code == LV_ERROR_OUT_OF_MEMORY));
 }
+
+TEST_CASE("raw RGB detects cancellation and source changes after metadata", "[raw-layout][source][cancel]")
+{
+    for (const bool cancel : {false, true})
+    {
+        Files files;
+        Engine engine;
+        engine.gate = true;
+        const lv_size_u32 source_size{3, 2};
+        const Bytes bytes(static_cast<std::size_t>(source_size.width) * source_size.height * 3, 0x7f);
+        const auto path = files.write("gated.rgb", bytes);
+        auto request = valid_request(path);
+        request.target.as.fit_bounds = source_size;
+        request.image.layout.size = source_size;
+        request.image.layout.planes[0] = {0, source_size.width * 3, source_size.width * 3, source_size.height, 0};
+        lv_request_id id = 0;
+        REQUIRE(lv_core_submit_raw(engine.core, &request, &id) == LV_OK);
+        {
+            std::unique_lock lock(engine.mutex);
+            REQUIRE(engine.changed.wait_for(lock, std::chrono::seconds(5), [&] { return engine.entered; }));
+        }
+        if (cancel)
+            REQUIRE(lv_core_cancel(engine.core, id) == LV_OK);
+        else
+        {
+            std::ofstream output(path, std::ios::binary | std::ios::app);
+            output.put('\0');
+        }
+        {
+            std::lock_guard lock(engine.mutex);
+            engine.proceed = true;
+            engine.changed.notify_all();
+        }
+        const auto result = collect(engine);
+        if (cancel)
+            CHECK(result.terminal == LV_EVENT_CANCELLED);
+        else
+        {
+            REQUIRE(result.terminal == LV_EVENT_ERROR);
+            CHECK(result.error.code == LV_ERROR_SOURCE_CHANGED);
+            CHECK(result.error.has_partial_output == 0);
+        }
+    }
+}
