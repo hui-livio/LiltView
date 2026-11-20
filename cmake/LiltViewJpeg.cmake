@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 include(ExternalProject)
 set(liltview_jpeg_system_target "")
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT LILTVIEW_LINUX_DEPENDENCY_MODE STREQUAL "FETCH")
     liltview_try_system_pkg_config(libjpeg liltview_jpeg_system_target)
 endif()
 
