@@ -140,89 +140,152 @@ else()
     endif()
 endif()
 
-# libavif is vendored as a source snapshot. Build the pinned full dav1d
-# decoder from the local submodule, and never let libavif fetch sources.
-liltview_dependency_source(dav1d meson.build dav1d_source)
-find_program(LILTVIEW_MESON_EXECUTABLE NAMES meson REQUIRED)
-find_program(LILTVIEW_NINJA_EXECUTABLE NAMES ninja ninja-build REQUIRED)
-set(dav1d_binary "${PROJECT_BINARY_DIR}/third_party/dav1d")
-set(dav1d_install "${PROJECT_BINARY_DIR}/third_party/dav1d-install")
-set(dav1d_library "${dav1d_install}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}dav1d${CMAKE_STATIC_LIBRARY_SUFFIX}")
-file(MAKE_DIRECTORY "${dav1d_install}/include")
-ExternalProject_Add(liltview_dav1d_build
-    SOURCE_DIR "${dav1d_source}" BINARY_DIR "${dav1d_binary}" INSTALL_DIR "${dav1d_install}"
-    DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND ""
-    CONFIGURE_COMMAND "${LILTVIEW_MESON_EXECUTABLE}" setup --buildtype=release --default-library=static
-        --prefix=<INSTALL_DIR> --libdir=lib -Denable_asm=true -Denable_tools=false
-        -Denable_examples=false -Denable_tests=false <BINARY_DIR> <SOURCE_DIR>
-    BUILD_COMMAND "${LILTVIEW_NINJA_EXECUTABLE}" -C <BINARY_DIR>
-    INSTALL_COMMAND "${LILTVIEW_NINJA_EXECUTABLE}" -C <BINARY_DIR> install
-    BUILD_BYPRODUCTS "${dav1d_library}")
-add_library(dav1d::dav1d STATIC IMPORTED GLOBAL)
-set_target_properties(dav1d::dav1d PROPERTIES
-    IMPORTED_LOCATION "${dav1d_library}"
-    INTERFACE_INCLUDE_DIRECTORIES "${dav1d_install}/include")
-add_dependencies(dav1d::dav1d liltview_dav1d_build)
-
-# JPEG XL is built from its pinned recursive source tree. Keep only the
-# decoder library and its local Highway/Brotli/CMS dependencies.
-liltview_dependency_source(libjxl CMakeLists.txt libjxl_source)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_DEVTOOLS OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_JNI OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_SJPEG OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_PLUGINS OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_TRANSCODE_JPEG OFF CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_BOXES ON CACHE BOOL "" FORCE)
-set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "" FORCE)
-set(JPEGXL_BUNDLE_LIBPNG OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-add_subdirectory("${libjxl_source}" "${PROJECT_BINARY_DIR}/third_party/libjxl" EXCLUDE_FROM_ALL SYSTEM)
-set(BUILD_TESTING ${LILTVIEW_BUILD_UNIT_TESTS} CACHE BOOL "" FORCE)
-
-# OpenEXR is used through its C OpenEXRCore API. Build the pinned Imath
-# submodule first so OpenEXR never invokes FetchContent or selects a system
-# package during configuration. OpenEXR's own deflate, zstd and OpenJPH
-# sources remain the only compression backends in this build.
-liltview_dependency_source(Imath CMakeLists.txt imath_source)
-set(liltview_openexr_saved_build_testing "${BUILD_TESTING}")
-set(IMATH_INSTALL OFF CACHE BOOL "" FORCE)
-set(IMATH_INSTALL_PKG_CONFIG OFF CACHE BOOL "" FORCE)
-set(PYTHON OFF CACHE BOOL "" FORCE)
-set(PYBIND11 OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-add_subdirectory("${imath_source}" "${PROJECT_BINARY_DIR}/third_party/Imath" EXCLUDE_FROM_ALL SYSTEM)
-set(Imath_VERSION "3.2.3")
-set(Imath_VERSION_MAJOR 3)
-set(Imath_VERSION_MINOR 2)
-set(Imath_VERSION_PATCH 3)
-set(Imath_SOVERSION 30)
-
-liltview_dependency_source(openexr CMakeLists.txt openexr_source)
-set(OPENEXR_INSTALL OFF CACHE BOOL "" FORCE)
-set(OPENEXR_INSTALL_TOOLS OFF CACHE BOOL "" FORCE)
-set(OPENEXR_INSTALL_DEVELOPER_TOOLS OFF CACHE BOOL "" FORCE)
-set(OPENEXR_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
-set(OPENEXR_BUILD_LIBS ON CACHE BOOL "" FORCE)
-set(OPENEXR_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(OPENEXR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(OPENEXR_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
-set(OPENEXR_FORCE_INTERNAL_IMATH ON CACHE BOOL "" FORCE)
-set(OPENEXR_FORCE_INTERNAL_DEFLATE ON CACHE BOOL "" FORCE)
-set(OPENEXR_FORCE_INTERNAL_ZSTD ON CACHE BOOL "" FORCE)
-set(OPENEXR_FORCE_INTERNAL_OPENJPH ON CACHE BOOL "" FORCE)
-add_subdirectory("${openexr_source}" "${PROJECT_BINARY_DIR}/third_party/openexr" EXCLUDE_FROM_ALL SYSTEM)
-if(liltview_openexr_saved_build_testing)
-    set(BUILD_TESTING ON CACHE BOOL "" FORCE)
+set(liltview_dav1d_system_target "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    liltview_try_system_pkg_config(dav1d liltview_dav1d_system_target)
+endif()
+if(liltview_dav1d_system_target)
+    add_library(liltview_dav1d_system INTERFACE)
+    target_link_libraries(liltview_dav1d_system INTERFACE "${liltview_dav1d_system_target}")
+    add_library(dav1d::dav1d ALIAS liltview_dav1d_system)
+    liltview_dependency_status("dav1d" "system" "${liltview_dav1d_system_target}")
 else()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_dependency_source_or_fetch(dav1d meson.build dav1d_source)
+        set(dav1d_binary "${PROJECT_BINARY_DIR}/_deps/liltview-dav1d-build")
+        set(dav1d_install "${PROJECT_BINARY_DIR}/_deps/liltview-dav1d-install")
+    else()
+        liltview_dependency_source(dav1d meson.build dav1d_source)
+        set(dav1d_binary "${PROJECT_BINARY_DIR}/third_party/dav1d")
+        set(dav1d_install "${PROJECT_BINARY_DIR}/third_party/dav1d-install")
+    endif()
+    find_program(LILTVIEW_MESON_EXECUTABLE NAMES meson REQUIRED)
+    find_program(LILTVIEW_NINJA_EXECUTABLE NAMES ninja ninja-build REQUIRED)
+    set(dav1d_library "${dav1d_install}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}dav1d${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    file(MAKE_DIRECTORY "${dav1d_install}/include")
+    ExternalProject_Add(liltview_dav1d_build
+        SOURCE_DIR "${dav1d_source}" BINARY_DIR "${dav1d_binary}" INSTALL_DIR "${dav1d_install}"
+        DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND ""
+        CONFIGURE_COMMAND "${LILTVIEW_MESON_EXECUTABLE}" setup --buildtype=release --default-library=static
+            --prefix=<INSTALL_DIR> --libdir=lib -Denable_asm=true -Denable_tools=false
+            -Denable_examples=false -Denable_tests=false <BINARY_DIR> <SOURCE_DIR>
+        BUILD_COMMAND "${LILTVIEW_NINJA_EXECUTABLE}" -C <BINARY_DIR>
+        INSTALL_COMMAND "${LILTVIEW_NINJA_EXECUTABLE}" -C <BINARY_DIR> install
+        BUILD_BYPRODUCTS "${dav1d_library}")
+    add_library(dav1d::dav1d STATIC IMPORTED GLOBAL)
+    set_target_properties(dav1d::dav1d PROPERTIES
+        IMPORTED_LOCATION "${dav1d_library}"
+        INTERFACE_INCLUDE_DIRECTORIES "${dav1d_install}/include")
+    add_dependencies(dav1d::dav1d liltview_dav1d_build)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_dependency_status("dav1d" "fetched" "dav1d::dav1d")
+    else()
+        liltview_dependency_status("dav1d" "vendored" "dav1d::dav1d")
+    endif()
+endif()
+
+set(liltview_jxl_system_target "")
+set(liltview_jxl_threads_system_target "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    liltview_try_system_pkg_config(libjxl liltview_jxl_system_target)
+    liltview_try_system_pkg_config(libjxl_threads liltview_jxl_threads_system_target)
+endif()
+if(liltview_jxl_system_target AND liltview_jxl_threads_system_target)
+    add_library(liltview_jxl_system INTERFACE)
+    target_link_libraries(liltview_jxl_system INTERFACE
+        "${liltview_jxl_system_target}" "${liltview_jxl_threads_system_target}")
+    add_library(jxl ALIAS liltview_jxl_system)
+    liltview_dependency_status("JPEG XL" "system" "${liltview_jxl_system_target}")
+else()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_dependency_source_or_fetch(libjxl CMakeLists.txt libjxl_source)
+        set(libjxl_binary "${PROJECT_BINARY_DIR}/_deps/liltview-libjxl-build")
+    else()
+        liltview_dependency_source(libjxl CMakeLists.txt libjxl_source)
+        set(libjxl_binary "${PROJECT_BINARY_DIR}/third_party/libjxl")
+    endif()
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_DEVTOOLS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_JNI OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_SJPEG OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_PLUGINS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_TRANSCODE_JPEG OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_BOXES ON CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "" FORCE)
+    set(JPEGXL_BUNDLE_LIBPNG OFF CACHE BOOL "" FORCE)
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${libjxl_source}" "${libjxl_binary}" EXCLUDE_FROM_ALL SYSTEM)
+    set(BUILD_TESTING ${LILTVIEW_BUILD_UNIT_TESTS} CACHE BOOL "" FORCE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_dependency_status("JPEG XL" "fetched" "jxl")
+    else()
+        liltview_dependency_status("JPEG XL" "vendored" "jxl")
+    endif()
+endif()
+
+set(liltview_openexr_system_target "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    liltview_try_system_pkg_config(OpenEXR liltview_openexr_system_target)
+endif()
+if(liltview_openexr_system_target)
+    add_library(liltview_openexr_system INTERFACE)
+    target_link_libraries(liltview_openexr_system INTERFACE "${liltview_openexr_system_target}")
+    add_library(OpenEXR::OpenEXRCore ALIAS liltview_openexr_system)
+    liltview_dependency_status("OpenEXR" "system" "${liltview_openexr_system_target}")
+else()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_dependency_source_or_fetch(Imath CMakeLists.txt imath_source)
+        liltview_dependency_source_or_fetch(openexr CMakeLists.txt openexr_source)
+        set(imath_binary "${PROJECT_BINARY_DIR}/_deps/liltview-Imath-build")
+        set(openexr_binary "${PROJECT_BINARY_DIR}/_deps/liltview-openexr-build")
+    else()
+        liltview_dependency_source(Imath CMakeLists.txt imath_source)
+        liltview_dependency_source(openexr CMakeLists.txt openexr_source)
+        set(imath_binary "${PROJECT_BINARY_DIR}/third_party/Imath")
+        set(openexr_binary "${PROJECT_BINARY_DIR}/third_party/openexr")
+    endif()
+    set(liltview_openexr_saved_build_testing "${BUILD_TESTING}")
+    set(IMATH_INSTALL OFF CACHE BOOL "" FORCE)
+    set(IMATH_INSTALL_PKG_CONFIG OFF CACHE BOOL "" FORCE)
+    set(PYTHON OFF CACHE BOOL "" FORCE)
+    set(PYBIND11 OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${imath_source}" "${imath_binary}" EXCLUDE_FROM_ALL SYSTEM)
+    set(Imath_VERSION "3.2.3")
+    set(Imath_VERSION_MAJOR 3)
+    set(Imath_VERSION_MINOR 2)
+    set(Imath_VERSION_PATCH 3)
+    set(Imath_SOVERSION 30)
+    set(OPENEXR_INSTALL OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_INSTALL_TOOLS OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_INSTALL_DEVELOPER_TOOLS OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_BUILD_LIBS ON CACHE BOOL "" FORCE)
+    set(OPENEXR_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
+    set(OPENEXR_FORCE_INTERNAL_IMATH ON CACHE BOOL "" FORCE)
+    set(OPENEXR_FORCE_INTERNAL_DEFLATE ON CACHE BOOL "" FORCE)
+    set(OPENEXR_FORCE_INTERNAL_ZSTD ON CACHE BOOL "" FORCE)
+    set(OPENEXR_FORCE_INTERNAL_OPENJPH ON CACHE BOOL "" FORCE)
+    add_subdirectory("${openexr_source}" "${openexr_binary}" EXCLUDE_FROM_ALL SYSTEM)
+    if(liltview_openexr_saved_build_testing)
+        set(BUILD_TESTING ON CACHE BOOL "" FORCE)
+    else()
+        set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_dependency_status("OpenEXR" "fetched" "OpenEXR::OpenEXRCore")
+    else()
+        liltview_dependency_status("OpenEXR" "vendored" "OpenEXR::OpenEXRCore")
+    endif()
 endif()
 
 # HEIF is kept behind a reproducible LGPL-3 dependency boundary. Build the
@@ -275,41 +338,62 @@ set(BUILD_SHARED_LIBS "${liltview_heif_saved_shared_libs}" CACHE BOOL "" FORCE)
 # source tree is copied into the build directory before autoreconf so the
 # pinned submodule remains clean and reproducible.
 if(UNIX)
-    liltview_dependency_source(libraw configure.ac libraw_source)
-    find_program(LILTVIEW_MAKE_EXECUTABLE NAMES gmake make REQUIRED)
-    set(libraw_binary "${PROJECT_BINARY_DIR}/third_party/libraw")
-    set(libraw_build_source "${libraw_binary}/source")
-    set(libraw_library "${libraw_build_source}/lib/.libs/${CMAKE_STATIC_LIBRARY_PREFIX}raw${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(libraw_cppflags "")
-    set(libraw_ldflags "")
-    if(NOT liltview_jpeg_system_target)
-        string(APPEND libraw_cppflags " -I${jpeg_source}/src -I${jpeg_binary}")
-        string(APPEND libraw_ldflags " -L${jpeg_binary}")
+    set(liltview_libraw_system_target "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        liltview_try_system_pkg_config(libraw liltview_libraw_system_target)
     endif()
-    if(NOT liltview_zlib_system)
-        string(APPEND libraw_cppflags " -I${zlib_source} -I${PROJECT_BINARY_DIR}/third_party/zlib")
-        string(APPEND libraw_ldflags " -L${PROJECT_BINARY_DIR}/third_party/zlib")
+    if(liltview_libraw_system_target)
+        add_library(liltview_libraw INTERFACE)
+        target_link_libraries(liltview_libraw INTERFACE "${liltview_libraw_system_target}")
+        add_library(liltview_libraw_build INTERFACE)
+        liltview_dependency_status("LibRaw" "system" "${liltview_libraw_system_target}")
+    else()
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            liltview_dependency_source_or_fetch(libraw configure.ac libraw_source)
+            set(libraw_binary "${PROJECT_BINARY_DIR}/_deps/liltview-libraw-build")
+        else()
+            liltview_dependency_source(libraw configure.ac libraw_source)
+            set(libraw_binary "${PROJECT_BINARY_DIR}/third_party/libraw")
+        endif()
+        find_program(LILTVIEW_MAKE_EXECUTABLE NAMES gmake make REQUIRED)
+        set(libraw_build_source "${libraw_binary}/source")
+        set(libraw_library "${libraw_build_source}/lib/.libs/${CMAKE_STATIC_LIBRARY_PREFIX}raw${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        set(libraw_cppflags "")
+        set(libraw_ldflags "")
+        if(NOT liltview_jpeg_system_target)
+            string(APPEND libraw_cppflags " -I${jpeg_source}/src -I${jpeg_binary}")
+            string(APPEND libraw_ldflags " -L${jpeg_binary}")
+        endif()
+        if(NOT liltview_zlib_system)
+            string(APPEND libraw_cppflags " -I${zlib_source} -I${PROJECT_BINARY_DIR}/third_party/zlib")
+            string(APPEND libraw_ldflags " -L${PROJECT_BINARY_DIR}/third_party/zlib")
+        endif()
+        ExternalProject_Add(liltview_libraw_build
+            SOURCE_DIR "${libraw_source}" BINARY_DIR "${libraw_binary}"
+            DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND ""
+            CONFIGURE_COMMAND
+                "${CMAKE_COMMAND}" -E copy_directory "${libraw_source}" "<BINARY_DIR>/source"
+                COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" autoreconf --install
+                COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" "${CMAKE_COMMAND}" -E env
+                    "CPPFLAGS=${libraw_cppflags}" "LDFLAGS=${libraw_ldflags}"
+                    "<BINARY_DIR>/source/configure"
+                    --disable-shared --enable-static --disable-openmp --disable-lcms --disable-examples
+                    --enable-jpeg --enable-zlib
+            BUILD_COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" "${LILTVIEW_MAKE_EXECUTABLE}" -j2
+            INSTALL_COMMAND ""
+            BUILD_BYPRODUCTS "${libraw_library}")
+        add_library(liltview_libraw STATIC IMPORTED GLOBAL)
+        set_target_properties(liltview_libraw PROPERTIES
+            IMPORTED_LOCATION "${libraw_library}"
+            INTERFACE_INCLUDE_DIRECTORIES "${libraw_source}/libraw"
+            INTERFACE_LINK_LIBRARIES "liltview_jpeg;zlibstatic;m")
+        add_dependencies(liltview_libraw liltview_libraw_build liltview_jpeg_build)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            liltview_dependency_status("LibRaw" "fetched" "liltview_libraw")
+        else()
+            liltview_dependency_status("LibRaw" "vendored" "liltview_libraw")
+        endif()
     endif()
-    ExternalProject_Add(liltview_libraw_build
-        SOURCE_DIR "${libraw_source}" BINARY_DIR "${libraw_binary}"
-        DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND ""
-        CONFIGURE_COMMAND
-            "${CMAKE_COMMAND}" -E copy_directory "${libraw_source}" "<BINARY_DIR>/source"
-            COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" autoreconf --install
-            COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" "${CMAKE_COMMAND}" -E env
-                "CPPFLAGS=${libraw_cppflags}" "LDFLAGS=${libraw_ldflags}"
-                "<BINARY_DIR>/source/configure"
-                --disable-shared --enable-static --disable-openmp --disable-lcms --disable-examples
-                --enable-jpeg --enable-zlib
-        BUILD_COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" "${LILTVIEW_MAKE_EXECUTABLE}" -j2
-        INSTALL_COMMAND ""
-        BUILD_BYPRODUCTS "${libraw_library}")
-    add_library(liltview_libraw STATIC IMPORTED GLOBAL)
-    set_target_properties(liltview_libraw PROPERTIES
-        IMPORTED_LOCATION "${libraw_library}"
-        INTERFACE_INCLUDE_DIRECTORIES "${libraw_source}/libraw"
-        INTERFACE_LINK_LIBRARIES "liltview_jpeg;zlibstatic;m")
-    add_dependencies(liltview_libraw liltview_libraw_build liltview_jpeg_build)
     add_library(LiltView::libraw ALIAS liltview_libraw)
 endif()
 
@@ -334,17 +418,30 @@ set(AVIF_BUILD_MAN_PAGES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${liltview_avif_source}" "${PROJECT_BINARY_DIR}/third_party/libavif" EXCLUDE_FROM_ALL SYSTEM)
 set(BUILD_SHARED_LIBS "${liltview_avif_saved_shared_libs}" CACHE BOOL "" FORCE)
 
-liltview_dependency_source(plutosvg CMakeLists.txt svg_source)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    liltview_dependency_source_or_fetch(plutosvg CMakeLists.txt svg_source)
+    set(plutovg_binary "${PROJECT_BINARY_DIR}/_deps/liltview-plutovg-build")
+    set(plutosvg_binary "${PROJECT_BINARY_DIR}/_deps/liltview-plutosvg-build")
+else()
+    liltview_dependency_source(plutosvg CMakeLists.txt svg_source)
+    set(plutovg_binary "${PROJECT_BINARY_DIR}/third_party/plutovg")
+    set(plutosvg_binary "${PROJECT_BINARY_DIR}/third_party/plutosvg")
+endif()
 if(NOT EXISTS "${svg_source}/plutovg/CMakeLists.txt")
-    message(FATAL_ERROR "Missing PlutoSVG's pinned PlutoVG: git submodule update --init --recursive")
+    message(FATAL_ERROR "Missing PlutoSVG's pinned PlutoVG source")
 endif()
 set(PLUTOVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD ON CACHE BOOL "" FORCE)
 set(PLUTOSVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(PLUTOSVG_ENABLE_FREETYPE OFF CACHE BOOL "" FORCE)
 # Add the recorded nested submodule first; never select a system PlutoVG.
-add_subdirectory("${svg_source}/plutovg" "${PROJECT_BINARY_DIR}/third_party/plutovg" EXCLUDE_FROM_ALL SYSTEM)
-add_subdirectory("${svg_source}" "${PROJECT_BINARY_DIR}/third_party/plutosvg" EXCLUDE_FROM_ALL SYSTEM)
+add_subdirectory("${svg_source}/plutovg" "${plutovg_binary}" EXCLUDE_FROM_ALL SYSTEM)
+add_subdirectory("${svg_source}" "${plutosvg_binary}" EXCLUDE_FROM_ALL SYSTEM)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    liltview_dependency_status("PlutoSVG" "fetched" "plutosvg::plutosvg")
+else()
+    liltview_dependency_status("PlutoSVG" "vendored" "plutosvg::plutosvg")
+endif()
 
 # giflib has a Makefile upstream. Prefer a system development package on
 # Linux, then build just the unmodified decoder sources as a fallback.

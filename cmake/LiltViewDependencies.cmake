@@ -117,7 +117,8 @@ function(liltview_fetch_dependency_source name marker output)
     FetchContent_Declare(${content_name}
         GIT_REPOSITORY "${repository}"
         GIT_TAG "${revision}"
-        GIT_SHALLOW FALSE)
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES_RECURSE TRUE)
     FetchContent_GetProperties(${content_name})
     if(NOT ${content_key}_POPULATED)
         cmake_policy(PUSH)
