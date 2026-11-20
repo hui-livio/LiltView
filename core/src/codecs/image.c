@@ -54,9 +54,22 @@ static decode_func detect_format(const uint8_t *data, size_t size)
     if (size >= 4 && data[0] == 0x76 && data[1] == 0x2f && data[2] == 0x31 && data[3] == 0x01)
         return lv_decode_openexr;
     if (size >= 12 && !memcmp(data, "II*\0", 4))
-        for (size_t at = 0; at + 1 < size; ++at)
-            if (data[at] == 0xca && data[at + 1] == 0xc5)
-                return lv_decode_raw;
+    {
+        const uint32_t ifd = data[4] | (uint32_t)data[5] << 8 | (uint32_t)data[6] << 16 | (uint32_t)data[7] << 24;
+        if (ifd <= size - 2)
+        {
+            const uint16_t count = data[ifd] | (uint16_t)data[ifd + 1] << 8;
+            const uint64_t available = size - ((uint64_t)ifd + 2);
+            const uint16_t inspect = (uint16_t)((available / 12 < count) ? available / 12 : count);
+            for (uint16_t index = 0; index < inspect; ++index)
+            {
+                const size_t entry = ifd + 2 + (size_t)index * 12;
+                const uint16_t tag = data[entry] | (uint16_t)data[entry + 1] << 8;
+                if (tag == 50706)
+                    return lv_decode_raw;
+            }
+        }
+    }
     if (size >= 12 && !memcmp(data, "II", 2) && data[8] == 'C' && data[9] == 'R' && data[10] == 2 && data[11] == 0)
         return lv_decode_raw;
     if (size >= 4 &&
