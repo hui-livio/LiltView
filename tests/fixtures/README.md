@@ -5,6 +5,8 @@ PNG、SVG、无损 WebP、QOI、ICO、CUR 的 alpha 为约 50%，BMP 为不透�
 
 OpenEXR fixture 包含普通 / decreasing-Y scanline、负 data window、NaN / Inf、额外通道、FLOAT、tiled 和 multipart 变体，用于验证首版边界。
 
+HEIF fixture 包含单张 8-bit RGBA HEIC、sequence、带 thumbnail 和 10-bit HEIC 变体。二进制样本由固定版本 libheif 的 `heif-enc` 生成，正式测试只读取已保存样本，不依赖系统编码器。
+
 `generate_formats.py` 可重新生成已有合成格式；仅生成 WebP 时需要本机 libwebp 编码器。OpenEXR fixture 使用固定的 v3.5.4 / Imath v3.2.3 writer 生成，正常测试不运行生成器。
 正常编译与测试直接读已保存文件，不运行生成器，也不依赖系统编码库。
 更多位深、Adam7、BMP 位域 / RLE、异常输入由 `tests/core/format_tests.cpp` 在测试内生成。SVG 正例只验证[基础静态 profile](../../docs/图片格式兼容表.md#4-svg-静态-profile)；文字、外部资源、滤镜、裁剪和引用等拒绝用例不代表这些特性已获支持。

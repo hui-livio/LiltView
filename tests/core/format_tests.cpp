@@ -501,6 +501,61 @@ TEST_CASE("AVIF rejects animation and truncation", "[formats][avif]")
     CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
 }
 
+TEST_CASE("HEIF static 8-bit RGBA decodes with native and FIT targets", "[formats][heif]")
+{
+    const auto result = decode(fixture_bytes("heif-red.heic"));
+    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+    CHECK(result.info.format == LV_FORMAT_HEIF);
+    CHECK(result.info.source_size.width == 96);
+    CHECK(result.info.source_size.height == 64);
+    CHECK(result.info.canvas.width == 96);
+    CHECK(result.info.canvas.height == 64);
+    REQUIRE(result.pixels.size() == 96 * 64 * 4);
+    for (std::size_t i = 0; i < result.pixels.size(); i += 4)
+    {
+        CHECK(result.pixels[i] >= 245);
+        CHECK(result.pixels[i + 1] <= 10);
+        CHECK(result.pixels[i + 2] <= 10);
+        CHECK(result.pixels[i + 3] >= 120);
+        CHECK(result.pixels[i + 3] <= 136);
+    }
+
+    const auto fitted = decode(fixture_bytes("heif-red.heic"), {24, 24});
+    REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+    CHECK(fitted.info.format == LV_FORMAT_HEIF);
+    CHECK(fitted.info.source_size.width == 96);
+    CHECK(fitted.info.source_size.height == 64);
+    CHECK(fitted.info.canvas.width == 24);
+    CHECK(fitted.info.canvas.height == 16);
+    REQUIRE(fitted.pixels.size() == 24 * 16 * 4);
+    CHECK(fitted.pixels[0] >= 245);
+    CHECK(fitted.pixels[1] <= 10);
+    CHECK(fitted.pixels[2] <= 10);
+    CHECK(fitted.pixels[3] >= 120);
+    CHECK(fitted.pixels[3] <= 136);
+
+    const auto native = decode_native(fixture_bytes("heif-red.heic"));
+    REQUIRE(native.terminal == LV_EVENT_COMPLETE);
+    CHECK(native.info.canvas.width == 96);
+    CHECK(native.info.canvas.height == 64);
+}
+
+TEST_CASE("HEIF rejects sequences, thumbnails, high bit depth, and truncation", "[formats][heif][errors]")
+{
+    for (const auto *name : {"heif-sequence.heic", "heif-thumbnail.heic", "heif-10bit.heic"})
+    {
+        const auto result = decode(fixture_bytes(name));
+        REQUIRE(result.terminal == LV_EVENT_ERROR);
+        CHECK(result.error.code == LV_ERROR_FORMAT_UNSUPPORTED);
+    }
+
+    auto truncated = fixture_bytes("heif-red.heic");
+    truncated.resize(truncated.size() / 2);
+    const auto damaged = decode(truncated);
+    REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+    CHECK((damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_FORMAT_UNSUPPORTED));
+}
+
 TEST_CASE("JPEG XL static lossless and lossy images decode to RGBA8", "[formats][jpegxl]")
 {
     for (const auto *name : {"red-alpha-lossless.jxl", "red-alpha-lossy.jxl"})
@@ -754,7 +809,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_OPENEXR; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_HEIF; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);
