@@ -155,7 +155,8 @@ void lv_decode_heif(lv_core *core, lv_request *request, lv_input *input, lv_erro
     }
     if (!heif_image_handle_is_primary_image(handle) || heif_has_unsupported_depth(handle) ||
         heif_image_handle_get_number_of_thumbnails(handle) > 0 || heif_image_handle_has_depth_image(handle) ||
-        heif_image_handle_get_number_of_auxiliary_images(handle, 0) > 0 || heif_has_unsupported_profile(handle))
+        heif_image_handle_get_number_of_auxiliary_images(handle, LIBHEIF_AUX_IMAGE_FILTER_OMIT_ALPHA) > 0 ||
+        heif_has_unsupported_profile(handle))
     {
         error->code = LV_ERROR_FORMAT_UNSUPPORTED;
         goto done;
