@@ -94,6 +94,7 @@ set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "" FORCE)
 set(JPEGXL_BUNDLE_LIBPNG OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 add_subdirectory("${libjxl_source}" "${PROJECT_BINARY_DIR}/third_party/libjxl" EXCLUDE_FROM_ALL SYSTEM)
+set(BUILD_TESTING ${LILTVIEW_BUILD_UNIT_TESTS} CACHE BOOL "" FORCE)
 
 set(liltview_avif_source "${PROJECT_SOURCE_DIR}/third_party/libavif")
 if(NOT EXISTS "${liltview_avif_source}/CMakeLists.txt")

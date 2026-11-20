@@ -501,6 +501,32 @@ TEST_CASE("AVIF rejects animation and truncation", "[formats][avif]")
     CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
 }
 
+TEST_CASE("JPEG XL static lossless and lossy images decode to RGBA8", "[formats][jpegxl]")
+{
+    for (const auto *name : {"red-alpha-lossless.jxl", "red-alpha-lossy.jxl"})
+    {
+        const auto result = decode(fixture_bytes(name));
+        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+        CHECK(result.info.format == LV_FORMAT_JPEGXL);
+        CHECK(result.info.source_size.width == 96);
+        CHECK(result.info.source_size.height == 64);
+        REQUIRE(result.pixels.size() == 96 * 64 * 4);
+        for (std::size_t i = 0; i < result.pixels.size(); i += 4)
+        {
+            CHECK(result.pixels[i] >= 240);
+            CHECK(result.pixels[i + 1] <= 15);
+            CHECK(result.pixels[i + 2] <= 30);
+            CHECK(result.pixels[i + 3] >= 120);
+            CHECK(result.pixels[i + 3] <= 136);
+        }
+    }
+    auto truncated = fixture_bytes("red-alpha-lossless.jxl");
+    truncated.resize(truncated.size() / 2);
+    const auto damaged = decode(truncated);
+    REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+    CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
+}
+
 TEST_CASE("WebP lossy lossless and alpha use decoder-scaled FIT", "[formats][webp]")
 {
     for (bool lossless : {false, true})
@@ -661,7 +687,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_AVIF; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_JPEGXL; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);

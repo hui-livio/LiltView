@@ -29,9 +29,9 @@ void lv_decode_jpegxl(lv_core *core, lv_request *request, lv_input *input, lv_er
         error->code = LV_ERROR_OUT_OF_MEMORY;
         goto done;
     }
-    if (JxlDecoderSubscribeEvents(decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FRAME | JXL_DEC_NEED_IMAGE_OUT_BUFFER |
-                                             JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS ||
-        JxlDecoderSetInput(decoder, data, bytes) != JXL_DEC_SUCCESS)
+    const JxlDecoderStatus subscribe = JxlDecoderSubscribeEvents(decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
+    const JxlDecoderStatus set_input = JxlDecoderSetInput(decoder, data, bytes);
+    if (subscribe != JXL_DEC_SUCCESS || set_input != JXL_DEC_SUCCESS)
     {
         error->code = LV_ERROR_CORRUPT_DATA;
         goto done;
@@ -87,7 +87,9 @@ void lv_decode_jpegxl(lv_core *core, lv_request *request, lv_input *input, lv_er
             break;
     }
     if (!error->code)
+    {
         error->code = lv_stopped(core, request) ? 0 : jxl_error(status);
+    }
 done:
     if (decoder)
         JxlDecoderDestroy(decoder);
