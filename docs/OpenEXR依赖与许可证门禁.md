@@ -12,7 +12,7 @@ OpenEXR 首版使用仓库内固定源码，不使用系统 OpenEXR、Imath、li
 | OpenEXR 内置 zstd | 随 OpenEXR 固定 | OpenEXR 源码内 `external/zstd` | 仅构建解码所需静态代码 |
 | OpenEXR 内置 OpenJPH | 随 OpenEXR 固定 | OpenEXR 源码内 `external/OpenJPH` | 仅构建解码所需静态代码 |
 
-构建裁剪关闭 OpenEXR 工具、示例、Python、测试、文档和安装目标，仅保留 `OpenEXR::OpenEXR` 解码库及其必要的 `Iex`、`IlmThread`、`OpenEXRCore` 和 Imath 目标。构建配置必须显式关闭 shared，并强制使用内部 deflate、zstd 和 OpenJPH。Imath 在主工程中先由固定 submodule 建立目标，再作为 OpenEXR 的内部目标使用，避免 FetchContent。
+构建裁剪关闭 OpenEXR 工具、示例、Python、测试、文档和安装目标，仅保留 `OpenEXR::OpenEXRCore` 解码库及其必要的 `Iex`、`IlmThread`、`OpenEXRCore` 和 Imath 目标。构建配置必须显式关闭 shared，并强制使用内部 deflate、zstd 和 OpenJPH。Imath 在主工程中先由固定 submodule 建立目标，再作为 OpenEXR 的内部目标使用，避免 FetchContent。
 
 ## 许可证
 

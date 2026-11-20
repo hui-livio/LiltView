@@ -209,6 +209,12 @@ install(FILES "${PROJECT_SOURCE_DIR}/third_party/libtiff/LICENSE.md"
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libavif/LICENSE"
     "${PROJECT_SOURCE_DIR}/third_party/libavif/source.json"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/libavif")
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/openexr/LICENSE.md"
+    "${PROJECT_SOURCE_DIR}/third_party/Imath/LICENSE.md"
+    "${PROJECT_SOURCE_DIR}/third_party/openexr/external/deflate/COPYING"
+    "${PROJECT_SOURCE_DIR}/third_party/openexr/external/zstd/LICENSE"
+    "${PROJECT_SOURCE_DIR}/third_party/openexr/external/OpenJPH/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/OpenEXR")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/dav1d/COPYING"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${liltview_license_subdir}/dav1d")
 install(FILES "${PROJECT_SOURCE_DIR}/third_party/libjxl/LICENSE"
