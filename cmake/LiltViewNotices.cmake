@@ -43,6 +43,10 @@ set(LILTVIEW_NOTICES "LiltView - licenses and third-party notices\n")
 foreach(relative IN LISTS liltview_notice_files)
     set(path "${PROJECT_SOURCE_DIR}/${relative}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
+    if(NOT EXISTS "${path}")
+        message(STATUS "Skipping unavailable third-party notice: ${relative}")
+        continue()
+    endif()
     if(relative STREQUAL "assets/fonts/LICENSE.HarmonyOS-Sans.txt")
         # The original upstream notice has trailing NUL padding. Keep that file
         # untouched for redistribution, but embed its readable text, not NULs

@@ -66,7 +66,12 @@ if(BUILD_TESTING)
 endif()
 
 message(STATUS "LiltView ${PROJECT_VERSION}: C${LILTVIEW_C_STANDARD} core / C++${LILTVIEW_CXX_STANDARD} consumers")
-message(STATUS "Dependencies: local third_party sources; app components=${LILTVIEW_BUILD_APP_COMPONENTS}; Catch2=${LILTVIEW_BUILD_UNIT_TESTS}")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(liltview_dependency_summary "Linux system-first with fixed-source fallback (${LILTVIEW_LINUX_DEPENDENCY_MODE})")
+else()
+    set(liltview_dependency_summary "platform-vendored third_party sources")
+endif()
+message(STATUS "Dependencies: ${liltview_dependency_summary}; app components=${LILTVIEW_BUILD_APP_COMPONENTS}; Catch2=${LILTVIEW_BUILD_UNIT_TESTS}")
 message(STATUS "JPEG/PNG/SVG/WebP/BMP/GIF/APNG/TIFF/QOI/ICO/CUR/JPEG2000/AVIF/JPEGXL/OpenEXR DISPLAY/FIT enabled; renderer backend=${LILTVIEW_RENDERER_BACKEND}; native tiled streaming / cached camera transforms")
 
 if(LILTVIEW_RELEASE_PACKAGING AND LILTVIEW_BUILD_APP_COMPONENTS)

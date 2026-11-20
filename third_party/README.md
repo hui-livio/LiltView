@@ -36,7 +36,7 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `dav1d-ref/` | 引用生命周期受控子集 | `39834d7f71c85a9c555f2ddd7a7add6d671750de` | C11 头文件抽取 / 改编，BSD-2-Clause；非完整 decoder |
 | `iguana/` | 2026-08-12 快照 | `2c05e011942c652d020a6782d026c2378c42008a` | YAML 及传递头文件直接保存 |
 
-初始化脚本读取 `dependencies.json`，其发布页字段记录版本来源。基线不是“最新版本”声明，升级时需同时审阅 manifest 和 gitlink 改动。
+初始化脚本读取 `dependencies.json`，其发布页字段记录版本来源。基线不是“最新版本”声明，升级时需同时审阅 manifest 和 gitlink 改动。Linux 的 system-first 路径仍使用该清单锁定 fallback 版本，源码放在 build 目录的 `_deps`，不改变 gitlink。Win32 继续由 gitlink 提供本地静态构建源。
 
 libjpeg-turbo 使用本地 ExternalProject 独立构建 jpeg-static，因为上游不支持 add_subdirectory。关闭 shared、TurboJPEG API、tools 和 tests；安装附 LICENSE.md / README.ijg，不安装 JPEG 动态库。x86 SIMD 需要 NASM，没有时上游回退标量。
 
@@ -73,7 +73,7 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-通常不使用 `git submodule update --remote`，以免绕过主仓库锁定版本。CMake 只读取本地源码，不自动执行 Git、下载或修改依赖。
+通常不使用 `git submodule update --remote`，以免绕过主仓库锁定版本。Win32 路径只读取本地源码，不自动执行 Git、下载或修改依赖。Linux 路径按构建选项优先读取系统包，缺失时由 FetchContent 在 build/_deps 获取 `dependencies.json` 中的固定提交，不修改仓库 submodule。
 
 HEIF/HEIC 已接入固定 libheif v1.23.7 与 libde265 v1.1.3 的静态 built-in 解码路径，当前支持单主图 HEVC、8-bit RGB / RGBA、可选 alpha、NATIVE / FIT，并拒绝 sequence、多图、thumbnail、depth、非 alpha auxiliary、高位深、ICC、HDR 和 REGION。发行前仍需完成 LGPL-3 静态发布方案、源码提供和替换链接审查。系统库不能作为正式构建依赖。详细门禁见[HEIF 依赖与许可证门禁](../docs/HEIF依赖与许可证门禁.md)。
 LibRaw 已固定为 0.22.3 gitlink，但 RAW / DNG 尚未接入。当前仍需完成 autotools 或源码目标的静态构建裁剪、双许可证和附带组件 notices 审查，以及可再分发真实样本清单。系统 libraw 不能作为正式构建依赖。详细门禁见[RAW / DNG 依赖与许可证门禁](../docs/RAW依赖与许可证门禁.md)。
