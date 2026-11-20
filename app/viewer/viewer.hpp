@@ -12,6 +12,7 @@
 #include "prefetch.hpp"
 #include "renderer/renderer.hpp"
 #include "tiles.hpp"
+#include "cli/options.hpp"
 
 namespace liltview
 {
@@ -29,6 +30,7 @@ public:
     Viewer(const Viewer &)            = delete;
     Viewer &operator=(const Viewer &) = delete;
     void open(const std::filesystem::path &);
+    void open_raw(const std::filesystem::path &, const RawInputOptions &);
     void navigate(int direction);
     const DirectoryNavigation::Snapshot &navigation() const
     {
@@ -181,6 +183,7 @@ public:
 
 private:
     void open_selected(const std::filesystem::path &);
+    void submit_raw_pending();
     void submit_pending();
     void consume(const lv_event_view &);
     void discard_pending();
@@ -249,6 +252,7 @@ private:
     lv_request_id request_                = 0;
     std::uint64_t generation_ = 0, submitted_generation_ = 0;
     std::filesystem::path pending_path_;
+    std::optional<RawInputOptions> pending_raw_;
     std::filesystem::path selected_path_, displayed_path_;
     std::string filename_;
     render::Image display_, pending_;

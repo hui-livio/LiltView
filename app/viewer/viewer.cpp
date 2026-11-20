@@ -1,5 +1,6 @@
 #include "platform/path.hpp"
 #include "viewer.hpp"
+#include <liltview/raw.h>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -10,6 +11,8 @@
 #include <spdlog/spdlog.h>
 #include <stdexcept>
 #include <system_error>
+#include <charconv>
+#include <sstream>
 
 namespace liltview
 {
@@ -182,6 +185,25 @@ void Viewer::open(const std::filesystem::path &path)
     open_selected(absolute);
 }
 
+void Viewer::open_raw(const std::filesystem::path &path, const RawInputOptions &raw)
+{
+    if (closing_) return;
+    ++generation_;
+    load_started_ = std::chrono::steady_clock::now();
+    prepared_animation_.reset();
+    close_animation();
+    if (request_) lv_core_cancel(core_, request_);
+    discard_pending();
+    pending_raw_ = raw;
+    pending_path_ = path;
+    selected_path_ = path;
+    filename_ = platform::path_bytes(path.filename());
+    try_animation_ = false;
+    work_ = Work::static_image;
+    loading_ = true;
+    error_ = 0;
+}
+
 void Viewer::navigate(int direction)
 {
     if (!closing_)
@@ -223,6 +245,7 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
     visible_pending_ = false;
     viewport_.reset();
     pending_path_  = adopting_animation_ ? std::filesystem::path{} : absolute;
+    pending_raw_.reset();
     selected_path_ = absolute;
     filename_      = platform::path_bytes(absolute.filename());
     error_         = 0;
@@ -265,6 +288,11 @@ void Viewer::discard_pending()
 
 void Viewer::submit_pending()
 {
+    if (pending_raw_)
+    {
+        submit_raw_pending();
+        return;
+    }
     if (pending_path_.empty() || request_ || retired_preparation_ || !retired_scene_.empty())
         return;
     const auto path = platform::path_bytes(pending_path_);
@@ -309,6 +337,75 @@ void Viewer::submit_pending()
         pending_path_.clear();
         fail(LV_ERROR_INTERNAL);
     }
+}
+
+void Viewer::submit_raw_pending()
+{
+    if (pending_path_.empty() || request_ || retired_preparation_ || !retired_scene_.empty() || !pending_raw_)
+        return;
+    const auto &raw = *pending_raw_;
+    auto parse_u64 = [](std::string_view text, std::uint64_t &value)
+    {
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+        return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
+    };
+    auto split_size = [](std::string_view text, lv_size_u32 &size)
+    {
+        const auto x = text.find('x');
+        if (x == std::string_view::npos) return false;
+        std::uint32_t w = 0, h = 0;
+        const auto aw = std::from_chars(text.data(), text.data() + x, w);
+        const auto ah = std::from_chars(text.data() + x + 1, text.data() + text.size(), h);
+        if (aw.ec != std::errc{} || aw.ptr != text.data() + x || ah.ec != std::errc{} || ah.ptr != text.data() + text.size() || !w || !h)
+            return false;
+        size = {w, h};
+        return true;
+    };
+    auto parse_plane = [&](std::string_view text, lv_raw_plane &plane)
+    {
+        std::stringstream stream{std::string(text)};
+        std::string item;
+        std::uint64_t values[4]{};
+        for (auto &value : values)
+        {
+            if (!std::getline(stream, item, ',') || !parse_u64(item, value)) return false;
+        }
+        if (std::getline(stream, item, ',') || values[3] > UINT32_MAX || values[1] < values[2]) return false;
+        plane = {values[0], values[1], values[2], static_cast<std::uint32_t>(values[3]), 0};
+        return true;
+    };
+    lv_raw_request_desc request;
+    lv_raw_request_desc_init(&request);
+    const auto path = platform::path_bytes(pending_path_);
+    request.path = {platform::path_encoding, path.data(), path.size()};
+    request.target.kind = LV_TARGET_NATIVE;
+    if (!split_size(raw.size, request.image.layout.size)) { fail(LV_ERROR_DIMENSION_LIMIT); pending_raw_.reset(); pending_path_.clear(); return; }
+    const std::string layouts[] = {"rgb24", "bgr24", "rgba8", "bgra8", "gray8", "i420", "yv12", "nv12", "nv21", "bayer8", "bayer16"};
+    const auto layout_it = std::find(std::begin(layouts), std::end(layouts), raw.layout);
+    if (layout_it == std::end(layouts)) { fail(LV_ERROR_FORMAT_UNSUPPORTED); pending_raw_.reset(); pending_path_.clear(); return; }
+    request.image.layout.layout = static_cast<lv_raw_layout>(std::distance(std::begin(layouts), layout_it) + 1);
+    request.image.layout.row_order = raw.row_order == "bottom-up" ? LV_RAW_BOTTOM_UP : LV_RAW_TOP_DOWN;
+    request.image.layout.byte_order = raw.byte_order == "little" ? LV_RAW_BYTE_LITTLE : raw.byte_order == "big" ? LV_RAW_BYTE_BIG : LV_RAW_BYTE_NATIVE;
+    request.image.layout.alpha = raw.alpha == "straight" ? LV_RAW_ALPHA_STRAIGHT : raw.alpha == "none" ? LV_RAW_ALPHA_NONE : LV_RAW_ALPHA_OPAQUE;
+    request.image.layout.plane_count = static_cast<std::uint32_t>(raw.planes.size());
+    for (std::uint32_t i = 0; i < request.image.layout.plane_count; ++i)
+        if (!parse_plane(raw.planes[i], request.image.layout.planes[i])) { fail(LV_ERROR_DIMENSION_LIMIT); pending_raw_.reset(); pending_path_.clear(); return; }
+    request.image.processing.matrix = raw.matrix == "bt601" ? LV_RAW_MATRIX_BT601 : raw.matrix == "bt709" ? LV_RAW_MATRIX_BT709 : LV_RAW_MATRIX_UNKNOWN;
+    request.image.processing.range = raw.range == "full" ? LV_RAW_RANGE_FULL : raw.range == "limited" ? LV_RAW_RANGE_LIMITED : LV_RAW_RANGE_UNKNOWN;
+    request.image.processing.chroma_siting = raw.siting == "cosited" ? LV_RAW_CHROMA_COSITED : LV_RAW_CHROMA_CENTER;
+    const std::string cfas[] = {"none", "rggb", "bggr", "grbg", "gbrg"};
+    const auto cfa_it = std::find(std::begin(cfas), std::end(cfas), raw.cfa);
+    request.image.processing.cfa = cfa_it == std::end(cfas) ? LV_RAW_CFA_NONE : static_cast<lv_raw_cfa_pattern>(std::distance(std::begin(cfas), cfa_it));
+    request.image.processing.black_level = raw.black_level;
+    request.image.processing.white_level = raw.white_level ? raw.white_level : request.image.layout.layout == LV_RAW_LAYOUT_BAYER16 ? 65535 : 255;
+    request.image.processing.red_gain_q16 = raw.red_gain_q16;
+    request.image.processing.green_red_gain_q16 = raw.green_red_gain_q16;
+    request.image.processing.green_blue_gain_q16 = raw.green_blue_gain_q16;
+    request.image.processing.blue_gain_q16 = raw.blue_gain_q16;
+    work_ = Work::static_image;
+    const auto status = lv_core_submit_raw(core_, &request, &request_);
+    if (status == LV_OK) { pending_raw_.reset(); pending_path_.clear(); submitted_generation_ = generation_; }
+    else { pending_raw_.reset(); pending_path_.clear(); fail(status == LV_INVALID_ARGUMENT ? LV_ERROR_DIMENSION_LIMIT : LV_ERROR_INTERNAL); }
 }
 
 void Viewer::accept_completed()

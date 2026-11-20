@@ -94,7 +94,7 @@ CommandLineResult parse_command_line(int argc, const char *const *argv, std::ost
             raw.black_level || raw.white_level || raw.red_gain_q16 != 65536 || raw.green_red_gain_q16 != 65536 ||
             raw.green_blue_gain_q16 != 65536 || raw.blue_gain_q16 != 65536)
         {
-            if (!*raw_layout || !*raw_size || raw.planes.empty() || !parse_size(raw.size))
+            if (!*raw_layout || !*raw_size || raw.planes.empty() || options.image_path.empty() || !parse_size(raw.size))
                 throw CLI::ValidationError("--raw-layout, --raw-size and at least one --raw-plane are required");
             for (const auto &plane : raw.planes)
                 if (!valid_plane(plane)) throw CLI::ValidationError("--raw-plane must be OFFSET,STRIDE,ROW_BYTES,HEIGHT");
