@@ -537,6 +537,10 @@ TEST_CASE("raw Bayer8 applies black white levels gains origin and FIT", "[raw-la
     CHECK(fitted.info.canvas.width == 2);
     CHECK(fitted.info.canvas.height == 2);
 
+    const auto wide_level = decode_bayer(raw, LV_RAW_CFA_RGGB, size, {0, 4, 4, 4}, 0, 0, 0, UINT32_MAX);
+    REQUIRE(wide_level.terminal == LV_EVENT_COMPLETE);
+    CHECK(wide_level.pixels[0] == 0);
+
     const auto gained = decode_bayer(raw, LV_RAW_CFA_RGGB, size, {0, 4, 4, 4}, 0, 0, 0, 255, 2 * 65536,
                                                                   65536, 3 * 65536, 4 * 65536);
     REQUIRE(gained.terminal == LV_EVENT_COMPLETE);

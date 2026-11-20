@@ -107,8 +107,9 @@ static uint8_t bayer_scaled(uint8_t sample, const lv_raw_processing *processing,
                             lv_raw_cfa_pattern pattern, uint32_t x, uint32_t y)
 {
     const int value = (int)sample - (int)processing->black_level;
-    const uint32_t span = processing->white_level - processing->black_level;
-    const int normalized = value <= 0 ? 0 : value >= (int)span ? 255 : (value * 255 + (int)span / 2) / (int)span;
+    const uint64_t span = (uint64_t)processing->white_level - processing->black_level;
+    const int normalized = value <= 0 ? 0 : (uint64_t)value >= span ? 255 :
+        (int)(((uint64_t)value * 255 + span / 2) / span);
     const uint32_t gain = bayer_gain(processing, channel, pattern, x, y);
     return clamp_u8((int)(((uint64_t)normalized * gain + 32768) >> 16));
 }
