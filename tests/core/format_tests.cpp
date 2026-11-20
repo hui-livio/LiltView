@@ -556,6 +556,72 @@ TEST_CASE("HEIF rejects sequences, thumbnails, high bit depth, and truncation", 
     CHECK((damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_FORMAT_UNSUPPORTED));
 }
 
+TEST_CASE("RAW and DNG whitelist samples decode with native and FIT targets", "[formats][raw]")
+{
+    for (const auto *name : {"canon-eos5d3-lossy.dng", "canon-eos20d.cr2"})
+    {
+        const auto result = decode(fixture_bytes(name));
+        REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+        CHECK(result.info.format == LV_FORMAT_RAW);
+        CHECK(result.info.source_size.width > 1000);
+        CHECK(result.info.source_size.height > 1000);
+        CHECK(result.info.canvas.width == result.info.source_size.width);
+        CHECK(result.info.canvas.height == result.info.source_size.height);
+        REQUIRE(result.pixels.size() == static_cast<std::size_t>(result.info.canvas.width) * result.info.canvas.height * 4);
+        CHECK(result.pixels[3] == 255);
+
+        const auto fitted = decode(fixture_bytes(name), {320, 240});
+        REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+        CHECK(fitted.info.format == LV_FORMAT_RAW);
+        CHECK(fitted.info.canvas.width <= 320);
+        CHECK(fitted.info.canvas.height <= 240);
+        CHECK(fitted.info.canvas.width > 0);
+        CHECK(fitted.info.canvas.height > 0);
+
+        const auto native = decode_native(fixture_bytes(name));
+        REQUIRE(native.terminal == LV_EVENT_COMPLETE);
+        CHECK(native.info.format == LV_FORMAT_RAW);
+        CHECK(native.info.canvas.width == result.info.canvas.width);
+        CHECK(native.info.canvas.height == result.info.canvas.height);
+    }
+}
+
+TEST_CASE("RAW and DNG reject truncation and honor source and memory guards", "[formats][raw][errors]")
+{
+    for (const auto *name : {"canon-eos5d3-lossy.dng", "canon-eos20d.cr2"})
+    {
+        auto truncated = fixture_bytes(name);
+        truncated.resize(truncated.size() / 2);
+        const auto damaged = decode(truncated);
+        REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+        CHECK((damaged.error.code == LV_ERROR_CORRUPT_DATA || damaged.error.code == LV_ERROR_FORMAT_UNSUPPORTED));
+    }
+
+    Files files;
+    Engine limited(1, 16 * 1024);
+    limited.submit(files.write("limited.dng", fixture_bytes("canon-eos5d3-lossy.dng")));
+    const auto budget = collect(limited);
+    REQUIRE(budget.terminal == LV_EVENT_ERROR);
+    CHECK(budget.error.code == LV_ERROR_MEMORY_BUDGET);
+
+    Engine gated;
+    gated.gate = true;
+    const auto path = files.write("gated.cr2", fixture_bytes("canon-eos20d.cr2"));
+    const auto id = gated.submit(path, {320, 240});
+    {
+        std::unique_lock lock(gated.mutex);
+        REQUIRE(gated.changed.wait_for(lock, std::chrono::seconds(5), [&] { return gated.entered; }));
+    }
+    REQUIRE(lv_core_cancel(gated.core, id) == LV_OK);
+    {
+        std::lock_guard lock(gated.mutex);
+        gated.proceed = true;
+        gated.changed.notify_all();
+    }
+    const auto cancelled = collect(gated);
+    CHECK(cancelled.terminal == LV_EVENT_CANCELLED);
+}
+
 TEST_CASE("JPEG XL static lossless and lossy images decode to RGBA8", "[formats][jpegxl]")
 {
     for (const auto *name : {"red-alpha-lossless.jxl", "red-alpha-lossy.jxl"})
