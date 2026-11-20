@@ -63,6 +63,7 @@ TEST_CASE("CLI11 help and version exit before launching graphics", "[cli]")
     CHECK(help.output.find("--language") != std::string::npos);
     CHECK(help.output.find("settings.yaml") != std::string::npos);
     CHECK(help.output.find("AVIF") != std::string::npos);
+    CHECK(help.output.find("JPEG XL") != std::string::npos);
 }
 
 TEST_CASE("CLI11 rejects unknown missing duplicate and conflicting arguments", "[cli]")

@@ -93,7 +93,7 @@ TEST_CASE("status bar shows basename actual source format raw dimensions and phy
                              std::pair{LV_FORMAT_WEBP, "WebP"}, std::pair{LV_FORMAT_BMP, "BMP"}, std::pair{LV_FORMAT_GIF, "GIF"},
                              std::pair{LV_FORMAT_TIFF, "TIFF"}, std::pair{LV_FORMAT_QOI, "QOI"}, std::pair{LV_FORMAT_ICO, "ICO"},
                              std::pair{LV_FORMAT_CUR, "CUR"}, std::pair{LV_FORMAT_JPEG2000, "JPEG 2000"},
-                             std::pair{LV_FORMAT_AVIF, "AVIF"}};
+                             std::pair{LV_FORMAT_AVIF, "AVIF"}, std::pair{LV_FORMAT_JPEGXL, "JPEG XL"}};
     for (const auto &[format, expected] : formats)
     {
         details.image.format = format;
