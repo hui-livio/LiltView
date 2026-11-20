@@ -170,6 +170,18 @@ TEST_CASE("raw layout validation rejects ambiguous and unsafe descriptions", "[r
     CHECK(id == 0);
 
     request = valid_request(path);
+    request.image.layout.layout = LV_RAW_LAYOUT_I420;
+    request.image.layout.size = {2, 2};
+    request.image.layout.plane_count = 3;
+    request.image.layout.planes[0] = {.offset = 0, .stride = 2, .row_bytes = 2, .height = 2};
+    request.image.layout.planes[1] = {.offset = 3, .stride = 1, .row_bytes = 1, .height = 1};
+    request.image.layout.planes[2] = {.offset = 4, .stride = 1, .row_bytes = 1, .height = 1};
+    request.image.processing.matrix = LV_RAW_MATRIX_BT601;
+    request.image.processing.range = LV_RAW_RANGE_FULL;
+    CHECK(lv_core_submit_raw(engine.core, &request, &id) == LV_INVALID_ARGUMENT);
+    CHECK(id == 0);
+
+    request = valid_request(path);
     request.target.kind = LV_TARGET_REGION;
     request.target.as.region.canvas = {3, 2};
     request.target.as.region.rect = {0, 0, 3, 2};

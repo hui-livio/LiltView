@@ -74,10 +74,12 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
     }
     if (layout->plane_count != expected_planes)
         return false;
+    uint64_t plane_starts[LV_RAW_MAX_PLANES] = {0};
+    uint64_t plane_ends[LV_RAW_MAX_PLANES] = {0};
     for (uint32_t i = 0; i < layout->plane_count; ++i)
     {
         const lv_raw_plane *plane = &layout->planes[i];
-        const uint32_t expected_height = (layout->layout == LV_RAW_LAYOUT_I420 || layout->layout == LV_RAW_LAYOUT_YV12 ||
+        const uint32_t expected_height = (((layout->layout == LV_RAW_LAYOUT_I420 || layout->layout == LV_RAW_LAYOUT_YV12) && i > 0) ||
                                           ((layout->layout == LV_RAW_LAYOUT_NV12 || layout->layout == LV_RAW_LAYOUT_NV21) && i == 1))
             ? layout->size.height / 2 : layout->size.height;
         const uint64_t expected_row = (layout->layout == LV_RAW_LAYOUT_I420 || layout->layout == LV_RAW_LAYOUT_YV12) && i > 0
@@ -90,6 +92,11 @@ static bool raw_layout_valid(const lv_raw_layout_desc *layout)
         if (!mul_u64(rows, plane->stride, &span) || !add_u64(plane->offset, span, &end) ||
             !add_u64(end, plane->row_bytes, &end))
             return false;
+        for (uint32_t j = 0; j < i; ++j)
+            if (plane->offset < plane_ends[j] && plane_starts[j] < end)
+                return false;
+        plane_starts[i] = plane->offset;
+        plane_ends[i]   = end;
     }
     return true;
 }
