@@ -179,6 +179,41 @@ add_subdirectory("${libheif_source}" "${PROJECT_BINARY_DIR}/third_party/libheif"
 set(BUILD_TESTING "${liltview_heif_saved_build_testing}" CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS "${liltview_heif_saved_shared_libs}" CACHE BOOL "" FORCE)
 
+# LibRaw currently ships an Autotools build rather than an upstream-supported
+# CMake build. Keep its first integration as a local, static Unix target. The
+# source tree is copied into the build directory before autoreconf so the
+# pinned submodule remains clean and reproducible.
+if(UNIX)
+    liltview_dependency_source(libraw configure.ac libraw_source)
+    find_program(LILTVIEW_MAKE_EXECUTABLE NAMES gmake make REQUIRED)
+    set(libraw_binary "${PROJECT_BINARY_DIR}/third_party/libraw")
+    set(libraw_build_source "${libraw_binary}/source")
+    set(libraw_library "${libraw_build_source}/lib/.libs/${CMAKE_STATIC_LIBRARY_PREFIX}raw${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(libraw_cppflags "-I${jpeg_source}/src -I${jpeg_binary} -I${zlib_source} -I${PROJECT_BINARY_DIR}/third_party/zlib")
+    set(libraw_ldflags "-L${jpeg_binary} -L${PROJECT_BINARY_DIR}/third_party/zlib")
+    ExternalProject_Add(liltview_libraw_build
+        SOURCE_DIR "${libraw_source}" BINARY_DIR "${libraw_binary}"
+        DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND ""
+        CONFIGURE_COMMAND
+            "${CMAKE_COMMAND}" -E copy_directory "${libraw_source}" "<BINARY_DIR>/source"
+            COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" autoreconf --install
+            COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" "${CMAKE_COMMAND}" -E env
+                "CPPFLAGS=${libraw_cppflags}" "LDFLAGS=${libraw_ldflags}"
+                "<BINARY_DIR>/source/configure"
+                --disable-shared --enable-static --disable-openmp --disable-lcms --disable-examples
+                --enable-jpeg --enable-zlib
+        BUILD_COMMAND "${CMAKE_COMMAND}" -E chdir "<BINARY_DIR>/source" "${LILTVIEW_MAKE_EXECUTABLE}" -j2
+        INSTALL_COMMAND ""
+        BUILD_BYPRODUCTS "${libraw_library}")
+    add_library(liltview_libraw STATIC IMPORTED GLOBAL)
+    set_target_properties(liltview_libraw PROPERTIES
+        IMPORTED_LOCATION "${libraw_library}"
+        INTERFACE_INCLUDE_DIRECTORIES "${libraw_source}/libraw"
+        INTERFACE_LINK_LIBRARIES "liltview_jpeg;zlibstatic;m")
+    add_dependencies(liltview_libraw liltview_libraw_build liltview_jpeg_build)
+    add_library(LiltView::libraw ALIAS liltview_libraw)
+endif()
+
 set(liltview_avif_source "${PROJECT_SOURCE_DIR}/third_party/libavif")
 if(NOT EXISTS "${liltview_avif_source}/CMakeLists.txt")
     message(FATAL_ERROR "Missing libavif source tree: third_party/libavif/CMakeLists.txt")
