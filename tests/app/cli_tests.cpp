@@ -64,6 +64,7 @@ TEST_CASE("CLI11 help and version exit before launching graphics", "[cli]")
     CHECK(help.output.find("settings.yaml") != std::string::npos);
     CHECK(help.output.find("AVIF") != std::string::npos);
     CHECK(help.output.find("JPEG XL") != std::string::npos);
+    CHECK(help.output.find("HEIF/HEIC") != std::string::npos);
     CHECK(help.output.find("OpenEXR") != std::string::npos);
 }
 
