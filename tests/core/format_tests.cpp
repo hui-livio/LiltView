@@ -527,6 +527,67 @@ TEST_CASE("JPEG XL static lossless and lossy images decode to RGBA8", "[formats]
     CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
 }
 
+TEST_CASE("OpenEXR scanline HALF RGB(A) decodes with windows, FIT, and SDR mapping", "[formats][openexr]")
+{
+    const auto result = decode(fixture_bytes("red.exr"));
+    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+    CHECK(result.info.format == LV_FORMAT_OPENEXR);
+    CHECK(result.info.source_size.width == 7);
+    CHECK(result.info.source_size.height == 5);
+    CHECK(result.info.canvas.width == 7);
+    CHECK(result.info.canvas.height == 5);
+    REQUIRE(result.pixels.size() == 7 * 5 * 4);
+    CHECK(result.pixels[0] == 255);
+    CHECK(result.pixels[1] >= 63);
+    CHECK(result.pixels[1] <= 65);
+    CHECK(result.pixels[2] == 0);
+    CHECK(result.pixels[3] == 255);
+
+    const auto negative = decode(fixture_bytes("red-negative.exr"));
+    REQUIRE(negative.terminal == LV_EVENT_COMPLETE);
+    CHECK(negative.info.source_size.width == 7);
+    CHECK(negative.info.source_size.height == 4);
+    CHECK(negative.pixels[0] == 255);
+
+    const auto fitted = decode(fixture_bytes("red.exr"), {3, 3});
+    REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
+    CHECK(fitted.info.canvas.width == 3);
+    CHECK(fitted.info.canvas.height == 2);
+    CHECK(fitted.pixels[0] == 255);
+}
+
+TEST_CASE("OpenEXR NaN and infinities use fixed SDR boundary mapping", "[formats][openexr]")
+{
+    const auto result = decode(fixture_bytes("red-special.exr"));
+    REQUIRE(result.terminal == LV_EVENT_COMPLETE);
+    REQUIRE(result.pixels.size() == 2 * 4);
+    CHECK(result.pixels[0] == 255);
+    CHECK(result.pixels[1] == 0);
+    CHECK(result.pixels[2] == 0);
+    CHECK(result.pixels[3] == 255);
+    CHECK(result.pixels[4] == 255);
+    CHECK(result.pixels[5] >= 127);
+    CHECK(result.pixels[5] <= 128);
+    CHECK(result.pixels[6] == 0);
+    CHECK(result.pixels[7] >= 127);
+    CHECK(result.pixels[7] <= 128);
+}
+
+TEST_CASE("OpenEXR rejects unsupported storage, channels, sample types, and truncation", "[formats][openexr][errors]")
+{
+    for (const auto *name : {"red-extra.exr", "red-float.exr", "red-tiled.exr", "red-multipart.exr"})
+    {
+        const auto result = decode(fixture_bytes(name));
+        REQUIRE(result.terminal == LV_EVENT_ERROR);
+        CHECK(result.error.code == LV_ERROR_FORMAT_UNSUPPORTED);
+    }
+    auto truncated = fixture_bytes("red.exr");
+    truncated.resize(truncated.size() / 2);
+    const auto damaged = decode(truncated);
+    REQUIRE(damaged.terminal == LV_EVENT_ERROR);
+    CHECK(damaged.error.code == LV_ERROR_CORRUPT_DATA);
+}
+
 TEST_CASE("WebP lossy lossless and alpha use decoder-scaled FIT", "[formats][webp]")
 {
     for (bool lossless : {false, true})
@@ -687,7 +748,7 @@ TEST_CASE("SVG unsupported resources effects and complexity reject explicitly", 
 TEST_CASE("all formats report capabilities and enforce output or original pixel limits", "[formats][budget]")
 {
     Engine engine;
-    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_JPEGXL; ++format)
+    for (lv_format format = LV_FORMAT_JPEG; format <= LV_FORMAT_OPENEXR; ++format)
     {
         lv_format_support support{};
         REQUIRE(lv_core_query_format(engine.core, format, &support) == LV_OK);
