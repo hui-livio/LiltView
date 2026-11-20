@@ -1,6 +1,6 @@
 # RAW / DNG 依赖与许可证门禁
 
-RAW / DNG 首版先固定 LibRaw 源码和发布边界，不使用系统 libraw 作为正式构建依赖。当前只完成依赖登记和范围审查，尚未接入 Core 或应用支持。
+RAW / DNG 首版固定 LibRaw 源码和发布边界，不使用系统 libraw 作为正式构建依赖。当前已接入 Core 和应用，但支持范围仍限于两个真实样本覆盖的 DNG / Canon CR2 白名单。
 
 ## 固定源码
 
@@ -16,8 +16,8 @@ LibRaw 主体采用 LGPL-2.1-only 或 CDDL-1.0 双许可证。源码树还包含
 
 ## 首版候选范围
 
-首版只考虑 DNG 和明确列入白名单的相机 RAW 样本。优先读取合法的内嵌 JPEG 预览，预览不存在时才使用 LibRaw 的 8-bit RGB 处理结果。输出统一为 RGBA8，支持 NATIVE / FIT，不支持裸 `.raw` 布局猜测、REGION、HDR、原生高位深、任意未知相机、完整 ICC 管理或批量多帧。
+首版只支持 little-endian DNG 和 Canon CR2 白名单样本。当前直接使用 LibRaw 的 8-bit developed RGB 处理结果，不承诺内嵌 JPEG preview-first。输出统一为 RGBA8，支持 NATIVE / FIT，不支持裸 `.raw` 布局猜测、REGION、HDR、原生高位深、未列入白名单的相机、完整 ICC 管理或批量多帧。
 
-每个进入白名单的样本必须记录相机型号、容器、主图尺寸、预览身份、CFA / active area 元数据和资源预算。仓库当前没有可提交的真实 RAW / DNG 样本，不能在取得可再分发样本和许可证确认前进入 Core 解码提交。
+每个进入白名单的样本必须记录相机型号、容器、主图尺寸、显影输出身份、CFA / active area 元数据和资源预算。当前样本和 SHA-256 记录在 `tests/fixtures/raw_sources.json`，正式测试不依赖网络。
 
-系统 LibRaw 只能用于 API 探针和样本审查，不能作为正式构建成功证据。下一批应先提交可再分发 fixture 清单和静态构建探针，再决定是否进入 Core。
+系统 LibRaw 不能作为正式构建依赖。正式 UNIX 构建使用固定 submodule 的 Autotools 静态目标，应用 notices 安装 `LICENSE.LGPL`、`LICENSE.CDDL` 和 `COPYRIGHT`。Windows 当前保留 RAW 内容识别但不声明 LibRaw 解码可用，格式查询会隐藏 RAW 能力。

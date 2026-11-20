@@ -48,6 +48,7 @@
 | JPEG XL（`.jxl`） | 静态 8 位 RGB / 灰度、有损或无损、可带透明度的图片，输出 RGBA8 | 不支持动画、高位深、HDR、额外通道或区域解码 |
 | HEIF / HEIC（`.heif` / `.heic`） | 静态单主图 HEVC 文件，必须只有一个主图，支持 8 位 RGB / RGBA、可选透明度，输出 RGBA8，支持 NATIVE / FIT | 不支持序列、多主图、缩略图、深度图或非透明辅助图、高位深、ICC profile、HDR 或区域解码 |
 | OpenEXR（`.exr`） | 单 part scanline HALF RGB / RGBA 图片，使用固定 SDR 边界映射输出 RGBA8，支持 NATIVE / FIT 与 data window 原点 | 不支持 deep、multi-part、tiled、FLOAT / UINT、额外通道、HDR 输出、ICC 或区域解码 |
+| RAW / DNG（`.dng` / `.cr2`） | little-endian DNG 和 Canon CR2 白名单样本，使用 LibRaw 8-bit developed RGB 输出 RGBA8，支持 NATIVE / FIT | 不支持裸 `.raw`、未列入白名单的相机、REGION、HDR、原生高位深、完整 ICC 或批量多帧；当前不使用内嵌 JPEG preview-first |
 
 **支持某种格式不代表支持其所有编码变体。** 文件按实际内容识别；同目录浏览按上述后缀筛选。完整的位深、透明、方向和资源限制见[格式兼容表](docs/图片格式兼容表.md)。
 

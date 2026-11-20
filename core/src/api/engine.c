@@ -359,6 +359,16 @@ lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format, lv_forma
         return LV_CLOSING;
     if (format < LV_FORMAT_JPEG || format > LV_FORMAT_RAW)
         return LV_INVALID_ARGUMENT;
+#if defined(LILTVIEW_HAS_LIBRAW)
+    const bool available = true;
+#else
+    const bool available = format != LV_FORMAT_RAW;
+#endif
+    if (!available)
+    {
+        *out = (lv_format_support){0, 0};
+        return LV_OK;
+    }
     const lv_capabilities capabilities = format == LV_FORMAT_SVG ? LV_CAP_VECTOR_RASTERIZE :
         (format == LV_FORMAT_JPEG || format == LV_FORMAT_WEBP)   ? LV_CAP_SCALED_DECODE :
                                                                    0;

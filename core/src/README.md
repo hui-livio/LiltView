@@ -1,6 +1,6 @@
 # 核心源码入口
 
-当前支持 Linux 与 Windows 文件适配，使用 C23（MSVC 为 C17 与私有兼容层）、ABI 3、单共享 worker；十一类格式的实际范围见[兼容表](../../docs/图片格式兼容表.md)。调用、所有权、预算、取消和关闭统一维护在 [Core 契约](../../docs/核心接口与生命周期契约.md)，完整声明见 [core.h](../include/liltview/core.h)。
+当前支持 Linux 与 Windows 文件适配，使用 C23（MSVC 为 C17 与私有兼容层）、ABI 3、单共享 worker；格式的实际范围见[兼容表](../../docs/图片格式兼容表.md)。RAW / DNG 解码依赖仅在 UNIX 构建启用，Windows 查询会隐藏 RAW 能力。调用、所有权、预算、取消和关闭统一维护在 [Core 契约](../../docs/核心接口与生命周期契约.md)，完整声明见 [core.h](../include/liltview/core.h)。
 
 | 路径 | 职责 |
 | --- | --- |
