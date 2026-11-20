@@ -1,5 +1,6 @@
 #include <libraw/libraw.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include "codec.h"
@@ -15,17 +16,27 @@ static lv_error_code raw_error(int result)
     case LIBRAW_UNSUFFICIENT_MEMORY:
     case LIBRAW_MEMPOOL_OVERFLOW:
         return LV_ERROR_OUT_OF_MEMORY;
+    case LIBRAW_DATA_ERROR:
+    case LIBRAW_TOO_BIG:
+        return LV_ERROR_CORRUPT_DATA;
     case LIBRAW_FILE_UNSUPPORTED:
     case LIBRAW_UNSUPPORTED_THUMBNAIL:
     case LIBRAW_NOT_IMPLEMENTED:
         return LV_ERROR_FORMAT_UNSUPPORTED;
     case LIBRAW_CANCELLED_BY_CALLBACK:
         return 0;
-    case LIBRAW_DATA_ERROR:
-    case LIBRAW_TOO_BIG:
     default:
         return LV_ERROR_CORRUPT_DATA;
     }
+}
+
+static int raw_progress(enum LibRaw_progress stage, int iteration, int expected, void *userdata)
+{
+    (void)stage;
+    (void)iteration;
+    (void)expected;
+    lv_request *request = userdata;
+    return request && request->cancelled;
 }
 
 void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error_info *error)
@@ -42,13 +53,16 @@ void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error
     const size_t bytes = (size_t)input->version.bytes;
     libraw_data_t *raw = libraw_init(0);
     lv_frame frame = {.core = core, .request = request, .input = input};
-    libraw_processed_image_t *image = nullptr;
+    libraw_processed_image_t *image = NULL;
+    uint8_t *native = NULL;
+    int result;
     if (!raw)
     {
         error->code = LV_ERROR_OUT_OF_MEMORY;
         goto done;
     }
-    int result = libraw_open_buffer(raw, data, bytes);
+    libraw_set_progress_handler(raw, raw_progress, request);
+    result = libraw_open_buffer(raw, data, bytes);
     if (result != LIBRAW_SUCCESS)
     {
         error->code = raw_error(result);
@@ -90,8 +104,6 @@ void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error
         error->code = raw_error(result);
         goto done;
     }
-    if (lv_stopped(core, request))
-        goto done;
     raw->params.output_bps = 8;
     raw->params.output_color = 1;
     raw->params.use_camera_wb = 1;
@@ -115,30 +127,27 @@ void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error
         error->code = LV_ERROR_FORMAT_UNSUPPORTED;
         goto done;
     }
-    uint8_t *native = lv_workspace_allocate(core, request, (size_t)native_bytes);
+    native = lv_workspace_allocate(core, request, (size_t)native_bytes);
     if (!native)
     {
         error->code = LV_ERROR_OUT_OF_MEMORY;
         goto done;
     }
-    const uint8_t *rgb = image->data;
     for (uint64_t at = 0; at < pixels; ++at)
     {
-        native[at * 4 + 0] = rgb[at * 3 + 0];
-        native[at * 4 + 1] = rgb[at * 3 + 1];
-        native[at * 4 + 2] = rgb[at * 3 + 2];
+        native[at * 4 + 0] = image->data[at * 3 + 0];
+        native[at * 4 + 1] = image->data[at * 3 + 1];
+        native[at * 4 + 2] = image->data[at * 3 + 2];
         native[at * 4 + 3] = 255;
     }
     if (!lv_resample_rgba(core, request, native, source, frame.data, canvas))
-    {
-        lv_workspace_release(core, request, native, (size_t)native_bytes);
         goto done;
-    }
-    lv_workspace_release(core, request, native, (size_t)native_bytes);
     if (!lv_frame_finish(&frame, error))
         goto done;
     error->code = 0;
 done:
+    if (native)
+        lv_workspace_release(core, request, native, (size_t)native_bytes);
     if (image)
         libraw_dcraw_clear_mem(image);
     if (raw)
