@@ -20,7 +20,7 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "libxcursor1, libxfixes3, libxi6, libxrandr2, l
 set(CPACK_RPM_PACKAGE_REQUIRES "libXcursor, libXfixes, libXi, libXrandr, libXScrnSaver, libXtst, libxkbcommon, libdecor, dbus-libs")
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
 set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
-set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0 AND MIT AND BSD-3-Clause AND Zlib AND IJG AND LicenseRef-HarmonyOS-Sans")
+set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0 AND MIT AND BSD-3-Clause AND Zlib AND IJG AND LGPL-2.1-only AND CDDL-1.0 AND LicenseRef-HarmonyOS-Sans")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 # CPack must not add GCC debug packages / debuginfo.
 set(CPACK_RPM_DEBUGINFO_PACKAGE OFF)

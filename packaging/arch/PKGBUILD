@@ -32,7 +32,7 @@ pkgdesc='A lightweight image viewer with a C23 core and ImGui interface'
 arch=('x86_64')
 url='https://github.com/hui-livio/LiltView'
 license=('Apache-2.0' 'MIT' 'Zlib' 'Libpng-2.0' 'BSD-3-Clause' 'IJG'
-         'BSL-1.0' 'FTL' 'libtiff' 'LicenseRef-HarmonyOS-Sans')
+         'BSL-1.0' 'FTL' 'libtiff' 'LGPL-2.1-only' 'CDDL-1.0' 'LicenseRef-HarmonyOS-Sans')
 depends=(
   'glibc' 'gcc-libs' 'fontconfig' 'glib2' 'wayland' 'libxkbcommon'
   'libx11' 'libxcursor' 'libxext' 'libxfixes' 'libxi' 'libxrandr' 'libxss' 'libxtst'
