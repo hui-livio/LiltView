@@ -57,6 +57,133 @@ static uint8_t clamp_u8(int value)
     return (uint8_t)(value < 0 ? 0 : value > 255 ? 255 : value);
 }
 
+enum
+{
+    BAYER_RED = 0,
+    BAYER_GREEN = 1,
+    BAYER_BLUE = 2
+};
+
+static unsigned bayer_color(lv_raw_cfa_pattern pattern, uint32_t x, uint32_t y)
+{
+    const bool odd_x = (x & 1u) != 0;
+    const bool odd_y = (y & 1u) != 0;
+    switch (pattern)
+    {
+    case LV_RAW_CFA_RGGB:
+        return odd_y ? (odd_x ? BAYER_BLUE : BAYER_GREEN) : (odd_x ? BAYER_GREEN : BAYER_RED);
+    case LV_RAW_CFA_BGGR:
+        return odd_y ? (odd_x ? BAYER_RED : BAYER_GREEN) : (odd_x ? BAYER_GREEN : BAYER_BLUE);
+    case LV_RAW_CFA_GRBG:
+        return odd_y ? (odd_x ? BAYER_GREEN : BAYER_BLUE) : (odd_x ? BAYER_RED : BAYER_GREEN);
+    case LV_RAW_CFA_GBRG:
+        return odd_y ? (odd_x ? BAYER_GREEN : BAYER_RED) : (odd_x ? BAYER_BLUE : BAYER_GREEN);
+    default:
+        return BAYER_GREEN;
+    }
+}
+
+static uint8_t bayer_sample(const uint8_t *row, uint64_t row_bytes, uint32_t x)
+{
+    return x < row_bytes ? row[x] : 0;
+}
+
+static uint32_t bayer_gain(const lv_raw_processing *processing, unsigned channel, lv_raw_cfa_pattern pattern,
+                           uint32_t x, uint32_t y)
+{
+    if (channel == BAYER_RED)
+        return processing->red_gain_q16;
+    if (channel == BAYER_BLUE)
+        return processing->blue_gain_q16;
+    const bool green_on_red =
+        pattern == LV_RAW_CFA_RGGB ? ((x & 1u) != 0 && (y & 1u) == 0) :
+        pattern == LV_RAW_CFA_BGGR ? ((x & 1u) == 0 && (y & 1u) != 0) :
+        pattern == LV_RAW_CFA_GRBG ? ((x & 1u) == 0 && (y & 1u) == 0) :
+                                     ((x & 1u) != 0 && (y & 1u) != 0);
+    return green_on_red ? processing->green_red_gain_q16 : processing->green_blue_gain_q16;
+}
+
+static uint8_t bayer_scaled(uint8_t sample, const lv_raw_processing *processing, unsigned channel,
+                            lv_raw_cfa_pattern pattern, uint32_t x, uint32_t y)
+{
+    const int value = (int)sample - (int)processing->black_level;
+    const uint32_t span = processing->white_level - processing->black_level;
+    const int normalized = value <= 0 ? 0 : value >= (int)span ? 255 : (value * 255 + (int)span / 2) / (int)span;
+    const uint32_t gain = bayer_gain(processing, channel, pattern, x, y);
+    return clamp_u8((int)(((uint64_t)normalized * gain + 32768) >> 16));
+}
+
+static uint8_t bayer_interpolated(const uint8_t *rows[3], uint64_t row_bytes, uint32_t width, uint32_t height,
+                                  uint32_t x, uint32_t y, const lv_raw_processing *processing, unsigned channel)
+{
+    const unsigned center = bayer_color(processing->cfa, x + processing->cfa_x_origin, y + processing->cfa_y_origin);
+    if (center == channel)
+        return bayer_scaled(rows[1][x], processing, channel, processing->cfa, x + processing->cfa_x_origin,
+                            y + processing->cfa_y_origin);
+    int total = 0, count = 0;
+    for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            int sx = (int)x + dx;
+            int sy = (int)y + dy;
+            if (sx < 0 || sy < 0 || (uint32_t)sx >= width || (uint32_t)sy >= height)
+                continue;
+            const unsigned color = bayer_color(processing->cfa, (uint32_t)sx + processing->cfa_x_origin,
+                                               (uint32_t)sy + processing->cfa_y_origin);
+            if (color != channel)
+                continue;
+            const uint8_t *row = rows[sy == (int)y - 1 ? 0 : sy == (int)y + 1 ? 2 : 1];
+            total += bayer_scaled(bayer_sample(row, row_bytes, (uint32_t)sx), processing, channel,
+                                  processing->cfa, (uint32_t)sx + processing->cfa_x_origin,
+                                  (uint32_t)sy + processing->cfa_y_origin);
+            ++count;
+        }
+    if (!count)
+        return bayer_scaled(bayer_sample(rows[1], row_bytes, x), processing, channel, processing->cfa,
+                            x + processing->cfa_x_origin, y + processing->cfa_y_origin);
+    return (uint8_t)((total + count / 2) / count);
+}
+
+static bool raw_read_bayer_row(raw_row_context *context, uint32_t y, uint8_t *rgba, lv_error_info *error)
+{
+    const lv_raw_layout_desc *layout = context->layout;
+    const lv_raw_processing *processing = context->processing;
+    if (processing->cfa == LV_RAW_CFA_NONE || processing->demosaic != LV_RAW_DEMOSAIC_BILINEAR)
+    {
+        error->code = LV_ERROR_FORMAT_UNSUPPORTED;
+        return false;
+    }
+    const lv_raw_plane *plane = &layout->planes[0];
+    uint8_t *loaded[3] = {nullptr, nullptr, nullptr};
+    size_t row_bytes = 0;
+    const uint32_t height = layout->size.height;
+    for (int slot = 0; slot < 3; ++slot)
+    {
+        const uint32_t source_y = slot == 0 ? y ? y - 1 : 0 : slot == 1 ? y : y + 1 < height ? y + 1 : y;
+        loaded[slot] = raw_read_bytes(context, plane, source_y, &row_bytes, error);
+        if (!loaded[slot])
+        {
+            for (int i = 0; i < slot; ++i)
+                lv_workspace_release(context->core, context->request, loaded[i], row_bytes);
+            return false;
+        }
+    }
+    const uint8_t *rows[3] = {loaded[0], loaded[1], loaded[2]};
+    for (uint32_t x = 0; x < layout->size.width; ++x)
+    {
+        rgba[x * 4 + 0] = bayer_interpolated(rows, plane->row_bytes, layout->size.width, height, x, y, processing,
+                                             BAYER_RED);
+        rgba[x * 4 + 1] = bayer_interpolated(rows, plane->row_bytes, layout->size.width, height, x, y, processing,
+                                             BAYER_GREEN);
+        rgba[x * 4 + 2] = bayer_interpolated(rows, plane->row_bytes, layout->size.width, height, x, y, processing,
+                                             BAYER_BLUE);
+        rgba[x * 4 + 3] = 255;
+    }
+    for (int i = 0; i < 3; ++i)
+        lv_workspace_release(context->core, context->request, loaded[i], row_bytes);
+    return !lv_stopped(context->core, context->request);
+}
+
 static void yuv601_to_rgb(uint8_t y, uint8_t u, uint8_t v, lv_raw_color_range range, uint8_t *rgba)
 {
     const int d = (int)u - 128;
@@ -84,6 +211,8 @@ static void yuv601_to_rgb(uint8_t y, uint8_t u, uint8_t v, lv_raw_color_range ra
 static bool raw_read_row(void *userdata, uint32_t y, uint8_t *rgba, lv_error_info *error)
 {
     raw_row_context *context = userdata;
+    if (context->layout->layout == LV_RAW_LAYOUT_BAYER8)
+        return raw_read_bayer_row(context, y, rgba, error);
     const lv_raw_plane *plane = &context->layout->planes[0];
     size_t row_bytes = 0;
     uint8_t *row = raw_read_bytes(context, plane, y, &row_bytes, error);
@@ -218,6 +347,13 @@ void lv_decode_raw_layout(lv_core *core, lv_request *request, lv_input *input, l
         goto done;
     }
     uint64_t row_bytes_total = plane->row_bytes;
+    const uint64_t row_multiplier = layout->layout == LV_RAW_LAYOUT_BAYER8 ? 3 : 1;
+    if (row_multiplier > UINT64_MAX / row_bytes_total)
+    {
+        error->code = LV_ERROR_MEMORY_BUDGET;
+        goto done;
+    }
+    row_bytes_total *= row_multiplier;
     if (layout->layout == LV_RAW_LAYOUT_I420 || layout->layout == LV_RAW_LAYOUT_YV12)
     {
         if (UINT64_MAX - row_bytes_total < layout->planes[1].row_bytes ||
