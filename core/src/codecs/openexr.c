@@ -136,11 +136,13 @@ void lv_decode_openexr(lv_core *core, lv_request *request, lv_input *input, lv_e
 
     int parts = 0;
     exr_storage_t storage = EXR_STORAGE_UNKNOWN;
+    exr_lineorder_t line_order = EXR_LINEORDER_INCREASING_Y;
     const exr_attr_chlist_t *channels = nullptr;
     exr_attr_box2i_t data_window = {0};
     exr_attr_box2i_t display_window = {0};
     if (exr_get_count(context, &parts) != EXR_ERR_SUCCESS || parts != 1 ||
         exr_get_storage(context, 0, &storage) != EXR_ERR_SUCCESS || storage != EXR_STORAGE_SCANLINE ||
+        exr_get_lineorder(context, 0, &line_order) != EXR_ERR_SUCCESS || line_order == EXR_LINEORDER_RANDOM_Y ||
         exr_get_channels(context, 0, &channels) != EXR_ERR_SUCCESS || !channels ||
         exr_get_data_window(context, 0, &data_window) != EXR_ERR_SUCCESS ||
         exr_get_display_window(context, 0, &display_window) != EXR_ERR_SUCCESS)
@@ -234,7 +236,9 @@ void lv_decode_openexr(lv_core *core, lv_request *request, lv_input *input, lv_e
         error->code = LV_ERROR_CORRUPT_DATA;
         goto done;
     }
-    for (int64_t y = data_window.min.y; y <= data_window.max.y;)
+    const bool descending = line_order == EXR_LINEORDER_DECREASING_Y;
+    for (int64_t y = descending ? data_window.max.y : data_window.min.y;
+         descending ? y >= data_window.min.y : y <= data_window.max.y;)
     {
         if (lv_stopped(core, request))
             goto done;
@@ -245,18 +249,21 @@ void lv_decode_openexr(lv_core *core, lv_request *request, lv_input *input, lv_e
             error->code = openexr_error(result, source.failure);
             goto done;
         }
-        if (chunk.height <= 0 || chunk.start_y < y || (int64_t)chunk.start_y + chunk.height <= y)
+        const int64_t chunk_low = chunk.start_y;
+        const int64_t chunk_high = (int64_t)chunk.start_y + chunk.height - 1;
+        if (chunk.height <= 0 || chunk_low < data_window.min.y || chunk_high > data_window.max.y ||
+            y < chunk_low || y > chunk_high)
         {
             error->code = LV_ERROR_CORRUPT_DATA;
             goto done;
         }
-        y = (int64_t)chunk.start_y + chunk.height;
+        y = descending ? chunk_low - 1 : chunk_high + 1;
         exr_decode_pipeline_t decoder = {0};
         decoder.pipe_size = sizeof decoder;
         result = exr_decoding_initialize(context, 0, &chunk, &decoder);
         if (result == EXR_ERR_SUCCESS)
         {
-            const int64_t row = (int64_t)chunk.start_y - data_window.min.y;
+            const int64_t row = chunk_low - data_window.min.y;
             if (row < 0 || row + chunk.height > size.height)
                 result = EXR_ERR_CORRUPT_CHUNK;
             for (int c = 0; result == EXR_ERR_SUCCESS && c < decoder.channel_count; ++c)

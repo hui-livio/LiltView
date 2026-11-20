@@ -549,6 +549,12 @@ TEST_CASE("OpenEXR scanline HALF RGB(A) decodes with windows, FIT, and SDR mappi
     CHECK(negative.info.source_size.height == 4);
     CHECK(negative.pixels[0] == 255);
 
+    const auto decreasing = decode(fixture_bytes("red-decreasing.exr"));
+    REQUIRE(decreasing.terminal == LV_EVENT_COMPLETE);
+    CHECK(decreasing.info.source_size.width == 7);
+    CHECK(decreasing.info.source_size.height == 5);
+    CHECK(decreasing.pixels[0] == 255);
+
     const auto fitted = decode(fixture_bytes("red.exr"), {3, 3});
     REQUIRE(fitted.terminal == LV_EVENT_COMPLETE);
     CHECK(fitted.info.canvas.width == 3);

@@ -3,7 +3,7 @@
 本目录图片是项目原创的 96×64 纯红合成样本，随项目采用 Apache-2.0。
 PNG、SVG、无损 WebP、QOI、ICO、CUR 的 alpha 为约 50%，BMP 为不透明 24 位。APNG、动画 WebP 和 GIF 含红 / 蓝两帧，分别保存播放一次与无限循环版本，帧时长 100 ms；TIFF 为不透明 RGB 首页；JPEG 2000 有 JP2 和裸 J2K 红色样本。
 
-OpenEXR fixture 包含普通 scanline、负 data window、NaN / Inf、额外通道、FLOAT、tiled 和 multipart 变体，用于验证首版边界。
+OpenEXR fixture 包含普通 / decreasing-Y scanline、负 data window、NaN / Inf、额外通道、FLOAT、tiled 和 multipart 变体，用于验证首版边界。
 
 `generate_formats.py` 可重新生成已有合成格式；仅生成 WebP 时需要本机 libwebp 编码器。OpenEXR fixture 使用固定的 v3.5.4 / Imath v3.2.3 writer 生成，正常测试不运行生成器。
 正常编译与测试直接读已保存文件，不运行生成器，也不依赖系统编码库。
