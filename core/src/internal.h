@@ -1,6 +1,7 @@
 #ifndef LV_INTERNAL_H
 #define LV_INTERNAL_H
 #include <liltview/core.h>
+#include <liltview/raw.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <threads.h>
@@ -101,6 +102,9 @@ struct lv_request
     lv_file_version replay_version;
     lv_error_code cache_failure;
     bool cache_hit;
+    bool raw_input;
+    uint64_t raw_identity;
+    lv_raw_image_desc raw_image;
 };
 struct lv_core
 {
@@ -165,6 +169,8 @@ void lv_notify(lv_core *);
 lv_pixels *lv_event_pixels(const lv_event *);
 lv_source *lv_source_for_locked(lv_core *, const lv_file_version *);
 lv_status lv_validate_request(const lv_request_desc *);
+lv_status lv_validate_raw_request(const lv_raw_request_desc *);
+uint64_t lv_raw_identity(const lv_raw_image_desc *);
 lv_status lv_accept_locked(lv_core *, const lv_request_desc *, lv_animation *, uint32_t action, lv_request_id *);
 void lv_discard_tiles_locked(lv_core *, lv_request_id);
 int lv_worker_main(void *);

@@ -1,4 +1,5 @@
 #include <liltview/core.h>
+#include <liltview/raw.h>
 
 #if !defined(_MSC_VER)
 #include <stdckdint.h>
@@ -26,6 +27,14 @@ int main(void)
     {
         fputs("C request initialization failed\n", stderr);
         return 2;
+    }
+    lv_raw_request_desc raw;
+    lv_raw_request_desc_init(&raw);
+    if (raw.abi_version != LV_RAW_ABI_VERSION || raw.struct_size != sizeof raw || raw.image.layout.struct_size != sizeof raw.image.layout ||
+        raw.image.processing.struct_size != sizeof raw.image.processing || raw.image.output.struct_size != sizeof raw.image.output)
+    {
+        fputs("Raw ABI initialization failed\n", stderr);
+        return 5;
     }
 
     // The toolchain must reject overflow rather than wrapping an image size.

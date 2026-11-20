@@ -1,4 +1,5 @@
 #include <liltview/core.h>
+#include <liltview/raw.h>
 
 #include <cstdio>
 #include <type_traits>

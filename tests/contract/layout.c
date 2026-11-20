@@ -1,4 +1,5 @@
 #include <liltview/core.h>
+#include <liltview/raw.h>
 
 // Export sizes/alignment from the C compiler for a C++ consumer to compare.
 #define LV_LAYOUT(type)                                                                                                          \
