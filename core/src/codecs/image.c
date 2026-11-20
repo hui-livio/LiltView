@@ -44,6 +44,8 @@ static decode_func detect_format(const uint8_t *data, size_t size)
         return lv_decode_jpegxl;
     if (size >= 12 && !memcmp(data, "\0\0\0\x0cjxl\x20\x20\x0d\x0a\x87\x0a", 12))
         return lv_decode_jpegxl;
+    if (size >= 4 && data[0] == 0x76 && data[1] == 0x2f && data[2] == 0x31 && data[3] == 0x01)
+        return lv_decode_openexr;
     size_t at = size >= 3 && !memcmp(data, "\xef\xbb\xbf", 3) ? 3 : 0;
     while (at < size && (data[at] == ' ' || data[at] == '\t' || data[at] == '\n' || data[at] == '\r'))
         ++at;
