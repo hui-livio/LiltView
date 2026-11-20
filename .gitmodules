@@ -40,3 +40,9 @@
 [submodule "libjxl"]
 	path = third_party/libjxl
 	url = https://github.com/libjxl/libjxl.git
+[submodule "Imath"]
+	path = third_party/Imath
+	url = https://github.com/AcademySoftwareFoundation/Imath.git
+[submodule "openexr"]
+	path = third_party/openexr
+	url = https://github.com/AcademySoftwareFoundation/openexr.git

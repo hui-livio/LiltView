@@ -105,6 +105,20 @@
       "version": "v0.12.0",
       "commit": "a7a9c787341cf703dede03c2009fa460cae5e5df",
       "release": "https://github.com/libjxl/libjxl/releases/tag/v0.12.0"
+    },
+    "openexr": {
+      "path": "third_party/openexr",
+      "url": "https://github.com/AcademySoftwareFoundation/openexr.git",
+      "version": "v3.5.4",
+      "commit": "86687e5f34e3a164820c5e280259550e3ca87c92",
+      "release": "https://github.com/AcademySoftwareFoundation/openexr/releases/tag/v3.5.4"
+    },
+    "Imath": {
+      "path": "third_party/Imath",
+      "url": "https://github.com/AcademySoftwareFoundation/Imath.git",
+      "version": "v3.2.3",
+      "commit": "5f27ba266d3ea1565e912570c30b5eafc89959f1",
+      "release": "https://github.com/AcademySoftwareFoundation/Imath/releases/tag/v3.2.3"
     }
   },
   "vendored_headers": [

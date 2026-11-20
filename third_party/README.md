@@ -27,6 +27,8 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `libavif/` | v1.4.2 | `source.json` 中的 tag 与树哈希 | 固定源码、裁剪版静态库 |
 | `dav1d/` | 1.5.3 | `b546257f770768b2c88258c533da38b91a06f737` | submodule、Meson 静态 decoder |
 | `libjxl/` | v0.12.0 | `a7a9c787341cf703dede03c2009fa460cae5e5df` | submodule 及递归 Highway/Brotli/CMS、静态 decoder |
+| `openexr/` | v3.5.4 | `86687e5f34e3a164820c5e280259550e3ca87c92` | submodule、裁剪版静态 decoder |
+| `Imath/` | v3.2.3 | `5f27ba266d3ea1565e912570c30b5eafc89959f1` | submodule、OpenEXR 固定构建依赖 |
 | `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
 | `lz4/` | v1.10.0 | `ebb370ca83af193212df4dcbadcc5d87bc0de2f0` | submodule、仅 lz4.c / xxhash.c 静态库 |
 | `dav1d-ref/` | 引用生命周期受控子集 | `39834d7f71c85a9c555f2ddd7a7add6d671750de` | C11 头文件抽取 / 改编，BSD-2-Clause；非完整 decoder |
@@ -73,6 +75,7 @@ ctest --preset dev
 
 HEIF/HEIC 尚未接入。系统 libheif 不能作为可复现发布依赖直接使用。首版接入前需要固定 libheif、实际 HEVC decoder 和所有静态链接义务，明确 LGPL-3 对发布、源代码和替换链接的影响。
 JPEG XL 尚未接入。系统 libjxl 不能作为可复现发布依赖直接使用。首版接入前需要固定 libjxl、Highway、Brotli、CMS 组件和 C++ 静态链接边界。libjxl 本体为 BSD-3-Clause，依赖组合和发行包体积仍需单独验收。
+OpenEXR 尚未接入。系统 OpenEXR 与 Imath 不能作为可复现发布依赖直接使用。首版固定 OpenEXR v3.5.4、Imath v3.2.3，使用 OpenEXR 源码内的 deflate、zstd 和 OpenJPH，关闭自动下载、工具、示例和测试。OpenEXR / Imath 使用 BSD-3-Clause，内置组件的原始许可证需要随发行包保留，详细门禁见[OpenEXR 依赖与许可证门禁](../docs/OpenEXR依赖与许可证门禁.md)。
 
 ## 纯头文件库规则
 
