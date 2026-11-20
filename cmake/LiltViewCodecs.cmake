@@ -147,7 +147,7 @@ set(ENABLE_ENCODER OFF CACHE BOOL "" FORCE)
 set(ENABLE_INTERNAL_TOOLS OFF CACHE BOOL "" FORCE)
 set(ENABLE_SHERLOCK265 OFF CACHE BOOL "" FORCE)
 add_subdirectory("${libde265_source}" "${PROJECT_BINARY_DIR}/third_party/libde265" EXCLUDE_FROM_ALL SYSTEM)
-target_include_directories(de265 SYSTEM PUBLIC
+target_include_directories(de265 SYSTEM PRIVATE
     "$<BUILD_INTERFACE:${libde265_source}/libde265>"
     "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/third_party/libde265/libde265>")
 
