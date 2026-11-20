@@ -46,3 +46,9 @@
 [submodule "openexr"]
 	path = third_party/openexr
 	url = https://github.com/AcademySoftwareFoundation/openexr.git
+[submodule "libheif"]
+	path = third_party/libheif
+	url = https://github.com/strukturag/libheif.git
+[submodule "libde265"]
+	path = third_party/libde265
+	url = https://github.com/strukturag/libde265.git

@@ -28,6 +28,8 @@ spdlog 本项目采用编译库形式；因此与 ImGui、SDL3、Catch2 一样�
 | `dav1d/` | 1.5.3 | `b546257f770768b2c88258c533da38b91a06f737` | submodule、Meson 静态 decoder |
 | `libjxl/` | v0.12.0 | `a7a9c787341cf703dede03c2009fa460cae5e5df` | submodule 及递归 Highway/Brotli/CMS、静态 decoder |
 | `openexr/` | v3.5.4 | `86687e5f34e3a164820c5e280259550e3ca87c92` | submodule、裁剪版静态 decoder |
+| `libheif/` | v1.23.7 | `12a259a5882dd99d45ec5fc77e296a3b620d1e2e` | submodule、LGPL-3 依赖门禁中 |
+| `libde265/` | v1.1.3 | `ba62bf4cfb3242f3bf0a45617ff09e35236e4d82` | submodule、LGPL-3 HEVC decoder 依赖门禁中 |
 | `Imath/` | v3.2.3 | `5f27ba266d3ea1565e912570c30b5eafc89959f1` | submodule、OpenEXR 固定构建依赖 |
 | `CLI11/` | v2.5.0 | `4160d259d961cd393fd8d67590a8c7d210207348` | 纯头文件源码直接保存 |
 | `lz4/` | v1.10.0 | `ebb370ca83af193212df4dcbadcc5d87bc0de2f0` | submodule、仅 lz4.c / xxhash.c 静态库 |
@@ -73,7 +75,7 @@ ctest --preset dev
 
 通常不使用 `git submodule update --remote`，以免绕过主仓库锁定版本。CMake 只读取本地源码，不自动执行 Git、下载或修改依赖。
 
-HEIF/HEIC 尚未接入。系统 libheif 不能作为可复现发布依赖直接使用。首版接入前需要固定 libheif、实际 HEVC decoder 和所有静态链接义务，明确 LGPL-3 对发布、源代码和替换链接的影响。
+HEIF/HEIC 尚未接入。已固定 libheif v1.23.7 与 libde265 v1.1.3，仍需完成 LGPL-3 静态发布方案、源码提供和替换链接审查。系统库不能作为正式构建依赖。详细门禁见[HEIF 依赖与许可证门禁](../docs/HEIF依赖与许可证门禁.md)。
 JPEG XL 尚未接入。系统 libjxl 不能作为可复现发布依赖直接使用。首版接入前需要固定 libjxl、Highway、Brotli、CMS 组件和 C++ 静态链接边界。libjxl 本体为 BSD-3-Clause，依赖组合和发行包体积仍需单独验收。
 OpenEXR 尚未接入。系统 OpenEXR 与 Imath 不能作为可复现发布依赖直接使用。首版固定 OpenEXR v3.5.4、Imath v3.2.3，使用 OpenEXR 源码内的 deflate、zstd 和 OpenJPH，关闭自动下载、工具、示例和测试。OpenEXR / Imath 使用 BSD-3-Clause，内置组件的原始许可证需要随发行包保留，详细门禁见[OpenEXR 依赖与许可证门禁](../docs/OpenEXR依赖与许可证门禁.md)。
 
