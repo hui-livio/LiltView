@@ -1,5 +1,106 @@
 include_guard(GLOBAL)
 
+include(FetchContent)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(LILTVIEW_LINUX_DEPENDENCY_MODE "AUTO" CACHE STRING
+        "Linux dependency source: AUTO, SYSTEM, or FETCH")
+    set_property(CACHE LILTVIEW_LINUX_DEPENDENCY_MODE PROPERTY STRINGS AUTO SYSTEM FETCH)
+    option(LILTVIEW_DEPENDENCY_OFFLINE
+        "Do not access the network while resolving fetched Linux dependencies" OFF)
+    if(NOT LILTVIEW_LINUX_DEPENDENCY_MODE MATCHES "^(AUTO|SYSTEM|FETCH)$")
+        message(FATAL_ERROR
+            "LILTVIEW_LINUX_DEPENDENCY_MODE must be AUTO, SYSTEM, or FETCH")
+    endif()
+    if(LILTVIEW_DEPENDENCY_OFFLINE)
+        set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
+            "Disable network access for FetchContent" FORCE)
+    endif()
+endif()
+
+function(liltview_is_linux output)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(${output} TRUE PARENT_SCOPE)
+    else()
+        set(${output} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(liltview_dependency_manifest_field name field output)
+    file(READ "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/dependencies.json" manifest)
+    string(JSON value GET "${manifest}" submodules "${name}" "${field}")
+    set(${output} "${value}" PARENT_SCOPE)
+endfunction()
+
+# Resolve a system package only on Linux. The caller supplies the target that
+# must be present so a package with headers but no usable CMake target is not
+# treated as a successful resolution.
+function(liltview_try_system_package package version target output)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"
+       OR LILTVIEW_LINUX_DEPENDENCY_MODE STREQUAL "FETCH")
+        set(${output} FALSE PARENT_SCOPE)
+        return()
+    endif()
+
+    if(version STREQUAL "")
+        find_package(${package} QUIET CONFIG)
+        if(NOT ${package}_FOUND)
+            find_package(${package} QUIET MODULE)
+        endif()
+    else()
+        find_package(${package} ${version} QUIET CONFIG)
+        if(NOT ${package}_FOUND)
+            find_package(${package} ${version} QUIET MODULE)
+        endif()
+    endif()
+
+    if(${package}_FOUND AND TARGET ${target})
+        set(${output} TRUE PARENT_SCOPE)
+    else()
+        set(${output} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Populate a fixed dependency into the build tree without adding a submodule
+# or mutating third_party/. The caller still owns add_subdirectory and all
+# upstream feature switches so Windows keeps its existing source path.
+function(liltview_fetch_dependency_source name marker output)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "Fetched dependency sources are only enabled on Linux: ${name}")
+    endif()
+
+    liltview_dependency_manifest_field("${name}" path relative_path)
+    liltview_dependency_manifest_field("${name}" url repository)
+    liltview_dependency_manifest_field("${name}" commit revision)
+    string(MAKE_C_IDENTIFIER "${name}" identifier)
+    set(content_name "liltview_${identifier}")
+    FetchContent_Declare(${content_name}
+        GIT_REPOSITORY "${repository}"
+        GIT_TAG "${revision}"
+        GIT_SHALLOW FALSE)
+    FetchContent_GetProperties(${content_name})
+    if(NOT ${content_name}_POPULATED)
+        FetchContent_Populate(${content_name})
+    endif()
+    set(source "${${content_name}_SOURCE_DIR}")
+    if(NOT EXISTS "${source}/${marker}")
+        message(FATAL_ERROR
+            "Fetched ${name} source is incomplete: ${source}/${marker}\n"
+            "Expected fixed revision ${revision} from ${repository}")
+    endif()
+    set(${output} "${source}" PARENT_SCOPE)
+endfunction()
+
+function(liltview_dependency_status name source target)
+    if(source STREQUAL "system")
+        message(STATUS "LiltView dependency ${name}: system target ${target}")
+    elseif(source STREQUAL "fetched")
+        message(STATUS "LiltView dependency ${name}: fetched fixed source")
+    else()
+        message(STATUS "LiltView dependency ${name}: vendored source")
+    endif()
+endfunction()
+
 # Header-only dependencies are vendored directly, never fetched by CMake.
 function(liltview_require_app_headers)
     if(TARGET LiltView::cli11)
