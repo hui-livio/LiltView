@@ -357,7 +357,7 @@ lv_status LV_CALL lv_core_query_format(lv_core *core, lv_format format, lv_forma
         return LV_INVALID_ARGUMENT;
     if (core->closing)
         return LV_CLOSING;
-    if (format < LV_FORMAT_JPEG || format > LV_FORMAT_RAW)
+    if (format < LV_FORMAT_JPEG || format > LV_FORMAT_RAW_LAYOUT)
         return LV_INVALID_ARGUMENT;
 #if defined(LILTVIEW_HAS_LIBRAW)
     const bool available = true;
