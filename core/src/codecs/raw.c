@@ -1,9 +1,11 @@
-#include <libraw/libraw.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include "codec.h"
+
+#if defined(LILTVIEW_HAS_LIBRAW)
+#include <libraw/libraw.h>
 
 static lv_error_code raw_error(int result)
 {
@@ -158,3 +160,14 @@ done:
     lv_frame_release(&frame);
     lv_workspace_release(core, request, data, bytes + 1);
 }
+#else
+
+void lv_decode_raw(lv_core *core, lv_request *request, lv_input *input, lv_error_info *error)
+{
+    (void)core;
+    (void)request;
+    (void)input;
+    error->code = LV_ERROR_FORMAT_UNSUPPORTED;
+}
+
+#endif

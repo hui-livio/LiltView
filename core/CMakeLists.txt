@@ -20,6 +20,10 @@ liltview_configure_c_target(liltview_core)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(liltview_core PRIVATE _FILE_OFFSET_BITS=64)
 endif()
-target_link_libraries(liltview_core PRIVATE liltview_jpeg png_static webpdecoder webpdemux openjp2 avif jxl OpenEXR::OpenEXRCore heif LiltView::libraw plutosvg::plutosvg
+target_link_libraries(liltview_core PRIVATE liltview_jpeg png_static webpdecoder webpdemux openjp2 avif jxl OpenEXR::OpenEXRCore heif plutosvg::plutosvg
     liltview_gif TIFF::tiff Threads::Threads)
+if(UNIX)
+    target_compile_definitions(liltview_core PRIVATE LILTVIEW_HAS_LIBRAW=1)
+    target_link_libraries(liltview_core PRIVATE LiltView::libraw)
+endif()
 add_dependencies(liltview_core liltview_jpeg_build)
