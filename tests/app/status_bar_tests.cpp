@@ -95,6 +95,7 @@ TEST_CASE("status bar shows basename actual source format raw dimensions and phy
                              std::pair{LV_FORMAT_CUR, "CUR"}, std::pair{LV_FORMAT_JPEG2000, "JPEG 2000"},
                              std::pair{LV_FORMAT_AVIF, "AVIF"}, std::pair{LV_FORMAT_JPEGXL, "JPEG XL"},
                              std::pair{LV_FORMAT_HEIF, "HEIF / HEIC"},
+                             std::pair{LV_FORMAT_RAW, "RAW / DNG"},
                              std::pair{LV_FORMAT_OPENEXR, "OpenEXR"}};
     for (const auto &[format, expected] : formats)
     {

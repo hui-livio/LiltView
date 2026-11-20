@@ -60,6 +60,8 @@ const char *format_name(lv_format format)
         return "JPEG XL";
     case LV_FORMAT_HEIF:
         return "HEIF / HEIC";
+    case LV_FORMAT_RAW:
+        return "RAW / DNG";
     case LV_FORMAT_OPENEXR:
         return "OpenEXR";
     default:
