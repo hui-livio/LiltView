@@ -160,6 +160,14 @@ TEST_CASE("information output describes actual pixel semantics and partial visib
     CHECK(field(Language::english, details, Text::info_state) == "Showing the previous image while loading");
 }
 
+TEST_CASE("information rows show explicit raw layout assumptions", "[image_details][raw-layout]")
+{
+    auto details = example();
+    details.image.format = LV_FORMAT_RAW_LAYOUT;
+    details.raw_description = "Raw rgb24 · 3x2 · planes=0,9,9,2 · top-down · native";
+    CHECK(field(Language::english, details, Text::info_format) == details.raw_description);
+}
+
 TEST_CASE("information animation known flags distinguish unknown zero and finite metadata", "[image_details][animation]")
 {
     auto details = example();

@@ -49,6 +49,23 @@ std::vector<std::string> image_extensions(lv_core *core)
     }
     return extensions;
 }
+
+std::string raw_description(const RawInputOptions &raw)
+{
+    std::ostringstream text;
+    text << "Raw " << raw.layout << " · " << raw.size << " · planes=";
+    for (std::size_t i = 0; i < raw.planes.size(); ++i)
+    {
+        if (i) text << ";";
+        text << raw.planes[i];
+    }
+    text << " · " << raw.row_order << " · " << raw.byte_order;
+    if (!raw.matrix.empty()) text << " · matrix=" << raw.matrix;
+    if (!raw.range.empty()) text << " · range=" << raw.range;
+    if (!raw.siting.empty()) text << " · siting=" << raw.siting;
+    if (!raw.cfa.empty()) text << " · CFA=" << raw.cfa;
+    return text.str();
+}
 } // namespace
 
 Viewer::Viewer(render::Renderer &renderer, CameraPolicy policy) :
@@ -209,6 +226,7 @@ void Viewer::open_raw(const std::filesystem::path &path, const RawInputOptions &
     visible_pending_ = false;
     viewport_.reset();
     pending_raw_.reset();
+    pending_raw_description_ = raw_description(raw);
     pending_raw_ = raw;
     pending_path_ = path;
     selected_path_ = path;
@@ -261,6 +279,7 @@ void Viewer::open_selected(const std::filesystem::path &absolute)
     viewport_.reset();
     pending_path_  = adopting_animation_ ? std::filesystem::path{} : absolute;
     pending_raw_.reset();
+    pending_raw_description_.clear();
     selected_path_ = absolute;
     filename_      = platform::path_bytes(absolute.filename());
     error_         = 0;
@@ -420,8 +439,19 @@ void Viewer::submit_raw_pending()
     request.image.processing.blue_gain_q16 = raw.blue_gain_q16;
     work_ = Work::static_image;
     const auto status = lv_core_submit_raw(core_, &request, &request_);
-    if (status == LV_OK) { pending_raw_.reset(); pending_path_.clear(); submitted_generation_ = generation_; }
-    else { pending_raw_.reset(); pending_path_.clear(); fail(status == LV_INVALID_ARGUMENT ? LV_ERROR_DIMENSION_LIMIT : LV_ERROR_INTERNAL); }
+    if (status == LV_OK)
+    {
+        pending_raw_.reset();
+        pending_path_.clear();
+        submitted_generation_ = generation_;
+    }
+    else
+    {
+        pending_raw_.reset();
+        pending_path_.clear();
+        pending_raw_description_.clear();
+        fail(status == LV_INVALID_ARGUMENT ? LV_ERROR_DIMENSION_LIMIT : LV_ERROR_INTERNAL);
+    }
 }
 
 void Viewer::accept_completed()
@@ -437,6 +467,7 @@ void Viewer::accept_completed()
     pending_scene_id_ = 0;
     info_             = pending_info_;
     displayed_path_   = std::move(displayed_path);
+    displayed_raw_description_ = std::move(pending_raw_description_);
     pixel_format_     = pending_pixel_format_;
     color_space_      = pending_color_space_;
     displayed_animation_.reset();

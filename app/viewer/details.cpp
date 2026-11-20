@@ -11,6 +11,7 @@ std::optional<ImageDetails> Viewer::image_details() const
     details.image               = reveal ? pending_info_ : info_;
     details.pixel_format        = reveal ? pending_pixel_format_ : pixel_format_;
     details.color_space         = reveal ? pending_color_space_ : color_space_;
+    details.raw_description     = reveal ? pending_raw_description_ : displayed_raw_description_;
     details.partial             = reveal;
     details.loading_replacement = loading_ && !reveal;
     details.scale               = !display_ || reveal || !scene_.empty() ? presented_viewport_.scale() : viewport_.scale();

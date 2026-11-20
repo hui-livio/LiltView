@@ -253,6 +253,7 @@ private:
     std::uint64_t generation_ = 0, submitted_generation_ = 0;
     std::filesystem::path pending_path_;
     std::optional<RawInputOptions> pending_raw_;
+    std::string pending_raw_description_, displayed_raw_description_;
     std::filesystem::path selected_path_, displayed_path_;
     std::string filename_;
     render::Image display_, pending_;

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <liltview/core.h>
 #include <optional>
+#include <string>
 
 namespace liltview
 {
@@ -20,6 +21,7 @@ struct ImageDetails
     lv_image_info image{};
     std::optional<lv_pixel_format> pixel_format;
     lv_color_space color_space = LV_COLOR_UNKNOWN;
+    std::string raw_description;
     double scale               = 1; // Source pixel -> physical framebuffer pixel; already accounts for density.
     bool partial = false, loading_replacement = false;
     std::optional<AnimationDetails> animation;

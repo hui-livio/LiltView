@@ -86,11 +86,12 @@ std::vector<ImageInformationRow> image_information_rows(Language language, const
     const auto &image     = details.image;
     const bool size_known = (image.flags & LV_INFO_SOURCE_SIZE_KNOWN) != 0;
     const auto *format    = format_name(image.format);
+    const auto format_value = details.raw_description.empty() ? std::string(format ? format : unknown) : details.raw_description;
     std::vector<ImageInformationRow> rows{
         {Text::info_path, platform::path_bytes(details.path)},
         {Text::info_file_size,
          image.flags & LV_INFO_FILE_BYTES_KNOWN ? std::to_string(image.file_bytes) + " " + t(Text::info_bytes) : unknown},
-        {Text::info_format, format ? format : unknown},
+        {Text::info_format, format_value},
         {Text::info_source_size, size_known ? dimensions(image.source_size) : unknown},
         {Text::info_display_size, size_known ? dimensions(oriented_image_size(image.source_size, image.orientation)) : unknown},
         {Text::info_canvas_size, image.canvas.width && image.canvas.height ? dimensions(image.canvas) : unknown},
